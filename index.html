@@ -42,7 +42,7 @@
                 <div class="mode-card" id="joinBtn">
                     <div class="icon">&rarr;</div>
                     <h2>Unirse a sala</h2>
-                    <p>Entra a una sala con un código de invitación.</p>
+                    <p>Entra a una sala pública o con un código privado.</p>
                 </div>
                 <div class="mode-card" id="soloBtn">
                     <div class="icon">&blacktriangleright;</div>
@@ -53,8 +53,66 @@
         </div>
     </div>
 
+    <div id="createRoomOverlay" class="hidden">
+        <div class="card">
+            <h2>Crear sala</h2>
+            <div class="config-group">
+                <label class="config-label">Límite de jugadores</label>
+                <div class="limit-options" id="limitOptions">
+                    <button class="limit-btn" data-limit="2">2</button>
+                    <button class="limit-btn" data-limit="3">3</button>
+                    <button class="limit-btn" data-limit="5">5</button>
+                    <button class="limit-btn" data-limit="7">7</button>
+                    <button class="limit-btn selected" data-limit="0">&infin;</button>
+                </div>
+            </div>
+            <div class="config-group">
+                <label class="config-label">Tipo de sala</label>
+                <div class="option-buttons">
+                    <button class="primary-btn" id="publicRoomBtn">Pública</button>
+                    <button class="primary-btn" id="privateRoomBtn">Privada</button>
+                </div>
+            </div>
+            <p class="coming-soon">Más opciones próximamente</p>
+            <button class="back-btn" id="createBackBtn">Volver</button>
+        </div>
+    </div>
+
+    <div id="joinRoomOverlay" class="hidden">
+        <div class="card join-card">
+            <h2>Unirse a sala</h2>
+            <div class="public-section">
+                <h3>Salas públicas</h3>
+                <ul class="public-list" id="publicList"></ul>
+                <p class="empty-hint" id="publicEmpty">No hay salas públicas ahora mismo</p>
+            </div>
+            <div class="divider">o</div>
+            <div class="private-section">
+                <p>Únete con un código privado</p>
+                <input type="text" id="joinCodeInput" class="code-input" maxlength="4" placeholder="XXXX" autocomplete="off">
+                <button class="primary-btn" id="joinRoomBtn">Unirse</button>
+            </div>
+            <button class="back-btn" id="joinBackBtn">Volver</button>
+        </div>
+    </div>
+
+    <div id="lobbyOverlay" class="hidden">
+        <div class="card lobby-card">
+            <h2 id="lobbyTitle">Sala</h2>
+            <div class="room-code" id="roomCodeSection">
+                <span class="room-code-label">Código de la sala</span>
+                <div class="room-code-value" id="roomCodeValue"></div>
+                <p class="room-code-hint" id="roomCodeHint"></p>
+            </div>
+            <h3 class="players-title">Jugadores <span class="players-count" id="playersCount"></span></h3>
+            <ul class="players-list" id="playersList"></ul>
+            <button class="back-btn" id="leaveBtn">Salir</button>
+        </div>
+    </div>
+
     <div id="toast"></div>
 
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js" defer></script>
     <script src="script.js" defer></script>
 </body>
 </html>

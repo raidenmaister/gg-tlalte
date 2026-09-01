@@ -1,12 +1,24 @@
 # gg-tlalte
 
-Visor de panorámicas 360° de Google Maps Street View usando solo HTML, CSS y JavaScript.
+Juego de adivinar ubicaciones con panorámicas 360° de Google Maps Street View.
+Hecho solo con HTML, CSS y JavaScript (sin frameworks).
 
 ## Características
 
-- Muestra panorámicas 360° navegables (arrastrar para rotar, flechas o scroll para moverse por la calle).
-- Carga ubicaciones desde `coordenadas_validas.json` (lat, lng, `pano_id` y fecha).
-- Selector para elegir ubicación, botones de anterior / siguiente y aleatorio.
+- Pantalla de bienvenida que pide el nombre del jugador (se guarda en `localStorage`).
+- Menú de modos: **crear sala**, **unirse a sala** y **jugar en solitario**.
+- Panorámicas 360° navegables (arrastrar para rotar, flechas o scroll para moverse por la calle).
+- Selector de ubicación, botones de anterior / siguiente y aleatorio.
+- Interfaz responsive: se adapta desde pantallas muy pequeñas hasta pantallas muy grandes.
+
+## Estructura
+
+```
+gg-tlalte/
+├── index.html   # Estructura de la página
+├── style.css    # Estilos
+└── script.js    # Lógica del juego
+```
 
 ## Uso
 
@@ -16,7 +28,7 @@ Visor de panorámicas 360° de Google Maps Street View usando solo HTML, CSS y J
    git clone https://github.com/raidenmaister/gg-tlalte.git
    ```
 
-2. Coloca tu archivo `coordenadas_validas.json` junto a `index.html` con el formato:
+2. Coloca tu archivo `coordenadas_validas.json` en la raíz con el formato:
 
    ```json
    [
@@ -44,7 +56,7 @@ La API Key **no** está incluida en el código. Necesitas una key de la
 
 Puedes introducirla de dos formas:
 
-- Al abrir la página, se te pedirá mediante un diálogo.
-- Pegándola directamente en la constante `API_KEY` dentro de `index.html`.
+- Al abrir el juego, se te pedirá mediante un diálogo.
+- Pegándola directamente en la constante `API_KEY` dentro de `script.js`.
 
 Restringe la key a tu dominio o a `localhost` desde la consola de Google Cloud.

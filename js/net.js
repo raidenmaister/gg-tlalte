@@ -290,6 +290,20 @@ export class Network {
     if (data.type === 'join') {
       const name = data.name || data.senderName || 'Anónimo';
       if (this.role === 'host') {
+        // Soporte de reconexión: si ya existía un invitado con este mismo nombre (p.ej. recargó página),
+        // reemplazamos el peerId anterior por el nuevo sin bloquearlo por 'full'.
+        for (const [oldPeerId, oldName] of this.guestNames.entries()) {
+          if (oldName === name && oldPeerId !== peerId) {
+            LOG('Reconexión de invitado detectada:', name, 'reemplazando', oldPeerId, 'por', peerId);
+            this.guestNames.delete(oldPeerId);
+            const oldConn = this.conns.get(oldPeerId);
+            if (oldConn) {
+              try { oldConn.close(); } catch (e) {}
+              this.conns.delete(oldPeerId);
+            }
+          }
+        }
+
         if (this.guestNames.size >= this.limit - 1) {
           this.sendTo(peerId, { type: 'full' });
           return;
@@ -547,6 +561,10 @@ export class Network {
         this.conns.delete('__host__');
       } else {
         this.conns.delete(conn.peer);
+        if (this.guestNames.has(conn.peer)) {
+          this.guestNames.delete(conn.peer);
+          this._syncPlayers();
+        }
       }
       if (this.conns.size === 0) {
         this._p2pConnected = false;

@@ -571,14 +571,26 @@ function renderLobby() {
 
   const startBtn = $('#startBtn');
   startBtn.classList.toggle('hidden', !isHost);
-  startBtn.disabled = !(isHost && players.length >= 1);
+  const canStart = isHost && players.length >= 2;
+  startBtn.disabled = !canStart;
+  if (players.length < 2) {
+    startBtn.textContent = isHost ? `Esperando rivales… (1/${limit})` : 'Esperando al anfitrión…';
+  } else {
+    startBtn.textContent = `Iniciar partida (${players.length}/${limit})`;
+  }
 
   const deleteBtn = $('#deleteRoomBtn');
   if (deleteBtn) deleteBtn.classList.toggle('hidden', !isHost);
 
   const note = $('#lobbyNote');
   if (isHost) {
-    note.textContent = 'Puedes iniciar la partida aunque la sala no esté llena.';
+    if (players.length < 2) {
+      note.textContent = 'Se necesitan al menos 2 jugadores para iniciar la partida.';
+    } else if (players.length < limit) {
+      note.textContent = `¡Listo para iniciar con ${players.length} jugadores! (O espera a que se unan más).`;
+    } else {
+      note.textContent = '¡Sala llena! Inicia la partida cuando quieras.';
+    }
   } else {
     note.textContent = 'Esperando a que el anfitrión inicie la partida…';
   }
@@ -688,10 +700,21 @@ function renderPublicList(rooms) {
 
     const btn = document.createElement('button');
     btn.className = 'join-public-btn';
-    const full = limit > 0 && count >= limit;
+    const savedRoomStr = localStorage.getItem(ROOM_KEY);
+    let isMyOldRoom = false;
+    if (savedRoomStr) {
+      try {
+        const saved = JSON.parse(savedRoomStr);
+        if (saved && saved.roomId === room.id) isMyOldRoom = true;
+      } catch (e) {}
+    }
+    const full = limit > 0 && count >= limit && !isMyOldRoom;
     btn.disabled = full;
-    btn.textContent = full ? 'Llena' : 'Unirse';
-    LOG('renderPublicList sala', { id: room.id, name: room.name, limit, count, full });
+    btn.textContent = isMyOldRoom ? 'Reconectarse' : (full ? 'Llena' : 'Unirse');
+    if (isMyOldRoom) {
+      btn.classList.add('btn-reconnect');
+    }
+    LOG('renderPublicList sala', { id: room.id, name: room.name, limit, count, full, isMyOldRoom });
     btn.addEventListener('click', () => {
       LOG('click Unirse sala pública', { id: room.id, meName });
       audio.ensure();
@@ -766,6 +789,10 @@ async function startSolo(rounds = soloRounds) {
 
 async function hostStartGame() {
   audio.ensure();
+  if (players.length < 2) {
+    showToast('Se necesitan al menos 2 jugadores para iniciar.', 'error');
+    return;
+  }
   $('#startBtn').disabled = true;
   try {
     setLoadingText('Preparando partida…');
@@ -793,12 +820,13 @@ function createRoom(isPublic = false) {
 }
 
 function persistActiveRoom() {
-  if (net.role !== 'host' || !net.roomId) {
+  if (!net.role || (!net.roomId && !net.roomCode)) {
     localStorage.removeItem(ROOM_KEY);
     return;
   }
   localStorage.setItem(ROOM_KEY, JSON.stringify({
     name: meName,
+    role: net.role,
     roomId: net.roomId,
     roomCode: net.roomCode,
     isPublic: net.isPublic,
@@ -1070,6 +1098,7 @@ function wireNet() {
   net.cb.onPlayers = (list, config) => {
     LOG('onPlayers', { list, config });
     players = list;
+    persistActiveRoom();
     renderLobby();
   };
 
@@ -1162,13 +1191,22 @@ function boot() {
       if (available) registerName(saved).catch(() => {});
     });
 
-    // Si había una sala anfitriona activa, reincorpórate a ella tras recargar.
+    // Si había una sala anfitriona o invitada activa, reincorpórate a ella tras recargar.
     const savedRoom = localStorage.getItem(ROOM_KEY);
     if (savedRoom) {
       try {
         const room = JSON.parse(savedRoom);
-        if (room && room.roomId) {
+        if (room && room.role === 'host' && room.roomId) {
           net.rejoinHostRoom(room);
+          return;
+        } else if (room && room.role === 'guest') {
+          setLoadingText('Reconectando a tu sala…');
+          showScreen('loading');
+          if (room.isPublic && room.roomId) {
+            net.joinPublicRoom(room.roomId, meName);
+          } else if (room.roomCode) {
+            net.joinRoom(room.roomCode, meName);
+          }
           return;
         }
       } catch (e) {

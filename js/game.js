@@ -144,14 +144,22 @@ export class Game {
     this._hostStarted = true;
     this._readyCount = 1; // el host ya está listo
 
-    // Si el anfitrión juega solo, no hay invitados que envíen 'ready'.
+    // No permitir iniciar un duelo si el anfitrión está solo
     if (this.players.length <= 1) {
-      this.emit('toast', { message: '¡Comienza la partida!', kind: 'info' });
-      this._beginRound(1);
+      this.emit('toast', { message: 'Se necesitan al menos 2 jugadores para iniciar.', kind: 'error' });
       return;
     }
 
-    this.emit('toast', { message: 'Esperando a que carguen los jugadores…', kind: 'info' });
+    // Timeout de seguridad: si en 3.5 segundos algún invitado tarda en cargar o responder 'ready',
+    // arranca la ronda de todas formas para que la partida nunca se quede congelada.
+    clearTimeout(this._readyTimer);
+    this._readyTimer = setTimeout(() => {
+      if (this.state !== 'playing' && this._hostStarted) {
+        this._beginRound(1);
+      }
+    }, 3500);
+
+    this.emit('toast', { message: 'Iniciando partida…', kind: 'info' });
   }
 
   /** Guest: recibe el mensaje 'start' del host. */
@@ -516,11 +524,13 @@ export class Game {
     if (this._master) clearInterval(this._master);
     if (this._tick) clearInterval(this._tick);
     if (this._resultTimer) clearTimeout(this._resultTimer);
+    if (this._readyTimer) clearTimeout(this._readyTimer);
     this._clearPrepare();
     this._clearHurry();
     this._master = null;
     this._tick = null;
     this._resultTimer = null;
+    this._readyTimer = null;
     this.hurryEnd = 0;
   }
 
@@ -533,6 +543,8 @@ export class Game {
         if (this.role === 'host') {
           this._readyCount += 1;
           if (this._readyCount >= this.players.length) {
+            clearTimeout(this._readyTimer);
+            this._readyTimer = null;
             this._beginRound(1);
           }
         }

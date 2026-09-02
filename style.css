@@ -1455,6 +1455,11 @@ input {
     filter: none;
 }
 
+.join-public-btn.btn-reconnect {
+    background: linear-gradient(135deg, #10b981, #059669);
+    box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
+}
+
 .empty-hint {
     color: var(--muted);
     font-size: 0.85rem;

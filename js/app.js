@@ -61,18 +61,16 @@ function setLoadingText(text) {
 }
 
 /* --------------------------- API (PHP) ------------------------------- */
-async function apiPost(action, data = {}) {
+async function apiPost(action, body = {}) {
   try {
-    const body = new URLSearchParams(data);
-    body.set('action', action);
-    const res = await fetch(API_URL, {
+    const res = await fetch(`${API_URL}?action=${encodeURIComponent(action)}&_t=${Date.now()}`, {
       method: 'POST',
-      body,
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
     });
     return await res.json();
   } catch (e) {
-    return { ok: false, error: 'sin conexión con el servidor' };
+    return null;
   }
 }
 
@@ -91,10 +89,14 @@ async function saveScoreToLeaderboard(entry) {
 
 async function fetchLeaderboard(rounds) {
   try {
-    const res = await fetch(`${API_URL}?action=leaderboard&rounds=${rounds}`);
+    const res = await fetch(`${API_URL}?action=leaderboard&rounds=${rounds}&_t=${Date.now()}`, {
+      cache: 'no-store',
+    });
     const data = await res.json();
     if (data && data.ok) return data.entries || [];
-  } catch (e) {}
+  } catch (e) {
+    console.error('Error cargando leaderboard:', e);
+  }
   return [];
 }
 

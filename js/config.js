@@ -14,6 +14,27 @@ export const CONFIG = {
   // Prefijo para los IDs de PeerJS (evita colisiones en el cloud público).
   PEER_PREFIX: 'ggtlalte-v1-',
 
+  // Servidores ICE para PeerJS. STUN descubre la IP pública; TURN retransmite
+  // el tráfico cuando el NAT/firewall bloquea la conexión P2P directa (por
+  // ejemplo, dos jugadores detrás del mismo router sin "hairpin NAT" o en redes móviles).
+  // Si se define `window.GG_ICE_SERVERS` en js/keys.js, tendrá prioridad.
+  ICE_SERVERS: (typeof window !== 'undefined' && Array.isArray(window.GG_ICE_SERVERS) && window.GG_ICE_SERVERS.length > 0)
+    ? window.GG_ICE_SERVERS
+    : [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        // Plantilla para TURN propio (coturn). Rellena con tu dominio o IP pública y credenciales:
+        // {
+        //   urls: [
+        //     'turn:tu-servidor-coturn.com:3478?transport=udp',
+        //     'turn:tu-servidor-coturn.com:3478?transport=tcp',
+        //     'turns:tu-servidor-coturn.com:5349?transport=tcp',
+        //   ],
+        //   username: 'ggtlalte_user',
+        //   credential: 'tu_password_seguro',
+        // },
+      ],
+
   // Caracteres y longitud del código de sala compartible.
   CODE_CHARS: 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789',
   CODE_LENGTH: 4,
@@ -21,7 +42,7 @@ export const CONFIG = {
   // --- Reglas de juego -------------------------------------------------------
   MAX_HP: 5000,             // Vida inicial de cada jugador.
   BASE_SCORE: 5000,         // Puntos máximos por ronda.
-  SCORE_DISTANCE: 2000,     // Constante de decaimiento exponencial (km).
+  SCORE_DISTANCE: 1.2,      // Constante de decaimiento para escala urbana/local (km).
   PERFECT_DISTANCE: 0.025,  // Distancia (km) considerada "perfecta" (25 m).
 
   SOLO_ROUNDS: 5,           // Rondas por defecto en modo solitario.

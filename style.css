@@ -38,7 +38,7 @@ body {
     width: 100%;
     height: 100%;
     overflow: hidden;
-    background: var(--bg);
+    background: #000;
     color: var(--text);
     font-family: var(--font);
     -webkit-tap-highlight-color: transparent;
@@ -57,6 +57,24 @@ button {
 
 input {
     font-family: inherit;
+}
+
+/* ============================== Fondo orbital ASCII ============================== */
+#ascii-earth {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    overflow: hidden;
+}
+
+.ascii-earth-canvas {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    display: block;
 }
 
 /* ============================== Pantallas ============================== */
@@ -79,6 +97,10 @@ input {
     display: block;
     padding: 0;
     background: #000;
+}
+
+#screen-menu {
+    background: transparent;
 }
 
 #screen-name,
@@ -397,6 +419,17 @@ input {
     font-size: 0.85rem;
     color: var(--muted);
     font-style: italic;
+}
+
+.btn-danger {
+    border-color: rgba(239, 68, 68, 0.55);
+    color: #ffb3b3;
+}
+
+.btn-danger:hover {
+    border-color: var(--red);
+    color: #fff;
+    background: rgba(239, 68, 68, 0.12);
 }
 
 /* ============================== Carga ============================== */
@@ -741,16 +774,16 @@ input {
 
 .countdown-banner {
     position: absolute;
-    top: 96px;
+    top: 86px;
     left: 50%;
     transform: translateX(-50%);
-    z-index: 55;
+    z-index: 60;
     display: flex;
     align-items: center;
     gap: 14px;
     padding: 12px 22px;
     border-radius: 14px;
-    background: rgba(10, 12, 22, 0.7);
+    background: rgba(10, 12, 22, 0.85);
     border: 1px solid var(--accent-glow);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
@@ -783,33 +816,23 @@ input {
 
 .waiting-banner {
     position: absolute;
-    top: 96px;
+    top: 154px;
     left: 50%;
     transform: translateX(-50%);
     z-index: 55;
     padding: 10px 20px;
     border-radius: 999px;
-    background: rgba(10, 12, 22, 0.6);
+    background: rgba(10, 12, 22, 0.75);
     border: 1px solid var(--border-strong);
     color: var(--muted);
     font-size: 0.9rem;
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
     animation: slideDown 0.3s ease both;
 }
 
-/* ------------------------------ Controles inferiores ------------------------------ */
-.hud-bottom {
-    position: absolute;
-    bottom: 20px;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 50;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-
+/* ------------------------------ Botón confirmar ------------------------------ */
 .btn-confirm {
     padding: 14px 30px;
     border-radius: 14px;
@@ -840,12 +863,6 @@ input {
 @keyframes pulse {
     0%, 100% { box-shadow: 0 10px 30px var(--accent-glow); }
     50% { box-shadow: 0 10px 44px var(--accent-glow), 0 0 0 6px rgba(233, 69, 96, 0.12); }
-}
-
-.hud-bottom .btn-ghost {
-    background: rgba(10, 12, 22, 0.55);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
 }
 
 /* ------------------------------ Minimapa ------------------------------ */
@@ -943,6 +960,13 @@ input {
     text-overflow: ellipsis;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+.gg-real-pin__label {
+    background: #16a34a;
+    border: 1px solid #fff;
+    color: #fff;
+    box-shadow: 0 2px 10px rgba(22, 163, 74, 0.65);
 }
 
 /* ------------------------------ Minimapa a pantalla completa ------------------------------ */
@@ -1451,17 +1475,17 @@ input {
         height: 55vh;
     }
 
-    .hud-bottom {
-        bottom: 14px;
-    }
-
     .btn-confirm {
         padding: 13px 22px;
         font-size: 0.95rem;
     }
 
     .countdown-banner {
-        top: 78px;
+        top: 76px;
+    }
+
+    .waiting-banner {
+        top: 136px;
     }
 }
 

@@ -9,15 +9,21 @@ import { PanoramaViewer } from './panorama.js';
 import { Minimap } from './minimap.js';
 import { Network } from './net.js';
 import { Game } from './game.js';
+import { AsciiEarthBackground } from './ascii-earth.js';
 
 const PLAYER_KEY = 'ggtlalte:playerName';
+const ROOM_KEY = 'ggtlalte:activeRoom';
 const API_URL = 'api.php';
+
+// Logs de diagnóstico temporales.
+const LOG = (...args) => console.log('[app]', ...args);
 
 /* ----------------------------- Instancias ------------------------------ */
 const pano = new PanoramaViewer('pano');
 const minimap = new Minimap('minimap');
 const net = new Network();
 const game = new Game({ pano, map: minimap, net, audio });
+const asciiEarth = new AsciiEarthBackground('ascii-earth');
 
 /* ------------------------------ Estado UI ------------------------------ */
 let meName = '';
@@ -31,6 +37,10 @@ function showScreen(id) {
   document.querySelectorAll('.screen').forEach((s) => s.classList.add('hidden'));
   const el = document.getElementById('screen-' + id);
   if (el) el.classList.remove('hidden');
+
+  // El fondo orbital solo se anima en el menú principal.
+  if (id === 'menu') asciiEarth.start();
+  else asciiEarth.stop();
 }
 
 let toastTimer = null;
@@ -211,7 +221,17 @@ function animateMultiHp(result) {
   if (!box) return;
 
   (result.players || []).forEach((p) => {
-    const row = box.querySelector(`.hp-row[data-id="${p.id}"]`);
+    let row = box.querySelector(`.hp-row[data-id="${p.id}"]`);
+    if (!row) {
+      const rows = box.querySelectorAll('.hp-row');
+      for (const r of rows) {
+        const nameEl = r.querySelector('.hp-name');
+        if (nameEl && nameEl.textContent === p.name) {
+          row = r;
+          break;
+        }
+      }
+    }
     if (!row) return;
 
     const bar = row.querySelector('.hp-bar');
@@ -220,11 +240,16 @@ function animateMultiHp(result) {
     if (!bar || !fill || !val) return;
 
     const damage = p.damage || 0;
-    if (damage <= 0) return;
+    const afterPct = (p.hp / CONFIG.MAX_HP) * 100;
+    if (damage <= 0) {
+      fill.style.width = afterPct + '%';
+      fill.className = 'hp-fill ' + hpColorClass(afterPct);
+      val.textContent = Math.round(p.hp);
+      return;
+    }
 
     const beforeHp = clamp(p.hp + damage, 0, CONFIG.MAX_HP);
     const beforePct = (beforeHp / CONFIG.MAX_HP) * 100;
-    const afterPct = (p.hp / CONFIG.MAX_HP) * 100;
     const damagePct = (damage / CONFIG.MAX_HP) * 100;
 
     // Estado previo al daño + capa roja parpadeante del tramo que se pierde.
@@ -263,17 +288,22 @@ function renderConfirm({ enabled }) {
 
 function renderWaiting({ waiting }) {
   $('#waitingBanner').classList.toggle('hidden', !waiting);
+  if (waiting) collapseMinimap();
 }
 
 function renderCountdown({ seconds }) {
   const banner = $('#countdownBanner');
   const num = $('#countdownNumber');
+  const label = banner ? banner.querySelector('.countdown-label') : null;
   if (seconds == null || seconds <= 0) {
     banner.classList.add('hidden');
   } else {
     banner.classList.remove('hidden');
     num.textContent = String(seconds);
     banner.classList.toggle('urgent', seconds <= 5);
+    if (label) {
+      label.textContent = game.myGuess ? 'Tiempo para tu rival:' : '¡Tu rival ya adivinó!';
+    }
   }
 }
 
@@ -493,13 +523,14 @@ function renderLobby() {
 
   const startBtn = $('#startBtn');
   startBtn.classList.toggle('hidden', !isHost);
-  startBtn.disabled = !(isHost && players.length >= CONFIG.ROOM_MIN_PLAYERS);
+  startBtn.disabled = !(isHost && players.length >= 1);
+
+  const deleteBtn = $('#deleteRoomBtn');
+  if (deleteBtn) deleteBtn.classList.toggle('hidden', !isHost);
 
   const note = $('#lobbyNote');
   if (isHost) {
-    note.textContent = players.length >= CONFIG.ROOM_MIN_PLAYERS
-      ? 'Todo listo. ¡Inicia la partida!'
-      : (isPublic ? 'Sala pública. Espera a que alguien se una…' : 'Comparte el código y espera jugadores…');
+    note.textContent = 'Puedes iniciar la partida aunque la sala no esté llena.';
   } else {
     note.textContent = 'Esperando a que el anfitrión inicie la partida…';
   }
@@ -507,7 +538,9 @@ function renderLobby() {
 
 /* --------------------------- Salas públicas ---------------------------- */
 async function fetchPublicRooms() {
+  LOG('fetchPublicRooms');
   const rooms = await net.listPublicRooms();
+  LOG('fetchPublicRooms → salas', rooms);
   renderPublicList(rooms);
 }
 
@@ -610,7 +643,9 @@ function renderPublicList(rooms) {
     const full = limit > 0 && count >= limit;
     btn.disabled = full;
     btn.textContent = full ? 'Llena' : 'Unirse';
+    LOG('renderPublicList sala', { id: room.id, name: room.name, limit, count, full });
     btn.addEventListener('click', () => {
+      LOG('click Unirse sala pública', { id: room.id, meName });
       audio.ensure();
       net.joinPublicRoom(room.id, meName);
     });
@@ -623,12 +658,17 @@ function renderPublicList(rooms) {
 
 /* --------------------------- Red --------------------------------------- */
 function handleNetMessage(data, fromPeerId) {
+  LOG('handleNetMessage', { data, fromPeerId });
   if (data.type === 'players') {
     players = data.players || [];
     if (data.config) {
       net.rounds = data.config.rounds;
       net.limit = data.config.limit;
     }
+    net.setGuestPlayers(players, data.config);
+    // Asegura que el invitado entre al lobby en cuanto recibe la lista,
+    // independientemente del orden en que llegue el estado 'guest'.
+    if (net.role === 'guest') showScreen('lobby');
     renderLobby();
     return;
   }
@@ -646,6 +686,7 @@ async function guestPrepareStart() {
     showScreen('game');
     resetGameUI();
     await ensureViewers();
+    setTimeout(() => pano.refresh(), 60);
     net.send({ type: 'ready' });
   } catch (err) {
     showError('No se pudo preparar la partida: ' + err.message);
@@ -666,6 +707,7 @@ async function startSolo(rounds = soloRounds) {
     showScreen('game');
     resetGameUI();
     await ensureViewers();
+    setTimeout(() => pano.refresh(), 60);
     game.meName = meName;
     game.startSolo(rounds);
   } catch (err) {
@@ -684,6 +726,7 @@ async function hostStartGame() {
     showScreen('game');
     resetGameUI();
     await ensureViewers();
+    setTimeout(() => pano.refresh(), 60);
     game.meName = meName;
     game.hostStart();
   } catch (err) {
@@ -697,10 +740,44 @@ function createRoom(isPublic = false) {
   audio.ensure();
   const rounds = Number($('#roomRounds').value) || CONFIG.DUEL_ROUNDS;
   const limit = Number($('#roomLimit').value) || CONFIG.ROOM_MAX_PLAYERS;
+  LOG('createRoom', { isPublic, meName, rounds, limit });
   net.createRoom(meName, isPublic, { rounds, limit });
 }
 
+function persistActiveRoom() {
+  if (net.role !== 'host' || !net.roomId) {
+    localStorage.removeItem(ROOM_KEY);
+    return;
+  }
+  localStorage.setItem(ROOM_KEY, JSON.stringify({
+    name: meName,
+    roomId: net.roomId,
+    roomCode: net.roomCode,
+    isPublic: net.isPublic,
+    rounds: net.rounds,
+    limit: net.limit,
+  }));
+}
+
+function leaveRoom() {
+  // Sale de la sala sin eliminarla: la sala anfitriona se conserva para que
+  // al recargar la página puedas reincorporarte a ella.
+  leaveEverything();
+  resetToMenu();
+}
+
+function deleteRoom() {
+  // Elimina la sala del servidor y la persistencia local.
+  if (net.role === 'host' && net.isPublic && net.roomId) {
+    apiPost('delete', { id: net.roomId }).catch(() => {});
+  }
+  net.leave();
+  localStorage.removeItem(ROOM_KEY);
+  resetToMenu('Sala eliminada');
+}
+
 function joinRoom(code) {
+  LOG('joinRoom (app)', { code, meName });
   audio.ensure();
   net.joinRoom(code, meName);
 }
@@ -822,10 +899,14 @@ function wire() {
   });
   const doJoin = () => {
     const code = joinCodeInput.value.trim().toUpperCase();
+    LOG('doJoin', { code });
     if (code.length !== CONFIG.CODE_LENGTH) {
       showToast('El código debe tener 4 caracteres', 'error');
       return;
     }
+    players = [];
+    showScreen('lobby');
+    renderLobby();
     joinRoom(code);
   };
   $('#joinRoomBtn').addEventListener('click', doJoin);
@@ -836,10 +917,8 @@ function wire() {
 
   // --- Lobby ---
   $('#startBtn').addEventListener('click', hostStartGame);
-  $('#leaveLobbyBtn').addEventListener('click', () => {
-    leaveEverything();
-    resetToMenu();
-  });
+  $('#leaveLobbyBtn').addEventListener('click', leaveRoom);
+  $('#deleteRoomBtn').addEventListener('click', deleteRoom);
   $('#copyCodeBtn').addEventListener('click', () => {
     const code = net.roomCode;
     if (!code) return;
@@ -870,10 +949,9 @@ function wire() {
   });
 
   // --- Juego ---
-  $('#confirmBtn').addEventListener('click', () => game.confirmGuess());
-  $('#recenterBtn').addEventListener('click', () => {
-    pano.recenter();
-    audio.click();
+  $('#confirmBtn').addEventListener('click', () => {
+    collapseMinimap();
+    game.confirmGuess();
   });
   $('#leaveGameBtn').addEventListener('click', () => {
     if (game.mode === 'multi') leaveEverything();
@@ -916,8 +994,10 @@ function wireGame() {
 
 function wireNet() {
   net.cb.onStatus = (status) => {
+    LOG('onStatus', status, { role: net.role, myId: net.myId, isPublic: net.isPublic });
     if (status === 'host') {
       players = [{ id: net.myId, name: meName, isHost: true }];
+      persistActiveRoom();
       showScreen('lobby');
       renderLobby();
       showToast('Sala creada');
@@ -932,6 +1012,7 @@ function wireNet() {
   };
 
   net.cb.onGuestJoin = (peerId, name) => {
+    LOG('onGuestJoin', { peerId, name });
     players = net.players;
     renderLobby();
     audio.join();
@@ -939,11 +1020,13 @@ function wireNet() {
   };
 
   net.cb.onPlayers = (list, config) => {
+    LOG('onPlayers', { list, config });
     players = list;
     renderLobby();
   };
 
   net.cb.onGuestLeave = (peerId) => {
+    LOG('onGuestLeave', { peerId, role: net.role });
     if (net.role === 'host') {
       players = net.players;
       renderLobby();
@@ -964,6 +1047,7 @@ function wireNet() {
   };
 
   net.cb.onError = (type) => {
+    LOG('onError', type);
     if (type === 'NO_EXISTE') {
       showToast('No existe esa sala', 'error');
       leaveEverything();
@@ -976,6 +1060,10 @@ function wireNet() {
       showToast('Regenerando código…');
     } else if (type === 'public-register') {
       showToast('No se pudo registrar la sala pública (requiere servidor PHP)', 'error');
+    } else if (type === 'peer-unavailable') {
+      showToast('No se pudo conectar con el anfitrión (NAT/firewall)', 'error');
+      leaveEverything();
+      showScreen('join');
     } else {
       showToast('Error de conexión: ' + type, 'error');
     }
@@ -1002,6 +1090,14 @@ function boot() {
   // Desbloqueo de audio al primer gesto.
   document.addEventListener('pointerdown', () => audio.ensure(), { once: true });
 
+  // Captura errores globales y promesas rechazadas para que nada quede silencioso.
+  window.addEventListener('error', (e) => {
+    LOG('window error', e.message, e.filename, e.lineno, e.colno, e.error);
+  });
+  window.addEventListener('unhandledrejection', (e) => {
+    LOG('unhandledrejection', e.reason);
+  });
+
   // Refresca el listado de salas públicas mientras la pantalla de unirse está abierta.
   setInterval(() => {
     const joinEl = document.getElementById('screen-join');
@@ -1017,6 +1113,20 @@ function boot() {
     checkNameAvailable(saved).then((available) => {
       if (available) registerName(saved).catch(() => {});
     });
+
+    // Si había una sala anfitriona activa, reincorpórate a ella tras recargar.
+    const savedRoom = localStorage.getItem(ROOM_KEY);
+    if (savedRoom) {
+      try {
+        const room = JSON.parse(savedRoom);
+        if (room && room.roomId) {
+          net.rejoinHostRoom(room);
+          return;
+        }
+      } catch (e) {
+        localStorage.removeItem(ROOM_KEY);
+      }
+    }
     showScreen('menu');
   } else {
     showScreen('name');

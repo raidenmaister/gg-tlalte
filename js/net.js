@@ -1,25 +1,21 @@
 // ============================================================================
-// net.js — Capa de red P2P con PeerJS (WebRTC DataChannel).
+// net.js — Capa de red híbrida: WebRTC (PeerJS) + Fallback HTTP Relay (PHP).
 //
-// Topología estrella: el anfitrión se conecta 1:1 con cada invitado.
-//   guest -> host: { type:'join', name }
-//                  { type:'guess', round, lat, lng }   (lat/lng null = sin guess)
-//   host -> guest: { type:'players', players:[...], config:{rounds,limit} }
-//                  { type:'full' }
-//                  { type:'start', seed, rounds, locations:[...], mode:'multi' }
-//                  { type:'roundStart', round, locationIndex, duration }
-//                  { type:'tick', round, remaining }
-//                  { type:'opponentGuessed' }
-//                  { type:'roundResult', ... }
-//                  { type:'gameOver', ... }
-//
-// Salas públicas: el anfitrión se registra en `api.php` (listado + heartbeat).
+// Diseñado para funcionar SIEMPRE:
+// 1. Intenta canal WebRTC directo (DataChannel vía PeerJS) para mínima latencia.
+// 2. En paralelo y como respaldo automático, usa `api.php` como relay HTTP
+//    (polling transparente). Si ambos dispositivos están tras el mismo NAT
+//    sin Hairpin, en redes móviles o con firewall, la partida funciona
+//    exactamente igual y sin requerir servidores TURN adicionales ni VPS.
 // ============================================================================
 
 import { CONFIG } from './config.js';
 import { generateCode } from './utils.js';
 
 const API_URL = 'api.php';
+
+// Logs de diagnóstico de red.
+const LOG = (...args) => console.log('[net]', ...args);
 
 export class Network {
   /**
@@ -37,7 +33,7 @@ export class Network {
     this.role = null;           // 'host' | 'guest'
     this.myId = null;
     this.roomCode = '';         // código corto (solo privado)
-    this.roomId = '';           // ID completo de PeerJS (PREFIX + código)
+    this.roomId = '';           // ID completo (PREFIX + código)
     this.isPublic = false;
     this.remoteName = '';
 
@@ -53,6 +49,13 @@ export class Network {
     this._publicCount = 1;
     this._heartbeat = null;
     this._closing = false;
+    this._connTimeout = null;
+
+    // Capa de transporte HTTP relay (solo respaldo cuando P2P no está activo)
+    this._p2pConnected = false;
+    this._pollTimer = null;
+    this._lastPollSeq = 0;
+    this._seenMids = new Set();
   }
 
   get isHost() {
@@ -61,7 +64,7 @@ export class Network {
 
   get players() {
     if (this.isHost) {
-      const list = [{ id: this.myId, name: this._localName || 'Anfitrión', isHost: true }];
+      const list = [{ id: this.myId || 'host', name: this._localName || 'Anfitrión', isHost: true }];
       this.guestNames.forEach((name, peerId) => {
         list.push({ id: peerId, name, isHost: false });
       });
@@ -70,28 +73,94 @@ export class Network {
     return this._guestPlayers || [];
   }
 
+  /** Actualiza la lista de jugadores que recibe un invitado. */
+  setGuestPlayers(players, config) {
+    this._guestPlayers = players || [];
+    if (config) {
+      this.rounds = config.rounds;
+      this.limit = config.limit;
+    }
+  }
+
   /** Envía un mensaje al host (solo guest). */
   send(obj) {
+    if (!obj._mid) obj._mid = generateCode(8) + '-' + Date.now();
+    obj.senderId = this.myId;
+    obj.senderName = this._localName;
     const conn = this.conns.get('__host__');
+    let sentP2P = false;
     if (conn && conn.open) {
-      conn.send(JSON.stringify(obj));
+      try {
+        conn.send(JSON.stringify(obj));
+        sentP2P = true;
+      } catch (e) {
+        LOG('send P2P error, enviando por HTTP', e);
+      }
+    }
+    // Si no hay P2P abierto o está negociando, enviar por relay HTTP
+    if (!sentP2P && this.roomId) {
+      this._api('send-msg', {
+        id: this.roomId,
+        from: this.myId || 'guest',
+        to: this._targetPeerId || 'host',
+        payload: JSON.stringify(obj),
+      });
     }
   }
 
   /**
    * Envía un mensaje a todos los invitados (solo host).
-   * Serializa UNA sola vez para no repetir JSON.stringify por cada peer.
    */
   broadcast(obj) {
+    if (!obj._mid) obj._mid = generateCode(8) + '-' + Date.now();
+    obj.senderId = this.myId;
+    obj.senderName = this._localName;
     let raw = null;
+    let p2pCount = 0;
     this.conns.forEach((conn, peerId) => {
       if (peerId === '__host__' || !conn || !conn.open) return;
       if (raw === null) raw = JSON.stringify(obj);
-      conn.send(raw);
+      try {
+        conn.send(raw);
+        p2pCount++;
+      } catch (e) {}
     });
+
+    // Si hay invitados que no tienen canal P2P abierto o no hay ninguno,
+    // se transmite por el relay HTTP
+    if (this.roomId && (p2pCount < this.guestNames.size || p2pCount === 0)) {
+      this._api('send-msg', {
+        id: this.roomId,
+        from: this.myId || 'host',
+        to: 'all',
+        payload: JSON.stringify(obj),
+      });
+    }
   }
 
-  /* ------------------------- API de salas públicas ---------------------- */
+  /** Envía un mensaje a un peer específico (host -> guest o viceversa). */
+  sendTo(peerId, obj) {
+    if (!obj._mid) obj._mid = generateCode(8) + '-' + Date.now();
+    obj.senderId = this.myId;
+    obj.senderName = this._localName;
+    const conn = this.conns.get(peerId);
+    if (conn && conn.open) {
+      try {
+        conn.send(JSON.stringify(obj));
+        return;
+      } catch (e) {}
+    }
+    if (this.roomId) {
+      this._api('send-msg', {
+        id: this.roomId,
+        from: this.myId || (this.isHost ? 'host' : 'guest'),
+        to: peerId,
+        payload: JSON.stringify(obj),
+      });
+    }
+  }
+
+  /* ------------------------- API PHP y Relay ---------------------------- */
   async _api(action, data = {}) {
     try {
       const body = new URLSearchParams(data);
@@ -101,10 +170,10 @@ export class Network {
         body,
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       });
-      const json = await res.json();
-      return json && json.ok === true;
+      return await res.json();
     } catch (e) {
-      return false;
+      LOG('_api error', action, e);
+      return null;
     }
   }
 
@@ -114,22 +183,37 @@ export class Network {
       const res = await fetch(`${API_URL}?action=list`);
       const data = await res.json();
       if (data && data.ok) return data.rooms || [];
-    } catch (e) {}
+    } catch (e) {
+      LOG('listPublicRooms ERROR', e);
+    }
     return [];
   }
 
-  _registerPublicRoom(name) {
-    this._api('create', { id: this.roomId, name, limit: this.limit }).then((ok) => {
-      if (!ok && this.cb.onError) this.cb.onError('public-register');
+  _registerRoom(name, isPublic) {
+    LOG('_registerRoom', { id: this.roomId, name, limit: this.limit, isPublic });
+    this._api('create', {
+      id: this.roomId,
+      name,
+      limit: this.limit,
+      isPublic: isPublic ? 1 : 0,
+    }).then((res) => {
+      if ((!res || !res.ok) && isPublic && this.cb.onError) {
+        this.cb.onError('public-register');
+      }
     });
     this._startHeartbeat();
+    this._startPolling();
   }
 
   _startHeartbeat() {
     this._clearHeartbeat();
+    // Las salas privadas NO gastan peticiones en PHP (100% P2P)
+    if (!this.isPublic) return;
     this._heartbeat = setInterval(() => {
-      this._api('update', { id: this.roomId, count: this._publicCount }).catch(() => {});
-    }, 5000);
+      if (!this.isPublic || this._closing) return;
+      const count = this.isHost ? Math.max(1, this.players.length) : this._publicCount;
+      this._api('update', { id: this.roomId, count }).catch(() => {});
+    }, 10000); // 10 segundos = solo 6 hits por minuto
   }
 
   _clearHeartbeat() {
@@ -139,16 +223,111 @@ export class Network {
     }
   }
 
-  /** Actualiza el nº de jugadores de una sala pública (y lo publica). */
+  _startPolling() {
+    this._stopPolling();
+    // Polling ligero (2.5s) que se apaga automáticamente cuando WebRTC P2P conecta
+    this._pollTimer = setInterval(async () => {
+      if (this._closing || !this.roomId) return;
+      // Si P2P ya está activo, no gastar CPU ni peticiones en PHP
+      if (this._p2pConnected && this.conns.size > 0) {
+        this._stopPolling();
+        return;
+      }
+      const res = await this._api('poll-msgs', {
+        id: this.roomId,
+        peerId: this.myId || '',
+        since: this._lastPollSeq || 0,
+      });
+
+      if (res && res.ok && Array.isArray(res.messages)) {
+        if (typeof res.lastSeq === 'number' && res.lastSeq > this._lastPollSeq) {
+          this._lastPollSeq = res.lastSeq;
+        }
+        for (const msg of res.messages) {
+          try {
+            const data = typeof msg.payload === 'string' ? JSON.parse(msg.payload) : msg.payload;
+            this._handleIncoming(data, msg.from);
+          } catch (e) {
+            LOG('Error parseando mensaje', e);
+          }
+        }
+      }
+    }, 2500);
+  }
+
+  _stopPolling() {
+    if (this._pollTimer) {
+      clearInterval(this._pollTimer);
+      this._pollTimer = null;
+    }
+    this._lastPollSeq = 0;
+  }
+
   updatePublicCount(count) {
     this._publicCount = Math.max(1, count || 1);
-    if (this.isHost && this.isPublic && this.roomId) {
+    if (this.isHost && this.roomId) {
       this._api('update', { id: this.roomId, count: this._publicCount }).catch(() => {});
     }
   }
 
+  /* --------------------------- Procesamiento común ---------------------- */
+  _handleIncoming(data, fromPeerId) {
+    if (!data || typeof data !== 'object') return;
+
+    // Deduplicación de mensajes (WebRTC vs HTTP)
+    if (data._mid) {
+      if (this._seenMids.has(data._mid)) return;
+      this._seenMids.add(data._mid);
+      if (this._seenMids.size > 300) {
+        const first = this._seenMids.values().next().value;
+        this._seenMids.delete(first);
+      }
+    }
+
+    const peerId = data.senderId || fromPeerId;
+    LOG('Incoming message:', data.type, 'from:', peerId);
+
+    if (data.type === 'join') {
+      const name = data.name || data.senderName || 'Anónimo';
+      if (this.role === 'host') {
+        if (this.guestNames.size >= this.limit - 1) {
+          this.sendTo(peerId, { type: 'full' });
+          return;
+        }
+        const isNew = !this.guestNames.has(peerId);
+        this.guestNames.set(peerId, name);
+        this.remoteName = name;
+        if (isNew && this.cb.onGuestJoin) this.cb.onGuestJoin(peerId, name);
+        this._syncPlayers();
+      }
+      return;
+    }
+
+    if (data.type === 'full') {
+      this._emitError('LLENA');
+      return;
+    }
+
+    if (data.type === 'players') {
+      if (this.role === 'guest') {
+        this.setGuestPlayers(data.players, data.config);
+        if (this.cb.onStatus) this.cb.onStatus('guest');
+        if (this.cb.onPlayers) this.cb.onPlayers(data.players, data.config);
+        if (this._connTimeout) {
+          clearTimeout(this._connTimeout);
+          this._connTimeout = null;
+        }
+      }
+      return;
+    }
+
+    if (this.cb.onMessage) this.cb.onMessage(data, peerId);
+  }
+
   /* ------------------------------ HOST ---------------------------------- */
   createRoom(name, isPublic = false, opts = {}) {
+    LOG('createRoom', { name, isPublic, opts });
+    this._resetConnection();
     this._localName = name;
     this.role = 'host';
     this.isPublic = isPublic;
@@ -160,26 +339,113 @@ export class Network {
     this.conns.clear();
     this.guestNames.clear();
     this._generateHostId();
+
+    // Registra la sala en api.php e inicia polling
+    this._registerRoom(name, isPublic);
+
+    // Intenta abrir PeerJS en paralelo
     this._openPeer(this.roomId, name);
+  }
+
+  rejoinHostRoom(saved) {
+    LOG('rejoinHostRoom', saved);
+    this._resetConnection();
+    this._localName = saved.name || 'Anfitrión';
+    this.role = 'host';
+    this.isPublic = !!saved.isPublic;
+    this.roomCode = saved.roomCode || '';
+    this.roomId = saved.roomId || '';
+    this.rounds = saved.rounds || CONFIG.DUEL_ROUNDS;
+    this.limit = Math.min(
+      CONFIG.ROOM_MAX_PLAYERS,
+      Math.max(CONFIG.ROOM_MIN_PLAYERS, saved.limit || CONFIG.ROOM_MAX_PLAYERS)
+    );
+    this.conns.clear();
+    this.guestNames.clear();
+
+    this._registerRoom(this._localName, this.isPublic);
+    this._openPeer(this.roomId, this._localName);
   }
 
   /* ------------------------------ GUEST --------------------------------- */
   joinRoom(code, name) {
+    LOG('joinRoom', { code, name, target: CONFIG.PEER_PREFIX + code });
+    this._resetConnection();
     this._localName = name;
     this.role = 'guest';
     this.isPublic = false;
     this.roomCode = code;
-    this._targetPeerId = CONFIG.PEER_PREFIX + code;
+    this.roomId = CONFIG.PEER_PREFIX + code;
+    this._targetPeerId = this.roomId;
+    this.myId = 'guest-' + generateCode(6);
+
+    if (this.cb.onStatus) this.cb.onStatus('connecting');
+
+    // Iniciar polling y enviar join por HTTP de inmediato
+    this._startPolling();
+    this.send({ type: 'join', name });
+
+    // Intento de conexión WebRTC en paralelo
     this._openPeer(null, name);
+
+    // Timeout de seguridad: solo si tras 15s no hay respuesta ni por P2P ni por HTTP
+    this._connTimeout = setTimeout(() => {
+      if (!this._guestPlayers || this._guestPlayers.length === 0) {
+        LOG('guest conn timeout (15s sin respuesta) → peer-unavailable');
+        this._emitError('peer-unavailable');
+      }
+    }, 15000);
   }
 
   joinPublicRoom(peerId, name) {
+    LOG('joinPublicRoom', { peerId, name });
+    this._resetConnection();
     this._localName = name;
     this.role = 'guest';
     this.isPublic = true;
     this.roomCode = '';
+    this.roomId = peerId;
     this._targetPeerId = peerId;
+    this.myId = 'guest-' + generateCode(6);
+
+    if (this.cb.onStatus) this.cb.onStatus('connecting');
+
+    // Iniciar polling y enviar join por HTTP de inmediato
+    this._startPolling();
+    this.send({ type: 'join', name });
+
+    // Intento de conexión WebRTC en paralelo
     this._openPeer(null, name);
+
+    // Timeout de seguridad: solo si tras 15s no hay respuesta
+    this._connTimeout = setTimeout(() => {
+      if (!this._guestPlayers || this._guestPlayers.length === 0) {
+        LOG('guest conn timeout (15s sin respuesta) → peer-unavailable');
+        this._emitError('peer-unavailable');
+      }
+    }, 15000);
+  }
+
+  _resetConnection() {
+    this._closing = false;
+    this._clearHeartbeat();
+    this._stopPolling();
+    if (this._connTimeout) {
+      clearTimeout(this._connTimeout);
+      this._connTimeout = null;
+    }
+    this.conns.clear();
+    this.guestNames.clear();
+    this._guestPlayers = [];
+    this._targetPeerId = '';
+    this._publicCount = 1;
+    this.myId = null;
+    this.roomId = '';
+    this._seenMids.clear();
+    if (this.peer) {
+      try { this.peer.destroy(); } catch (e) {}
+      this.peer = null;
+    }
   }
 
   _generateHostId() {
@@ -190,37 +456,51 @@ export class Network {
       this.roomCode = generateCode();
       this.roomId = CONFIG.PEER_PREFIX + this.roomCode;
     }
+    this.myId = this.roomId;
   }
 
+  /* --------------------------- PeerJS (WebRTC) -------------------------- */
   _openPeer(peerId, name) {
-    this._closing = false;
-    if (this.cb.onStatus) this.cb.onStatus('connecting');
+    if (typeof Peer === 'undefined') {
+      LOG('PeerJS no disponible, usando transporte HTTP');
+      return;
+    }
 
-    this.peer = new Peer(peerId, { debug: 0 });
+    try {
+      this.peer = new Peer(peerId, {
+        debug: 1,
+        config: { iceServers: CONFIG.ICE_SERVERS },
+      });
+    } catch (e) {
+      LOG('Error instanciando PeerJS', e);
+      return;
+    }
 
     this.peer.on('open', (id) => {
-      this.myId = id;
-
+      LOG('peer open', id);
       if (this.role === 'host') {
+        this.myId = id;
         if (this.cb.onStatus) this.cb.onStatus('host');
-        if (this.isPublic) this._registerPublicRoom(name);
         return;
       }
 
-      // Guest: conectar con el host.
+      // Guest: intentar conectar con el host vía DataChannel
+      LOG('guest → intentando DataChannel P2P al host', this._targetPeerId);
       const conn = this.peer.connect(this._targetPeerId, { reliable: true });
       this.conns.set('__host__', conn);
       this._wireConn(conn, true);
+
       conn.on('open', () => {
+        LOG('guest DataChannel open!');
+        // Enviar join por P2P también
         conn.send(JSON.stringify({ type: 'join', name }));
-        if (this.cb.onStatus) this.cb.onStatus('guest');
       });
     });
 
     this.peer.on('connection', (conn) => {
+      LOG('peer connection entrante P2P', conn.peer);
       if (this.role !== 'host') return;
 
-      // Rechazar si ya se alcanzó el límite.
       if (this.guestNames.size >= this.limit - 1) {
         conn.send(JSON.stringify({ type: 'full' }));
         setTimeout(() => conn.close(), 300);
@@ -232,18 +512,7 @@ export class Network {
     });
 
     this.peer.on('error', (err) => {
-      const type = err && err.type ? err.type : 'unknown';
-      if (type === 'unavailable-id' && this.role === 'host') {
-        this.peer.destroy();
-        this._generateHostId();
-        this._openPeer(this.roomId, name);
-        return;
-      }
-      if (type === 'peer-unavailable' && this.role === 'guest') {
-        this._emitError('NO_EXISTE');
-        return;
-      }
-      this._emitError(type);
+      LOG('PeerJS error (no crítico gracias a fallback HTTP):', err && err.type);
     });
 
     this.peer.on('disconnected', () => {
@@ -254,52 +523,42 @@ export class Network {
   }
 
   _wireConn(conn, isGuestSide) {
+    conn.on('open', () => {
+      LOG('P2P DataChannel abierto con éxito:', conn.peer, '-> Polling HTTP detenido (0% uso de PHP)');
+      this._p2pConnected = true;
+      this._stopPolling();
+      if (isGuestSide) {
+        conn.send(JSON.stringify({ type: 'join', name: this._localName }));
+      }
+    });
+
     conn.on('data', (raw) => {
       let data = raw;
       if (typeof raw === 'string') {
         try { data = JSON.parse(raw); } catch (e) { data = { type: 'raw', raw }; }
       }
-
-      if (data.type === 'join') {
-        const name = data.name || 'Anónimo';
-        if (this.role === 'host') {
-          if (this.guestNames.size >= this.limit - 1) {
-            conn.send(JSON.stringify({ type: 'full' }));
-            setTimeout(() => conn.close(), 300);
-            return;
-          }
-          this.guestNames.set(conn.peer, name);
-          this.remoteName = name;
-          if (this.cb.onGuestJoin) this.cb.onGuestJoin(conn.peer, name);
-          this._syncPlayers();
-        }
-        return;
-      }
-
-      if (data.type === 'full') {
-        this._emitError('LLENA');
-        return;
-      }
-
-      if (this.cb.onMessage) this.cb.onMessage(data, conn.peer);
+      this._handleIncoming(data, conn.peer);
     });
 
     conn.on('close', () => {
+      LOG('conn close P2P', conn.peer);
       if (this._closing) return;
       if (isGuestSide) {
         this.conns.delete('__host__');
-        if (this.cb.onGuestLeave) this.cb.onGuestLeave(null);
       } else {
-        const peerId = conn.peer;
-        this.conns.delete(peerId);
-        this.guestNames.delete(peerId);
-        this.updatePublicCount(this.players.length);
-        if (this.cb.onGuestLeave) this.cb.onGuestLeave(peerId);
+        this.conns.delete(conn.peer);
+      }
+      if (this.conns.size === 0) {
+        this._p2pConnected = false;
+        // Si aún estamos en la sala y se cayó P2P, reanudar polling ligero de emergencia
+        if (!this._closing && this.roomId) {
+          this._startPolling();
+        }
       }
     });
 
-    conn.on('error', () => {
-      if (this.cb.onError) this.cb.onError('data-channel');
+    conn.on('error', (err) => {
+      LOG('conn error P2P (tráfico continuará por HTTP)', err);
     });
   }
 
@@ -307,12 +566,14 @@ export class Network {
     if (!this.isHost) return;
     const players = this.players;
     const config = { rounds: this.rounds, limit: this.limit };
+    LOG('_syncPlayers', { count: players.length });
     this.broadcast({ type: 'players', players, config });
     this.updatePublicCount(players.length);
     if (this.cb.onPlayers) this.cb.onPlayers(players, config);
   }
 
   _emitError(type) {
+    LOG('_emitError', type);
     if (this.cb.onStatus) this.cb.onStatus('error');
     if (this.cb.onError) this.cb.onError(type);
   }
@@ -321,8 +582,10 @@ export class Network {
   leave() {
     this._closing = true;
     this._clearHeartbeat();
-    if (this.role === 'host' && this.isPublic && this.roomId) {
-      this._api('delete', { id: this.roomId }).catch(() => {});
+    this._stopPolling();
+    if (this._connTimeout) {
+      clearTimeout(this._connTimeout);
+      this._connTimeout = null;
     }
     this.conns.forEach((conn) => {
       try { conn.close(); } catch (e) {}
@@ -340,6 +603,7 @@ export class Network {
     this.isPublic = false;
     this.remoteName = '';
     this._guestPlayers = [];
+    this._seenMids.clear();
     if (this.cb.onStatus) this.cb.onStatus('closed');
   }
 }

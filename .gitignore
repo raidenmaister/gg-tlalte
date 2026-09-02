@@ -23,5 +23,6 @@ package-lock.json
 
 # Logs y sistema
 *.log
+LOG.txt
 .DS_Store
 Thumbs.db

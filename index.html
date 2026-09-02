@@ -13,6 +13,9 @@
 </head>
 <body>
 
+    <!-- Fondo orbital ASCII (solo menú) -->
+    <div id="ascii-earth" class="hidden"></div>
+
     <!-- ====================== PANTALLA: NOMBRE ====================== -->
     <div id="screen-name" class="screen">
         <div class="card name-card">
@@ -156,7 +159,8 @@
             <ul class="players-list" id="playersList"></ul>
             <div class="lobby-actions">
                 <button class="btn-primary hidden" id="startBtn">Iniciar partida</button>
-                <button class="btn-ghost" id="leaveLobbyBtn">Salir</button>
+                <button class="btn-ghost" id="leaveLobbyBtn">Salir de la sala</button>
+                <button class="btn-ghost btn-danger hidden" id="deleteRoomBtn">Eliminar sala</button>
             </div>
             <p class="lobby-note" id="lobbyNote"></p>
         </div>
@@ -212,11 +216,6 @@
 
         <!-- Banner: esperando al rival -->
         <div class="waiting-banner hidden" id="waitingBanner">Esperando al rival…</div>
-
-        <!-- Controles inferiores -->
-        <div class="hud-bottom">
-            <button class="btn-ghost" id="recenterBtn" title="Recentrar la vista">⌖ Recentrar</button>
-        </div>
 
         <!-- Minimapa + confirmar -->
         <div class="minimap-wrap collapsed" id="minimapWrap">

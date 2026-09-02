@@ -33,6 +33,20 @@ function makePin({ lat, lng, color, size, label }) {
   return L.marker([lat, lng], { icon }).bindPopup(label);
 }
 
+/** Pin de la ubicación real con etiqueta visible para distinguirlo. */
+function makeRealPin({ lat, lng, color, size, label }) {
+  const tipY = size * 1.2071;
+  const labelH = 22;
+  const icon = L.divIcon({
+    className: 'gg-player-pin gg-real-pin',
+    html: `<div class="gg-player-pin__label gg-real-pin__label">${escapeHtml(label)}</div>
+      <div class="gg-pin__pin" style="--pin-color:${color}; width:${size}px; height:${size}px;"></div>`,
+    iconSize: [size, tipY + labelH],
+    iconAnchor: [size / 2, tipY + labelH],
+  });
+  return L.marker([lat, lng], { icon, interactive: false });
+}
+
 /** Pin de jugador con el nombre siempre visible encima de la chincheta. */
 function makePlayerPin({ lat, lng, color, size, label }) {
   const tipY = size * 1.2071;
@@ -150,7 +164,7 @@ export class Minimap {
 
     if (real) {
       this.revealLayer.addLayer(
-        makePin({ lat: real.lat, lng: real.lng, ...MARKER.real })
+        makeRealPin({ lat: real.lat, lng: real.lng, ...MARKER.real })
       );
       bounds.push([real.lat, real.lng]);
     }
@@ -180,7 +194,7 @@ export class Minimap {
 
     if (real) {
       this.revealLayer.addLayer(
-        makePin({ lat: real.lat, lng: real.lng, ...MARKER.real })
+        makeRealPin({ lat: real.lat, lng: real.lng, ...MARKER.real })
       );
       bounds.push([real.lat, real.lng]);
     }

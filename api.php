@@ -83,16 +83,19 @@ function userExists($users, $name) {
     return false;
 }
 
+$staleSeconds = 30;
+
 $rooms = cleanupRooms(loadRooms($roomsFile), $staleSeconds);
 $users = loadJson($usersFile, []);
 $leaderboard = loadJson($leaderboardFile, ['5' => [], '7' => [], '10' => []]);
 
 switch ($action) {
-    /* --------------------------- SALAS --------------------------- */
+    /* --------------------------- SALAS & MENSAJERÍA --------------------------- */
     case 'create': {
         $id = trim($_POST['id'] ?? '');
         $name = trim($_POST['name'] ?? 'Anónimo');
         $limit = intval($_POST['limit'] ?? 0);
+        $isPublic = isset($_POST['isPublic']) ? intval($_POST['isPublic']) : 1;
         if ($id === '') {
             echo json_encode(['ok' => false, 'error' => 'id requerido']);
             exit;
@@ -102,6 +105,9 @@ switch ($action) {
             'limit' => $limit,
             'count' => 1,
             'updated' => time(),
+            'isPublic' => $isPublic,
+            'messages' => [],
+            'lastSeq' => 0,
         ];
         if (!saveRooms($roomsFile, $rooms)) {
             echo json_encode(['ok' => false, 'error' => 'no se pudo escribir rooms.json']);
@@ -131,6 +137,8 @@ switch ($action) {
     case 'list': {
         $out = [];
         foreach ($rooms as $id => $room) {
+            // No listar salas privadas en el listado público
+            if (isset($room['isPublic']) && intval($room['isPublic']) === 0) continue;
             $out[] = [
                 'id' => $id,
                 'name' => $room['name'],
@@ -139,6 +147,101 @@ switch ($action) {
             ];
         }
         echo json_encode(['ok' => true, 'rooms' => $out]);
+        break;
+    }
+
+    case 'send-msg': {
+        $id = trim($_POST['id'] ?? '');
+        $from = trim($_POST['from'] ?? '');
+        $to = trim($_POST['to'] ?? 'all');
+        $payload = trim($_POST['payload'] ?? '');
+
+        if ($id === '' || $payload === '') {
+            echo json_encode(['ok' => false, 'error' => 'id y payload requeridos']);
+            exit;
+        }
+
+        // Si la sala no existe en rooms.json (por ejemplo privada), inicializarla
+        if (!isset($rooms[$id])) {
+            $rooms[$id] = [
+                'name' => 'Sala ' . substr($id, -4),
+                'limit' => 12,
+                'count' => 1,
+                'updated' => time(),
+                'isPublic' => 0,
+                'messages' => [],
+                'lastSeq' => 0,
+            ];
+        }
+
+        if (!isset($rooms[$id]['messages']) || !is_array($rooms[$id]['messages'])) {
+            $rooms[$id]['messages'] = [];
+            $rooms[$id]['lastSeq'] = 0;
+        }
+
+        $rooms[$id]['lastSeq'] = intval($rooms[$id]['lastSeq'] ?? 0) + 1;
+        $seq = $rooms[$id]['lastSeq'];
+        $now = time();
+
+        $rooms[$id]['messages'][] = [
+            'seq' => $seq,
+            'from' => $from,
+            'to' => $to,
+            'payload' => $payload,
+            'time' => $now,
+        ];
+
+        // Conservar solo los últimos 60 mensajes y purgar los de más de 60 segundos
+        if (count($rooms[$id]['messages']) > 60) {
+            $rooms[$id]['messages'] = array_slice($rooms[$id]['messages'], -60);
+        }
+        $rooms[$id]['messages'] = array_values(array_filter($rooms[$id]['messages'], function ($m) use ($now) {
+            return ($now - intval($m['time'] ?? 0)) < 60;
+        }));
+
+        $rooms[$id]['updated'] = $now;
+        saveRooms($roomsFile, $rooms);
+
+        echo json_encode(['ok' => true, 'seq' => $seq]);
+        break;
+    }
+
+    case 'poll-msgs': {
+        $id = trim($_GET['id'] ?? $_POST['id'] ?? '');
+        $peerId = trim($_GET['peerId'] ?? $_POST['peerId'] ?? '');
+        $since = intval($_GET['since'] ?? $_POST['since'] ?? 0);
+
+        if ($id === '' || !isset($rooms[$id])) {
+            echo json_encode(['ok' => false, 'error' => 'sala no existe']);
+            exit;
+        }
+
+        // Mantener viva la sala
+        $rooms[$id]['updated'] = time();
+        saveRooms($roomsFile, $rooms);
+
+        $msgs = isset($rooms[$id]['messages']) && is_array($rooms[$id]['messages'])
+            ? $rooms[$id]['messages']
+            : [];
+
+        $out = [];
+        $maxSeq = $since;
+        foreach ($msgs as $m) {
+            $s = intval($m['seq']);
+            if ($s > $since) {
+                // Filtrar para mí: si no soy yo el emisor, y va para 'all' o va para mí
+                if ($m['from'] !== $peerId && ($m['to'] === 'all' || $m['to'] === $peerId)) {
+                    $out[] = [
+                        'seq' => $s,
+                        'from' => $m['from'],
+                        'payload' => $m['payload'],
+                    ];
+                }
+                if ($s > $maxSeq) $maxSeq = $s;
+            }
+        }
+
+        echo json_encode(['ok' => true, 'messages' => $out, 'lastSeq' => $maxSeq]);
         break;
     }
 

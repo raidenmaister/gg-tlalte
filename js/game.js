@@ -108,7 +108,7 @@ export class Game {
     this.role = 'solo';
     this.rounds = mode.rounds;
     this.soloTotalSeconds = mode.totalSeconds;
-    this.soloStartTime = Date.now();
+    this.soloStartTime = 0;
     this.locations = pickIndices(this.coordenadas.length, this.rounds);
     this._beginRound(1);
   }
@@ -143,6 +143,14 @@ export class Game {
 
     this._hostStarted = true;
     this._readyCount = 1; // el host ya está listo
+
+    // Si el anfitrión juega solo, no hay invitados que envíen 'ready'.
+    if (this.players.length <= 1) {
+      this.emit('toast', { message: '¡Comienza la partida!', kind: 'info' });
+      this._beginRound(1);
+      return;
+    }
+
     this.emit('toast', { message: 'Esperando a que carguen los jugadores…', kind: 'info' });
   }
 
@@ -181,6 +189,7 @@ export class Game {
     this._readyCount = 0;
     this.currentCoord = null;
     this.soloTimedOut = false;
+    this.soloStartTime = 0;
   }
 
   _beginRound(round) {
@@ -211,8 +220,17 @@ export class Game {
     this.emit('confirm', { enabled: false });
     this._emitHud();
 
+    if (this.mode === 'solo') {
+      // En solitario el reloj global no arranca hasta que el panorama esté
+      // visible, para no quemar tiempo en una pantalla de carga.
+      this.pano.waitForReady()
+        .catch(() => {})
+        .then(() => this._startSoloRoundTimer(round));
+      return;
+    }
+
     const now = Date.now();
-    const prepareMs = this.mode === 'multi' ? CONFIG.PREPARE_DURATION * 1000 : 0;
+    const prepareMs = CONFIG.PREPARE_DURATION * 1000;
     const startAt = now + prepareMs;
 
     if (this.role === 'host') {
@@ -228,6 +246,15 @@ export class Game {
     } else {
       this._startPrepare(startAt, round);
     }
+  }
+
+  /** Arranca la fase de adivinar en solitario (una vez cargada la imagen). */
+  _startSoloRoundTimer(round) {
+    if (this.state !== 'playing' || this.currentRound !== round) return;
+    // El reloj global de la partida solo se fija en la primera ronda.
+    // En rondas posteriores ya viene corriendo y no debe reiniciarse.
+    if (!this.soloStartTime) this.soloStartTime = Date.now();
+    this._activateRound(round);
   }
 
   /**
@@ -342,7 +369,15 @@ export class Game {
   }
 
   _submitGuess(guess) {
-    const me = this.players.find((p) => p.id === this.net.myId);
+    let me = this.players.find((p) => p.id === this.net.myId);
+    if (!me && this.role === 'host') {
+      me = this.players.find((p) => p.isHost || p.id === this.net.roomId);
+    }
+    if (!me && this.players.length === 2 && this.role === 'guest') {
+      me = this.players.find((p) => p.id !== this.net.roomId && !p.isHost);
+    }
+    if (!me) me = this.players[0];
+
     if (me) {
       me.guessed = true;
       me.guess = guess;
@@ -359,6 +394,7 @@ export class Game {
       });
     } else if (this.role === 'host') {
       if (this._allGuessed()) {
+        this._clearHurry();
         this._resolveMultiRound();
       } else {
         // Arranca el contador de 15s para los que aún no envían.
@@ -375,31 +411,50 @@ export class Game {
       type: 'hurryStart',
       round: this.currentRound,
       seconds: CONFIG.OPPONENT_COUNTDOWN,
+      endTime: this.hurryEnd,
     });
-    // El propio host también ve el contador si aún no adivinó (normalmente ya lo hizo).
-    this.emit('countdown', { seconds: CONFIG.OPPONENT_COUNTDOWN });
+    this._runHurryCountdown(this.hurryEnd);
   }
 
   _onHurryStart(data) {
-    if (this.role !== 'guest' || this._resolved) return;
-    this._hurryEnd = Date.now() + (data.seconds || CONFIG.OPPONENT_COUNTDOWN) * 1000;
-    this.emit('countdown', { seconds: data.seconds || CONFIG.OPPONENT_COUNTDOWN });
-    this._clearHurry();
-    this._hurry = setInterval(() => {
-      const left = Math.ceil((this._hurryEnd - Date.now()) / 1000);
-      this.emit('countdown', { seconds: left > 0 ? left : 0 });
+    if (this._resolved) return;
+    this.hurryEnd = data.endTime || (Date.now() + (data.seconds || CONFIG.OPPONENT_COUNTDOWN) * 1000);
+    this._runHurryCountdown(this.hurryEnd);
+  }
+
+  _runHurryCountdown(endTime) {
+    this._clearHurryTimer();
+    const tick = () => {
+      const left = Math.max(0, Math.ceil((endTime - Date.now()) / 1000));
+      this.emit('countdown', { seconds: left });
       if (left <= 0) {
         this._clearHurry();
         this.emit('countdown', { seconds: null });
+        if (this.role === 'host' && !this._resolved) {
+          this.players.forEach((p) => {
+            if (!p.guessed) {
+              p.guessed = true;
+              p.guess = null;
+            }
+          });
+          this._resolveMultiRound();
+        }
       }
-    }, 1000);
+    };
+    tick();
+    this._hurry = setInterval(tick, 1000);
   }
 
-  _clearHurry() {
+  _clearHurryTimer() {
     if (this._hurry) {
       clearInterval(this._hurry);
       this._hurry = null;
     }
+  }
+
+  _clearHurry() {
+    this._clearHurryTimer();
+    this.hurryEnd = 0;
   }
 
   _allGuessed() {
@@ -514,19 +569,21 @@ export class Game {
         break;
       case 'guess': {
         if (this.role !== 'host') break;
-        const p = this.players.find((x) => x.id === fromPeerId);
+        let p = this.players.find((x) => x.id === fromPeerId || (data.senderId && x.id === data.senderId));
+        if (!p && this.players.length === 2) {
+          p = this.players.find((x) => x.id !== this.net.myId && !x.isHost);
+        }
         if (p && !p.guessed) {
           p.guessed = true;
-          p.guess =
-            data.lat != null && data.lng != null
-              ? { lat: data.lat, lng: data.lng }
-              : null;
+          p.guess = (data.lat != null && data.lng != null)
+            ? { lat: data.lat, lng: data.lng }
+            : null;
         }
         if (this._allGuessed() && !this._resolved) {
-          this.hurryEnd = 0;
+          this._clearHurry();
           this._resolveMultiRound();
         } else if (!this._resolved && !this.hurryEnd) {
-          // El último que confirmó dispara el contador de 15s para los demás.
+          // El primer jugador en adivinar dispara el contador de 15s para los demás.
           this._startHurry();
         }
         break;
@@ -569,12 +626,16 @@ export class Game {
       return { ...p, distance: info.distance, roundScore: info.score };
     });
 
-    // Daño individual: si no lograste puntuación perfecta (BASE_SCORE),
-    // pierdes vida según la diferencia. El multiplicador amplifica el castigo.
+    // En Duelo: el jugador con mejor puntaje en la ronda recibe 0 de daño.
+    // Los rivales reciben daño igual a la diferencia de puntos multiplicada por el factor de ronda.
+    const maxRoundScore = Math.max(0, ...scored.map((p) => p.roundScore));
+    const roundMult = damageMultiplier(this.currentRound);
+
     const results = scored.map((p) => {
-      const damage = p.roundScore < CONFIG.BASE_SCORE
-        ? computeDamage(CONFIG.BASE_SCORE, p.roundScore, this.currentRound)
-        : 0;
+      let damage = 0;
+      if (p.roundScore < maxRoundScore) {
+        damage = Math.round((maxRoundScore - p.roundScore) * roundMult);
+      }
       p.hp = clamp(p.hp - damage, 0, CONFIG.MAX_HP);
       return {
         id: p.id,
@@ -593,7 +654,7 @@ export class Game {
       total: this.rounds,
       real,
       players: results,
-      multiplier: damageMultiplier(this.currentRound),
+      multiplier: roundMult,
     };
 
     this.net.broadcast({ type: 'roundResult', ...neutral });

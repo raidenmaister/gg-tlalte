@@ -1,6 +1,6 @@
 # GG-TLALTE
 
-Juego de adivinar ubicaciones con panorámicas 360° de Google Maps Street View, inspirado en GeoGuessr. Incluye modo solitario con leaderboard y partidas multijugador P2P de hasta 12 jugadores.
+Juego de adivinar ubicaciones con panorámicas 360° de Google Maps Street View, inspirado en GeoGuessr y ambientado en Tlaltenango de Sánchez Román, Zacatecas. Incluye modo solitario con leaderboard y partidas multijugador en duelo 1v1 y hasta 12 jugadores.
 
 ## Características
 
@@ -9,36 +9,46 @@ Juego de adivinar ubicaciones con panorámicas 360° de Google Maps Street View,
   - 7 rondas → 2:00
   - 10 rondas → 2:30
 - **Leaderboard de solitario** separado en categorías de 5, 7 y 10 rondas.
-- **Puntuación equilibrada**: combina precisión (5000 pts por ronda) y velocidad, para que un intento rápido pero impreciso no quede por encima de uno acertado.
+- **Puntuación calibrada a escala local**:
+  - Fórmula exponencial adaptada a distancias urbanas (~1.2 km de constante de decaimiento).
+  - Aciertos a menos de 25 m = 5,000 pts (puntuación perfecta).
+  - Diferencias claras y justas de puntos y daño en distancias de calles y colonias.
 - **Nombres de usuario únicos** (no repetidos, insensibles a mayúsculas/minúsculas).
-- **Partidas multijugador P2P** con PeerJS, de 2 a 12 jugadores:
+- **Partidas multijugador P2P híbridas** (WebRTC vía PeerJS con fallback HTTP ultraligero):
+  - **Prioridad P2P absoluta**: Al establecer conexión directa WebRTC entre jugadores, el sondeo al servidor PHP se detiene completamente (0% consumo de CPU/hits en hosting gratuito como InfinityFree).
   - Salas privadas con código de 4 caracteres.
-  - Salas públicas con listado y heartbeat.
-  - Resultados sobre minimapa a pantalla completa: chincheta real y de cada jugador, con su nombre y conectadas por líneas.
-  - Barras de vida por jugador con previsualización de daño y color según la vida restante (verde, amarillo o rojo).
-- **Backend PHP** que persiste usuarios, salas y leaderboard en archivos JSON (sin base de datos).
+  - Salas públicas con listado y heartbeat inteligente.
+  - Sistema de prisa sincronizado (reloj de 15 segundos cuando el primer jugador confirma su guess).
+  - **Reglas de Duelo GeoGuessr**: El jugador con mejor puntuación en la ronda inflige daño a los rivales según la diferencia multiplicada por el factor de ronda.
+  - Resultados sobre minimapa a pantalla completa: chincheta real y de cada jugador, con nombres y conectadas por líneas geodésicas.
+  - Barras de vida animadas con reflejo de daño recibido en tiempo real.
+- **Efectos visuales y audio**:
+  - Fondo orbital con la Tierra en arte ASCII renderizada en Canvas 2D de alto rendimiento.
+  - Visor Street View con bloqueo de navegación y control de punto de vista.
+  - Audio sintetizado por Web Audio API para aciertos, temporizador y victorias/derrotas.
+- **Backend PHP ligero**:
+  - Persiste usuarios, salas y leaderboard en archivos JSON (sin necesidad de MySQL).
 
 ## Estructura
 
 ```
 gg-tlalte/
-├── index.html           # Estructura de la página
-├── style.css            # Estilos
-├── api.php              # Backend PHP (salas, usuarios, leaderboard)
-├── rooms.json           # Salas públicas (plantilla)
-├── coordenadas_validas.json
+├── index.html           # Estructura de la aplicación
+├── style.css            # Estilos y diseño responsivo
+├── api.php              # Backend PHP (salas, usuarios, leaderboard, relay P2P)
+├── rooms.json           # Salas públicas activas
+├── coordenadas_validas.json # Banco de ubicaciones 360° validadas
 └── js/
-    ├── app.js           # Punto de entrada y UI
-    ├── game.js          # Máquina de estados del juego
-    ├── net.js           # Capa de red PeerJS
-    ├── panorama.js      # Visor Street View
-    ├── minimap.js       # Minimapa Leaflet
-    ├── config.js        # Constantes y reglas
-    ├── audio.js
-    └── utils.js
+    ├── app.js           # Orquestador principal y eventos de UI
+    ├── ascii-earth.js   # Fondo animado de la Tierra en ASCII
+    ├── audio.js         # Efectos de sonido con Web Audio API
+    ├── config.js        # Constantes, servidores STUN/TURN y configuración
+    ├── game.js          # Máquina de estados del juego (solo y multi)
+    ├── minimap.js       # Minimapa interactivo con Leaflet
+    ├── net.js           # Capa de red híbrida WebRTC / PeerJS / HTTP relay
+    ├── panorama.js      # Visor Google Maps Street View
+    └── utils.js         # Cálculos geodésicos (Haversine) y fórmulas
 ```
-
-Los archivos auxiliares de desarrollo (deploy, descarga de panorámicas, visor de prueba) se mantienen fuera de este repositorio.
 
 ## Uso local
 
@@ -48,35 +58,44 @@ Los archivos auxiliares de desarrollo (deploy, descarga de panorámicas, visor d
    git clone https://github.com/raidenmaister/gg-tlalte.git
    ```
 
-2. Sirve el proyecto con un servidor local (necesario para `fetch`):
+2. Sirve el proyecto con un servidor local (necesario para módulos ES y `fetch`):
 
-   ```bash
-   cd gg-tlalte
-   python -m http.server 8000
-   ```
+   - **Con PHP (Recomendado, habilita salas públicas y leaderboard):**
+     ```bash
+     cd gg-tlalte
+     php -S localhost:8000
+     ```
 
-3. Abre `http://localhost:8000`.
+   - **Con Python:**
+     ```bash
+     python -m http.server 8000
+     ```
 
-> Las salas públicas y el leaderboard requieren un servidor con PHP. En local con `python -m http.server` no se ejecuta `api.php`, por lo que solo funcionarán las salas privadas y el modo solitario.
+3. Abre en tu navegador `http://localhost:8000`.
 
-## API Key de Google Maps
+## API Key de Google Maps y Servidores ICE
 
-La API Key **no** está incluida en este repositorio. Para que el juego no la pida, configura un archivo local `js/keys.js` con:
+La API Key y credenciales privadas **no** se suben a GitHub. Configura tu archivo local `js/keys.js` (ignorado por git):
 
 ```js
-window.GG_GOOGLE_MAPS_API_KEY = 'TU_API_KEY';
+// js/keys.js
+window.GG_GOOGLE_MAPS_API_KEY = 'TU_GOOGLE_MAPS_API_KEY';
+
+// Opcional: Servidores TURN para redes restringidas
+window.GG_ICE_SERVERS = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  // { urls: 'turn:...', username: '...', credential: '...' }
+];
 ```
 
-Ese archivo está en `.gitignore`, así que no se sube a GitHub. Si no existe, el visor pedirá la key por prompt al cargar.
+Si no se configura `js/keys.js`, la aplicación solicitará la clave de Google Maps en un prompt interactivo al iniciar.
 
-Restringe la key a tu dominio (o a `localhost`) desde la consola de Google Cloud.
+## Despliegue (Deploy)
 
-## Deploy a hosting con PHP
-
-El deploy se hace desde local con un script (`deploy.mjs`) que no se incluye en GitHub. Configura las credenciales FTP en `.env.deploy` y ejecuta:
+El proyecto está preparado para desplegarse por FTP en cualquier hosting compartido con soporte PHP (como InfinityFree, ByetHost, etc.):
 
 ```bash
 node deploy.mjs
 ```
 
-Sube los archivos web al web root preservando los datos del juego (`users.json`, `leaderboard.json`, `rooms.json`). El script excluye tooling local y secretos (`.env*`, `.commandcode/`, `node_modules/`, `deploy.mjs`, etc.).
+El script de despliegue conserva de forma segura los archivos de estado (`rooms.json`, `users.json`, `leaderboard.json`) en el servidor sin sobreescribirlos.

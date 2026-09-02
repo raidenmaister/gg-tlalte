@@ -26,6 +26,10 @@ class AudioManager {
 
   toggle() {
     this.enabled = !this.enabled;
+    if (this.master) {
+      // Silencia también lo que ya está sonando, no solo los tonos futuros.
+      this.master.gain.value = this.enabled ? 0.22 : 0;
+    }
     return this.enabled;
   }
 

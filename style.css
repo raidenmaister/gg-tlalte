@@ -640,15 +640,15 @@ input {
 
 .hp-row {
     display: grid;
-    grid-template-columns: auto 1fr auto;
+    grid-template-columns: auto 1fr auto auto;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     min-width: 0;
 }
 
 .hp-name {
-    font-size: 0.78rem;
-    font-weight: 600;
+    font-size: 0.8rem;
+    font-weight: 700;
     color: var(--text);
     white-space: nowrap;
     max-width: 90px;
@@ -706,11 +706,48 @@ input {
 }
 
 .hp-val {
-    font-size: 0.78rem;
+    font-size: 0.8rem;
     font-weight: 700;
     color: var(--text);
-    min-width: 42px;
+    min-width: 44px;
     text-align: right;
+}
+
+/* Badge de daño o bonus en la barra de vida */
+.hp-diff {
+    font-size: 0.75rem;
+    font-weight: 800;
+    min-width: 58px;
+    padding: 2px 6px;
+    border-radius: 6px;
+    text-align: center;
+    opacity: 0;
+    transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.hp-diff.damage {
+    opacity: 1;
+    color: #ff4d4d;
+    background: rgba(239, 68, 68, 0.22);
+    border: 1px solid rgba(239, 68, 68, 0.5);
+    animation: popDamage 0.4s ease-out, damagepulse 1.2s infinite alternate;
+}
+
+.hp-diff.safe {
+    opacity: 1;
+    color: #4ade80;
+    background: rgba(34, 197, 94, 0.18);
+    border: 1px solid rgba(34, 197, 94, 0.4);
+}
+
+@keyframes popDamage {
+    0% { transform: scale(1.3); }
+    100% { transform: scale(1); }
+}
+
+@keyframes damagepulse {
+    0% { box-shadow: 0 0 4px rgba(239, 68, 68, 0.3); }
+    100% { box-shadow: 0 0 12px rgba(239, 68, 68, 0.7); }
 }
 
 .btn-leave {
@@ -1022,11 +1059,107 @@ input {
     display: block;
 }
 
-/* Ocultar el título/estadísticas en el overlay de resultado para centrar el mapa */
+/* Ocultar el título/estadísticas en el overlay de resultado solo en solitario */
 #resultPanel.result-overlay .panel-title,
 #resultPanel.result-overlay .result-stats,
 #resultPanel.result-overlay .panel-note {
     display: none;
+}
+
+/* Tarjeta flotante de resultados en multijugador */
+#resultPanel.result-multi {
+    position: absolute;
+    inset: auto 16px 20px 16px;
+    display: flex;
+    justify-content: center;
+    pointer-events: none;
+    z-index: 95;
+    animation: slideUpMulti 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes slideUpMulti {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+#resultPanel.result-multi .panel {
+    background: rgba(10, 12, 24, 0.92);
+    border: 1px solid var(--border-strong);
+    box-shadow: 0 16px 44px rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-radius: 18px;
+    padding: 14px 18px;
+    max-width: 520px;
+    width: 100%;
+    pointer-events: auto;
+}
+
+#resultPanel.result-multi .panel-title {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 10px;
+    text-align: center;
+}
+
+.res-multi-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.035);
+    margin-bottom: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.res-multi-name {
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.res-multi-meta {
+    font-size: 0.78rem;
+    color: var(--muted);
+    margin-top: 2px;
+}
+
+.res-damage-badge {
+    font-size: 0.85rem;
+    font-weight: 800;
+    padding: 4px 10px;
+    border-radius: 8px;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.res-damage-badge.hit {
+    color: #ff4d4d;
+    background: rgba(239, 68, 68, 0.22);
+    border: 1px solid rgba(239, 68, 68, 0.55);
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.35);
+}
+
+.res-damage-badge.safe {
+    color: #4ade80;
+    background: rgba(34, 197, 94, 0.18);
+    border: 1px solid rgba(34, 197, 94, 0.4);
+}
+
+.res-hp-left {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--text);
+    min-width: 68px;
+    text-align: right;
 }
 
 /* ------------------------------ Paneles ------------------------------ */

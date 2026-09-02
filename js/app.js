@@ -210,9 +210,13 @@ function renderMultiHp(players) {
     val.className = 'hp-val';
     val.textContent = Math.round(p.hp);
 
+    const diff = document.createElement('span');
+    diff.className = 'hp-diff';
+
     row.appendChild(name);
     row.appendChild(bar);
     row.appendChild(val);
+    row.appendChild(diff);
     box.appendChild(row);
   });
 }
@@ -239,22 +243,35 @@ function animateMultiHp(result) {
     const bar = row.querySelector('.hp-bar');
     const fill = row.querySelector('.hp-fill');
     const val = row.querySelector('.hp-val');
+    let diff = row.querySelector('.hp-diff');
+    if (!diff) {
+      diff = document.createElement('span');
+      diff.className = 'hp-diff';
+      row.appendChild(diff);
+    }
     if (!bar || !fill || !val) return;
 
     const damage = p.damage || 0;
     const afterPct = (p.hp / CONFIG.MAX_HP) * 100;
+
     if (damage <= 0) {
+      diff.className = 'hp-diff safe';
+      diff.textContent = '0 HP';
       fill.style.width = afterPct + '%';
       fill.className = 'hp-fill ' + hpColorClass(afterPct);
       val.textContent = Math.round(p.hp);
       return;
     }
 
+    // Mostrar badge rojo con la cantidad de vida que pierde
+    diff.className = 'hp-diff damage';
+    diff.textContent = `-${formatNumber(damage)}`;
+
     const beforeHp = clamp(p.hp + damage, 0, CONFIG.MAX_HP);
     const beforePct = (beforeHp / CONFIG.MAX_HP) * 100;
     const damagePct = (damage / CONFIG.MAX_HP) * 100;
 
-    // Estado previo al daño + capa roja parpadeante del tramo que se pierde.
+    // Estado previo + tramo rojo parpadeante
     fill.style.width = beforePct + '%';
     val.textContent = Math.round(beforeHp);
 
@@ -265,12 +282,12 @@ function animateMultiHp(result) {
     bar.appendChild(layer);
 
     setTimeout(() => {
-      // Se aplica el daño: desaparece la capa y la barra queda con su color real.
+      // Se aplica el daño real: desaparece la capa y la barra se contrae
       layer.remove();
       fill.style.width = afterPct + '%';
       fill.className = 'hp-fill ' + hpColorClass(afterPct);
       val.textContent = Math.round(p.hp);
-    }, 1400);
+    }, 1100);
   });
 }
 
@@ -337,14 +354,15 @@ function renderResult(result) {
   $('#gameOverPanel').classList.add('hidden');
 
   // Solo: mapa a pantalla completa + botón flotante de "siguiente".
-  // Multijugador: mapa a pantalla completa con las chinchetas, sin cuadro de puntos.
+  // Multijugador: mapa a pantalla completa + tarjeta flotante inferior con puntuación y daño.
   if (result.mode === 'solo') {
     minimap.setFullscreen(true);
     $('#resultPanel').classList.add('result-overlay');
+    $('#resultPanel').classList.remove('result-multi', 'hidden');
   } else {
     minimap.setFullscreen(true);
-    $('#resultPanel').classList.remove('result-overlay');
-    $('#resultPanel').classList.add('hidden');
+    $('#resultPanel').classList.remove('result-overlay', 'hidden');
+    $('#resultPanel').classList.add('result-multi');
     const hudTop = $('.hud-top');
     if (hudTop) hudTop.classList.add('over-map');
   }
@@ -380,31 +398,35 @@ function renderResult(result) {
     note.classList.add('hidden');
     $('#hudScoreValue').textContent = formatNumber(result.myTotalScore);
   } else {
-    // Multijugador
-    if (result.wonRound) {
-      title.textContent = '¡Ganaste la ronda!';
-      title.className = 'panel-title panel-title-win';
-    } else {
-      title.textContent = 'Ronda completada';
-      title.className = 'panel-title panel-title-neutral';
-    }
+    // Multijugador: tarjeta de resultados por ronda con daño exacto
+    title.textContent = `Ronda ${result.round}/${result.total} · Multiplicador x${result.multiplier || 1}`;
+    title.className = 'panel-title panel-title-neutral';
 
-    stats.innerHTML = result.players.map((p) =>
-      statRow(
-        p.name,
-        `${formatNumber(p.score)} pts · ${p.distance != null ? formatKm(p.distance) : 'sin guess'}` +
-        (p.damage > 0 ? ` · -${formatNumber(p.damage)} HP` : '')
-      )
-    ).join('');
+    stats.innerHTML = result.players.map((p) => {
+      const isWinner = p.damage <= 0;
+      const damageBadge = p.damage > 0
+        ? `<span class="res-damage-badge hit">-${formatNumber(p.damage)} HP</span>`
+        : `<span class="res-damage-badge safe">👑 0 HP</span>`;
+      return `
+        <div class="res-multi-row">
+          <div class="res-multi-info">
+            <div class="res-multi-name">${p.name} ${isWinner ? '👑' : ''}</div>
+            <div class="res-multi-meta">
+              +${formatNumber(p.score)} pts · ${p.distance != null ? formatKm(p.distance) : 'sin guess'}
+            </div>
+          </div>
+          ${damageBadge}
+          <div class="res-hp-left">${formatNumber(p.hp)} HP</div>
+        </div>
+      `;
+    }).join('');
 
     nextBtn.classList.add('hidden');
     note.classList.remove('hidden');
     note.textContent = 'Siguiente ronda en unos segundos…';
   }
 
-  if (result.mode === 'solo') {
-    $('#resultPanel').classList.remove('hidden');
-  }
+  $('#resultPanel').classList.remove('hidden');
 }
 
 async function handleGameOver(result) {
@@ -472,8 +494,12 @@ function resetGameUI() {
   const hudTop = $('.hud-top');
   if (hudTop) hudTop.classList.remove('over-map');
   $('#resultPanel').classList.add('hidden');
-  $('#resultPanel').classList.remove('result-overlay');
+  $('#resultPanel').classList.remove('result-overlay', 'result-multi');
   $('#gameOverPanel').classList.add('hidden');
+  document.querySelectorAll('.hp-diff').forEach((el) => {
+    el.className = 'hp-diff';
+    el.textContent = '';
+  });
   minimap.setFullscreen(false);
   collapseMinimap();
 }

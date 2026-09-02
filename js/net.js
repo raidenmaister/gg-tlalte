@@ -80,9 +80,18 @@ export class Network {
     return this._guestPlayers || [];
   }
 
-  /** Actualiza la lista de jugadores que recibe un invitado. */
+  /** Actualiza la lista de jugadores que recibe un invitado (deduplicada). */
   setGuestPlayers(players, config) {
-    this._guestPlayers = players || [];
+    const seen = new Set();
+    const cleanList = [];
+    for (const p of (players || [])) {
+      const key = (p.name || '').trim().toLowerCase();
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        cleanList.push(p);
+      }
+    }
+    this._guestPlayers = cleanList;
     if (config) {
       this.rounds = config.rounds;
       this.limit = config.limit;
@@ -656,6 +665,20 @@ export class Network {
 
   _syncPlayers() {
     if (!this.isHost) return;
+
+    // Depuración activa de this.guestNames para eliminar duplicados huérfanos antes de transmitir
+    const seen = new Set([this._localName.trim().toLowerCase()]);
+    const toDelete = [];
+    for (const [peerId, name] of this.guestNames.entries()) {
+      const lower = (name || '').trim().toLowerCase();
+      if (seen.has(lower)) {
+        toDelete.push(peerId);
+      } else {
+        seen.add(lower);
+      }
+    }
+    toDelete.forEach((id) => this.guestNames.delete(id));
+
     const players = this.players;
     const config = { rounds: this.rounds, limit: this.limit };
     LOG('_syncPlayers', { count: players.length });

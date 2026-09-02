@@ -546,6 +546,18 @@ function renderLobby() {
       ? 'Sala privada'
       : 'Sala';
 
+  // Deduplicación estricta en el cliente para garantizar nombres únicos en el lobby
+  const seenLobby = new Set();
+  const cleanPlayers = [];
+  for (const p of players) {
+    const key = (p.name || '').trim().toLowerCase();
+    if (key && !seenLobby.has(key)) {
+      seenLobby.add(key);
+      cleanPlayers.push(p);
+    }
+  }
+  players = cleanPlayers;
+
   const list = $('#playersList');
   list.innerHTML = '';
 

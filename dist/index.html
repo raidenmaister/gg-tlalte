@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#0a0a14">
+    <title>GG-TLALTE · GeoGuessr P2P</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230a0a14'/%3E%3Ctext x='32' y='45' font-family='Arial, sans-serif' font-size='38' font-weight='bold' fill='%23e94560' text-anchor='middle'%3EG%3C/text%3E%3C/svg%3E">
+
+    <!-- Leaflet (minimapa) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- ====================== PANTALLA: NOMBRE ====================== -->
+    <div id="screen-name" class="screen">
+        <div class="card name-card">
+            <div class="logo-mini">GG-TLALTE</div>
+            <h2>Bienvenido</h2>
+            <p>Introduce tu nombre de jugador</p>
+            <input type="text" id="playerNameInput" maxlength="20" placeholder="Tu nombre" autocomplete="off">
+            <button class="btn-primary" id="saveNameBtn">Entrar</button>
+        </div>
+    </div>
+
+    <!-- ====================== PANTALLA: MENÚ ====================== -->
+    <div id="screen-menu" class="screen hidden">
+        <div class="menu">
+            <h1 class="title">GG-TLALTE</h1>
+            <p class="greeting">Bienvenido, <span id="menuPlayerName"></span>. Elige un modo:</p>
+            <div class="modes">
+                <button class="mode-card" id="soloBtn">
+                    <span class="icon">▶</span>
+                    <h2>Jugar en solitario</h2>
+                    <p>Elige entre 5, 7 o 10 rondas · 5000 pts por ronda.</p>
+                </button>
+                <button class="mode-card" id="createBtn">
+                    <span class="icon">＋</span>
+                    <h2>Crear sala</h2>
+                    <p>Duelo 1v1 · genera un código para tu rival.</p>
+                </button>
+                <button class="mode-card" id="joinBtn">
+                    <span class="icon">→</span>
+                    <h2>Unirse a sala</h2>
+                    <p>Entra con el código del anfitrión.</p>
+                </button>
+                <button class="mode-card" id="leaderboardBtn">
+                    <span class="icon">🏆</span>
+                    <h2>Leaderboard</h2>
+                    <p>Los mejores puntajes en solitario.</p>
+                </button>
+            </div>
+            <button class="btn-sound" id="soundBtn" title="Activar/desactivar sonido">🔊</button>
+        </div>
+    </div>
+
+    <!-- ====================== PANTALLA: RONDAS SOLITARIO ====================== -->
+    <div id="screen-solo" class="screen hidden">
+        <div class="card">
+            <h2>Jugar en solitario</h2>
+            <p>Elige el número de rondas. El tiempo es para toda la partida, no por ronda.</p>
+            <div class="option-buttons">
+                <button class="btn-primary solo-rounds-btn" data-rounds="5">5 rondas · 1:45</button>
+                <button class="btn-ghost solo-rounds-btn" data-rounds="7">7 rondas · 2:00</button>
+                <button class="btn-ghost solo-rounds-btn" data-rounds="10">10 rondas · 2:30</button>
+            </div>
+            <button class="btn-ghost" id="soloBackBtn">Volver</button>
+        </div>
+    </div>
+
+    <!-- ====================== PANTALLA: LEADERBOARD ====================== -->
+    <div id="screen-leaderboard" class="screen hidden">
+        <div class="card leaderboard-card">
+            <h2>Leaderboard · Solitario</h2>
+            <div class="lb-tabs">
+                <button class="lb-tab active" data-rounds="5">5 rondas</button>
+                <button class="lb-tab" data-rounds="7">7 rondas</button>
+                <button class="lb-tab" data-rounds="10">10 rondas</button>
+            </div>
+            <div class="lb-list" id="leaderboardList"></div>
+            <p class="empty-hint hidden" id="leaderboardEmpty">Aún no hay puntajes en esta categoría.</p>
+            <button class="btn-ghost" id="leaderboardBackBtn">Volver</button>
+        </div>
+    </div>
+
+    <!-- ====================== PANTALLA: CREAR ====================== -->
+    <div id="screen-create" class="screen hidden">
+        <div class="card">
+            <h2>Crear sala</h2>
+            <p>Elige el tipo de sala:</p>
+            <div class="option-buttons">
+                <button class="btn-primary" id="createPublicBtn">🌐 Pública</button>
+                <button class="btn-ghost" id="createPrivateBtn">🔒 Privada</button>
+            </div>
+            <p class="coming-soon">Pública: cualquiera puede unirse desde el listado. Privada: solo con código.</p>
+            <button class="btn-ghost" id="createBackBtn">Volver</button>
+        </div>
+    </div>
+
+    <!-- ====================== PANTALLA: UNIRSE ====================== -->
+    <div id="screen-join" class="screen hidden">
+        <div class="card join-card">
+            <h2>Unirse a sala</h2>
+            <div class="public-section">
+                <h3 class="section-title">Salas públicas</h3>
+                <ul class="public-list" id="publicList"></ul>
+                <p class="empty-hint" id="publicEmpty">No hay salas públicas ahora mismo</p>
+            </div>
+            <div class="divider">o</div>
+            <div class="private-section">
+                <p>Entra con un código privado</p>
+                <input type="text" id="joinCodeInput" class="code-input" maxlength="4" placeholder="XXXX" autocomplete="off" autocapitalize="characters">
+                <button class="btn-primary" id="joinRoomBtn">Unirse</button>
+            </div>
+            <button class="btn-ghost" id="joinBackBtn">Volver</button>
+        </div>
+    </div>
+
+    <!-- ====================== PANTALLA: LOBBY ====================== -->
+    <div id="screen-lobby" class="screen hidden">
+        <div class="card lobby-card">
+            <h2 id="lobbyTitle">Sala</h2>
+            <div class="room-code" id="roomCodeSection">
+                <span class="room-code-label">Código de la sala</span>
+                <div class="room-code-value" id="roomCodeValue">----</div>
+                <button class="btn-ghost btn-copy" id="copyCodeBtn">Copiar código</button>
+            </div>
+            <h3 class="players-title">Jugadores <span id="playersCount"></span></h3>
+            <ul class="players-list" id="playersList"></ul>
+            <div class="lobby-actions">
+                <button class="btn-primary hidden" id="startBtn">Iniciar partida</button>
+                <button class="btn-ghost" id="leaveLobbyBtn">Salir</button>
+            </div>
+            <p class="lobby-note" id="lobbyNote"></p>
+        </div>
+    </div>
+
+    <!-- ====================== PANTALLA: CARGA ====================== -->
+    <div id="screen-loading" class="screen hidden">
+        <div class="loading">
+            <div class="spinner"></div>
+            <p id="loadingText">Cargando mapa…</p>
+        </div>
+    </div>
+
+    <!-- ====================== PANTALLA: JUEGO ====================== -->
+    <div id="screen-game" class="screen hidden">
+        <div id="pano"></div>
+
+        <!-- HUD superior -->
+        <div class="hud-top">
+            <div class="hud-left">
+                <div class="hud-round" id="hudRound">RONDA 1/5</div>
+                <div class="hud-timer" id="hudTimer">60</div>
+            </div>
+
+            <div class="hud-compass" id="hudCompass">
+                <div class="compass-ring">
+                    <span class="compass-arrow" id="compassArrow">N</span>
+                </div>
+            </div>
+
+            <div class="hud-right">
+                <div class="hud-score" id="hudScore">
+                    <span class="hud-score-label">PUNTOS</span>
+                    <span class="hud-score-value" id="hudScoreValue">0</span>
+                </div>
+                <div class="hud-hp hidden" id="hudHp">
+                    <div class="hp-row">
+                        <span class="hp-name" id="hpMeName">Tú</span>
+                        <div class="hp-bar"><div class="hp-fill hp-me" id="hpMeFill"></div></div>
+                        <span class="hp-val" id="hpMeVal">6000</span>
+                    </div>
+                    <div class="hp-row">
+                        <span class="hp-name" id="hpOppName">Rival</span>
+                        <div class="hp-bar"><div class="hp-fill hp-opp" id="hpOppFill"></div></div>
+                        <span class="hp-val" id="hpOppVal">6000</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <button class="btn-leave" id="leaveGameBtn" title="Abandonar partida">✕</button>
+
+        <!-- Banner: preparándose (fase previa a adivinar) -->
+        <div class="prepare-banner hidden" id="prepareBanner">
+            <span class="prepare-label">Prepárate</span>
+            <span class="prepare-number" id="prepareNumber">3</span>
+        </div>
+
+        <!-- Banner: el rival ya adivinó -->
+        <div class="countdown-banner hidden" id="countdownBanner">
+            <span class="countdown-label">¡Tu rival ya adivinó!</span>
+            <span class="countdown-number" id="countdownNumber">15</span>
+        </div>
+
+        <!-- Banner: esperando al rival -->
+        <div class="waiting-banner hidden" id="waitingBanner">Esperando al rival…</div>
+
+        <!-- Controles inferiores -->
+        <div class="hud-bottom">
+            <button class="btn-ghost" id="recenterBtn" title="Recentrar la vista">⌖ Recentrar</button>
+            <button class="btn-confirm" id="confirmBtn" disabled>CONFIRMAR GUESS</button>
+        </div>
+
+        <!-- Minimapa -->
+        <div class="minimap-wrap collapsed" id="minimapWrap">
+            <button class="minimap-toggle" id="minimapToggle" title="Expandir/contraer">🗺</button>
+            <div class="minimap-panel" id="minimapPanel">
+                <div id="minimap"></div>
+            </div>
+        </div>
+
+        <!-- Panel: resumen de ronda -->
+        <div class="panel-overlay hidden" id="resultPanel">
+            <div class="panel">
+                <h2 class="panel-title" id="resultTitle"></h2>
+                <div class="result-stats" id="resultStats"></div>
+                <button class="btn-primary hidden" id="resultNextBtn">Siguiente ronda →</button>
+                <p class="panel-note hidden" id="resultNote"></p>
+            </div>
+        </div>
+
+        <!-- Panel: fin de partida -->
+        <div class="panel-overlay hidden" id="gameOverPanel">
+            <div class="panel">
+                <h2 class="panel-title" id="gameOverTitle"></h2>
+                <div class="result-stats" id="gameOverStats"></div>
+                <button class="btn-primary" id="gameOverBtn">Volver al menú</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast"></div>
+
+    <!-- CDNs -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+    <script type="module" src="js/app.js"></script>
+</body>
+</html>

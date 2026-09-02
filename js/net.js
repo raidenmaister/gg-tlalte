@@ -339,25 +339,47 @@ export class Network {
       const name = (data.name || data.senderName || 'Anónimo').trim();
       if (this.role === 'host') {
         const lower = name.toLowerCase();
-        // Soporte de reconexión / deduplicación: si ya existía un invitado con este mismo nombre,
-        // reemplazamos el peerId anterior por el nuevo sin bloquearlo por 'full'.
+
+        // 1. Verificar si este nombre ya estaba previamente en la sala
+        let existingPeerId = null;
         for (const [oldPeerId, oldName] of this.guestNames.entries()) {
-          if (oldName.trim().toLowerCase() === lower && oldPeerId !== peerId) {
-            LOG('Reconexión / deduplicación de invitado:', name, 'reemplazando', oldPeerId, 'por', peerId);
-            this.guestNames.delete(oldPeerId);
-            const oldConn = this.conns.get(oldPeerId);
-            if (oldConn) {
-              try { oldConn.close(); } catch (e) {}
-              this.conns.delete(oldPeerId);
-            }
+          if (oldName.trim().toLowerCase() === lower) {
+            existingPeerId = oldPeerId;
+            break;
           }
         }
 
-        if (this.guestNames.size >= this.limit - 1 && !this.guestNames.has(peerId)) {
+        // 2. Calcular cuántos invitados únicos distintos hay actualmente
+        const uniqueOtherGuests = new Set();
+        for (const [id, n] of this.guestNames.entries()) {
+          const nLower = n.trim().toLowerCase();
+          if (nLower !== lower) {
+            uniqueOtherGuests.add(nLower);
+          }
+        }
+
+        // Capacidad total de invitados = limit - 1 (el anfitrión ocupa 1 slot)
+        const maxGuestSlots = Math.max(1, this.limit - 1);
+
+        // Si es un jugador nuevo y ya no hay cupos para nuevos invitados:
+        if (!existingPeerId && uniqueOtherGuests.size >= maxGuestSlots) {
+          LOG('Sala llena, rechazando a', name, { uniqueOthers: uniqueOtherGuests.size, maxGuestSlots });
           this.sendTo(peerId, { type: 'full' });
           return;
         }
-        const isNew = !this.guestNames.has(peerId);
+
+        // 3. Si es reconexión o reemplazo de peerId anterior del mismo jugador:
+        if (existingPeerId && existingPeerId !== peerId) {
+          LOG('Actualizando conexión de invitado:', name, existingPeerId, '->', peerId);
+          this.guestNames.delete(existingPeerId);
+          const oldConn = this.conns.get(existingPeerId);
+          if (oldConn) {
+            try { oldConn.close(); } catch (e) {}
+            this.conns.delete(existingPeerId);
+          }
+        }
+
+        const isNew = !existingPeerId;
         this.guestNames.set(peerId, name);
         this.remoteName = name;
         if (isNew && this.cb.onGuestJoin) this.cb.onGuestJoin(peerId, name);
@@ -572,12 +594,6 @@ export class Network {
     this.peer.on('connection', (conn) => {
       LOG('peer connection entrante P2P', conn.peer);
       if (this.role !== 'host') return;
-
-      if (this.guestNames.size >= this.limit - 1) {
-        conn.send(JSON.stringify({ type: 'full' }));
-        setTimeout(() => conn.close(), 300);
-        return;
-      }
 
       this.conns.set(conn.peer, conn);
       this._wireConn(conn, false);

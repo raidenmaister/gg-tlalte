@@ -1,12 +1,12 @@
 // ============================================================================
 // net.js — Capa de red P2P con PeerJS (WebRTC DataChannel).
 //
-// Protocolo (mensajes JSON sobre un DataChannel 1:1 host<->guest):
+// Topología estrella: el anfitrión se conecta 1:1 con cada invitado.
 //   guest -> host: { type:'join', name }
 //                  { type:'guess', round, lat, lng }   (lat/lng null = sin guess)
-//   host -> guest: { type:'players', players }
+//   host -> guest: { type:'players', players:[...], config:{rounds,limit} }
 //                  { type:'full' }
-//                  { type:'start', seed, rounds, locations:[...], mode }
+//                  { type:'start', seed, rounds, locations:[...], mode:'multi' }
 //                  { type:'roundStart', round, locationIndex, duration }
 //                  { type:'tick', round, remaining }
 //                  { type:'opponentGuessed' }
@@ -14,7 +14,6 @@
 //                  { type:'gameOver', ... }
 //
 // Salas públicas: el anfitrión se registra en `api.php` (listado + heartbeat).
-// El listado público es opcional y solo funciona con un servidor PHP.
 // ============================================================================
 
 import { CONFIG } from './config.js';
@@ -27,24 +26,32 @@ export class Network {
    * @param {object} callbacks
    *  - onStatus(state)            'connecting' | 'host' | 'guest' | 'closed' | 'error'
    *  - onGuestJoin(peerId, name)
-   *  - onGuestLeave()
+   *  - onGuestLeave(peerId)       peerId null = el guest perdió al host
+   *  - onPlayers(players, config)
    *  - onError(type)              'NO_EXISTE' | 'LLENA' | 'unavailable-id' | ...
-   *  - onMessage(data)            mensaje decodificado
+   *  - onMessage(data, fromPeerId) mensaje decodificado
    */
   constructor(callbacks = {}) {
     this.cb = callbacks;
     this.peer = null;
-    this.conn = null;
-    this.role = null;        // 'host' | 'guest'
+    this.role = null;           // 'host' | 'guest'
     this.myId = null;
-    this.roomCode = '';      // código corto (solo privado)
-    this.roomId = '';        // ID completo de PeerJS (PREFIX + código)
+    this.roomCode = '';         // código corto (solo privado)
+    this.roomId = '';           // ID completo de PeerJS (PREFIX + código)
     this.isPublic = false;
     this.remoteName = '';
+
+    this.conns = new Map();     // peerId -> DataConnection ('__host__' en guest)
+    this.guestNames = new Map();// peerId -> nombre
+
+    this.rounds = CONFIG.DUEL_ROUNDS;
+    this.limit = CONFIG.ROOM_MAX_PLAYERS;
+
+    this._localName = '';
+    this._guestPlayers = [];
     this._targetPeerId = '';
     this._publicCount = 1;
     this._heartbeat = null;
-    this._retry = 0;
     this._closing = false;
   }
 
@@ -52,15 +59,36 @@ export class Network {
     return this.role === 'host';
   }
 
-  get connected() {
-    return !!(this.conn && this.conn.open);
+  get players() {
+    if (this.isHost) {
+      const list = [{ id: this.myId, name: this._localName || 'Anfitrión', isHost: true }];
+      this.guestNames.forEach((name, peerId) => {
+        list.push({ id: peerId, name, isHost: false });
+      });
+      return list;
+    }
+    return this._guestPlayers || [];
   }
 
-  /** Serializa y envía un mensaje al otro jugador. */
+  /** Envía un mensaje al host (solo guest). */
   send(obj) {
-    if (this.conn && this.conn.open) {
-      this.conn.send(JSON.stringify(obj));
+    const conn = this.conns.get('__host__');
+    if (conn && conn.open) {
+      conn.send(JSON.stringify(obj));
     }
+  }
+
+  /**
+   * Envía un mensaje a todos los invitados (solo host).
+   * Serializa UNA sola vez para no repetir JSON.stringify por cada peer.
+   */
+  broadcast(obj) {
+    let raw = null;
+    this.conns.forEach((conn, peerId) => {
+      if (peerId === '__host__' || !conn || !conn.open) return;
+      if (raw === null) raw = JSON.stringify(obj);
+      conn.send(raw);
+    });
   }
 
   /* ------------------------- API de salas públicas ---------------------- */
@@ -91,7 +119,7 @@ export class Network {
   }
 
   _registerPublicRoom(name) {
-    this._api('create', { id: this.roomId, name, limit: 2 }).then((ok) => {
+    this._api('create', { id: this.roomId, name, limit: this.limit }).then((ok) => {
       if (!ok && this.cb.onError) this.cb.onError('public-register');
     });
     this._startHeartbeat();
@@ -100,9 +128,7 @@ export class Network {
   _startHeartbeat() {
     this._clearHeartbeat();
     this._heartbeat = setInterval(() => {
-      this._api('update', { id: this.roomId, count: this._publicCount }).catch(
-        () => {}
-      );
+      this._api('update', { id: this.roomId, count: this._publicCount }).catch(() => {});
     }, 5000);
   }
 
@@ -117,22 +143,29 @@ export class Network {
   updatePublicCount(count) {
     this._publicCount = Math.max(1, count || 1);
     if (this.isHost && this.isPublic && this.roomId) {
-      this._api('update', { id: this.roomId, count: this._publicCount }).catch(
-        () => {}
-      );
+      this._api('update', { id: this.roomId, count: this._publicCount }).catch(() => {});
     }
   }
 
   /* ------------------------------ HOST ---------------------------------- */
-  createRoom(name, isPublic = false) {
+  createRoom(name, isPublic = false, opts = {}) {
+    this._localName = name;
     this.role = 'host';
     this.isPublic = isPublic;
+    this.rounds = opts.rounds || CONFIG.DUEL_ROUNDS;
+    this.limit = Math.min(
+      CONFIG.ROOM_MAX_PLAYERS,
+      Math.max(CONFIG.ROOM_MIN_PLAYERS, opts.limit || CONFIG.ROOM_MAX_PLAYERS)
+    );
+    this.conns.clear();
+    this.guestNames.clear();
     this._generateHostId();
     this._openPeer(this.roomId, name);
   }
 
   /* ------------------------------ GUEST --------------------------------- */
   joinRoom(code, name) {
+    this._localName = name;
     this.role = 'guest';
     this.isPublic = false;
     this.roomCode = code;
@@ -141,6 +174,7 @@ export class Network {
   }
 
   joinPublicRoom(peerId, name) {
+    this._localName = name;
     this.role = 'guest';
     this.isPublic = true;
     this.roomCode = '';
@@ -159,7 +193,6 @@ export class Network {
   }
 
   _openPeer(peerId, name) {
-    this._retry = 0;
     this._closing = false;
     if (this.cb.onStatus) this.cb.onStatus('connecting');
 
@@ -176,6 +209,7 @@ export class Network {
 
       // Guest: conectar con el host.
       const conn = this.peer.connect(this._targetPeerId, { reliable: true });
+      this.conns.set('__host__', conn);
       this._wireConn(conn, true);
       conn.on('open', () => {
         conn.send(JSON.stringify({ type: 'join', name }));
@@ -185,19 +219,21 @@ export class Network {
 
     this.peer.on('connection', (conn) => {
       if (this.role !== 'host') return;
-      if (this.conn && this.conn.open) {
-        // Ya hay un rival: rechazar conexiones extra.
+
+      // Rechazar si ya se alcanzó el límite.
+      if (this.guestNames.size >= this.limit - 1) {
         conn.send(JSON.stringify({ type: 'full' }));
         setTimeout(() => conn.close(), 300);
         return;
       }
+
+      this.conns.set(conn.peer, conn);
       this._wireConn(conn, false);
     });
 
     this.peer.on('error', (err) => {
       const type = err && err.type ? err.type : 'unknown';
       if (type === 'unavailable-id' && this.role === 'host') {
-        // El ID ya estaba en uso: regenerar y reintentar.
         this.peer.destroy();
         this._generateHostId();
         this._openPeer(this.roomId, name);
@@ -211,49 +247,54 @@ export class Network {
     });
 
     this.peer.on('disconnected', () => {
-      // Pérdida de conexión con el servidor de señalización: reintentar.
       if (this.peer && !this.peer.destroyed) {
-        try {
-          this.peer.reconnect();
-        } catch (e) {}
+        try { this.peer.reconnect(); } catch (e) {}
       }
     });
   }
 
   _wireConn(conn, isGuestSide) {
-    this.conn = conn;
-
     conn.on('data', (raw) => {
       let data = raw;
       if (typeof raw === 'string') {
-        try {
-          data = JSON.parse(raw);
-        } catch (e) {
-          data = { type: 'raw', raw };
-        }
+        try { data = JSON.parse(raw); } catch (e) { data = { type: 'raw', raw }; }
       }
 
       if (data.type === 'join') {
-        this.remoteName = data.name;
-        if (this.cb.onGuestJoin) this.cb.onGuestJoin(conn.peer, data.name);
+        const name = data.name || 'Anónimo';
+        if (this.role === 'host') {
+          if (this.guestNames.size >= this.limit - 1) {
+            conn.send(JSON.stringify({ type: 'full' }));
+            setTimeout(() => conn.close(), 300);
+            return;
+          }
+          this.guestNames.set(conn.peer, name);
+          this.remoteName = name;
+          if (this.cb.onGuestJoin) this.cb.onGuestJoin(conn.peer, name);
+          this._syncPlayers();
+        }
         return;
       }
+
       if (data.type === 'full') {
         this._emitError('LLENA');
         return;
       }
 
-      if (this.cb.onMessage) this.cb.onMessage(data);
+      if (this.cb.onMessage) this.cb.onMessage(data, conn.peer);
     });
 
     conn.on('close', () => {
       if (this._closing) return;
-      this.conn = null;
       if (isGuestSide) {
-        // El host cerró o se perdió la conexión.
-        if (this.cb.onGuestLeave) this.cb.onGuestLeave('host-left');
+        this.conns.delete('__host__');
+        if (this.cb.onGuestLeave) this.cb.onGuestLeave(null);
       } else {
-        if (this.cb.onGuestLeave) this.cb.onGuestLeave('guest-left');
+        const peerId = conn.peer;
+        this.conns.delete(peerId);
+        this.guestNames.delete(peerId);
+        this.updatePublicCount(this.players.length);
+        if (this.cb.onGuestLeave) this.cb.onGuestLeave(peerId);
       }
     });
 
@@ -262,28 +303,34 @@ export class Network {
     });
   }
 
+  _syncPlayers() {
+    if (!this.isHost) return;
+    const players = this.players;
+    const config = { rounds: this.rounds, limit: this.limit };
+    this.broadcast({ type: 'players', players, config });
+    this.updatePublicCount(players.length);
+    if (this.cb.onPlayers) this.cb.onPlayers(players, config);
+  }
+
   _emitError(type) {
     if (this.cb.onStatus) this.cb.onStatus('error');
     if (this.cb.onError) this.cb.onError(type);
   }
 
-  /** Cierra la conexión y destruye el Peer. */
+  /** Cierra todas las conexiones y destruye el Peer. */
   leave() {
     this._closing = true;
     this._clearHeartbeat();
     if (this.role === 'host' && this.isPublic && this.roomId) {
       this._api('delete', { id: this.roomId }).catch(() => {});
     }
-    if (this.conn) {
-      try {
-        this.conn.close();
-      } catch (e) {}
-      this.conn = null;
-    }
+    this.conns.forEach((conn) => {
+      try { conn.close(); } catch (e) {}
+    });
+    this.conns.clear();
+    this.guestNames.clear();
     if (this.peer) {
-      try {
-        this.peer.destroy();
-      } catch (e) {}
+      try { this.peer.destroy(); } catch (e) {}
       this.peer = null;
     }
     this.role = null;
@@ -292,6 +339,7 @@ export class Network {
     this.roomId = '';
     this.isPublic = false;
     this.remoteName = '';
+    this._guestPlayers = [];
     if (this.cb.onStatus) this.cb.onStatus('closed');
   }
 }

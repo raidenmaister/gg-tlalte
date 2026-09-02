@@ -2,7 +2,7 @@
 // app.js — Punto de entrada. Coordina UI, red, visor panorámico y juego.
 // ============================================================================
 
-import { $, formatKm, formatNumber } from './utils.js';
+import { $, formatKm, formatNumber, clamp } from './utils.js';
 import { CONFIG } from './config.js';
 import { audio } from './audio.js';
 import { PanoramaViewer } from './panorama.js';
@@ -139,6 +139,8 @@ function collapseMinimap() {
 
 /* --------------------------- Render: HUD ------------------------------- */
 function renderHud(hud) {
+  const hudTop = $('.hud-top');
+  if (hudTop) hudTop.classList.remove('over-map');
   collapseMinimap();
   minimap.setFullscreen(false);
   $('#resultPanel').classList.add('hidden');
@@ -147,19 +149,17 @@ function renderHud(hud) {
   const roundLabel = $('#hudRound');
   if (roundLabel) roundLabel.textContent = `RONDA ${hud.round}/${hud.total}`;
 
-  const isDuel = hud.mode === 'duel';
-  $('#hudScore').classList.toggle('hidden', isDuel);
-  $('#hudHp').classList.toggle('hidden', !isDuel);
+  const isMulti = hud.mode === 'multi';
+  $('#hudScore').classList.toggle('hidden', isMulti);
+  $('#hudHp').classList.toggle('hidden', !isMulti);
 
-  if (!isDuel) {
+  if (!isMulti) {
     $('#hudScoreValue').textContent = formatNumber(hud.me.score);
   } else {
-    updateHP(hud.me.hp, hud.opp.hp);
-    $('#hpMeName').textContent = hud.me.name;
-    $('#hpOppName').textContent = hud.opp.name;
+    renderMultiHp(hud.players);
   }
 
-  if (hud.mode === 'duel') {
+  if (hud.mode === 'multi') {
     const mult = hud.multiplier ? hud.multiplier.toFixed(1) : '1.0';
     $('#hudTimer').dataset.mult = `x${mult}`;
   } else {
@@ -167,22 +167,93 @@ function renderHud(hud) {
   }
 }
 
-function updateHP(myHp, oppHp) {
-  const mePct = (myHp / CONFIG.MAX_HP) * 100;
-  const oppPct = (oppHp / CONFIG.MAX_HP) * 100;
-  const meFill = $('#hpMeFill');
-  const oppFill = $('#hpOppFill');
-  meFill.style.width = mePct + '%';
-  oppFill.style.width = oppPct + '%';
-  meFill.classList.toggle('low', mePct <= 25);
-  oppFill.classList.toggle('low', oppPct <= 25);
-  $('#hpMeVal').textContent = Math.round(myHp);
-  $('#hpOppVal').textContent = Math.round(oppHp);
+function hpColorClass(pct) {
+  if (pct <= 25) return 'hp-low';
+  if (pct <= 50) return 'hp-mid';
+  return 'hp-high';
+}
+
+function renderMultiHp(players) {
+  const box = $('#hudHp');
+  if (!box) return;
+  box.innerHTML = '';
+  (players || []).forEach((p) => {
+    const row = document.createElement('div');
+    row.className = 'hp-row';
+    row.dataset.id = p.id;
+
+    const name = document.createElement('span');
+    name.className = 'hp-name';
+    name.textContent = p.name;
+
+    const bar = document.createElement('div');
+    bar.className = 'hp-bar';
+    const fill = document.createElement('div');
+    const pct = clamp((p.hp / CONFIG.MAX_HP) * 100, 0, 100);
+    fill.className = 'hp-fill ' + hpColorClass(pct);
+    fill.style.width = pct + '%';
+    bar.appendChild(fill);
+
+    const val = document.createElement('span');
+    val.className = 'hp-val';
+    val.textContent = Math.round(p.hp);
+
+    row.appendChild(name);
+    row.appendChild(bar);
+    row.appendChild(val);
+    box.appendChild(row);
+  });
+}
+
+/** Anima el descuento de vida al resolverse la ronda multijugador. */
+function animateMultiHp(result) {
+  const box = $('#hudHp');
+  if (!box) return;
+
+  (result.players || []).forEach((p) => {
+    const row = box.querySelector(`.hp-row[data-id="${p.id}"]`);
+    if (!row) return;
+
+    const bar = row.querySelector('.hp-bar');
+    const fill = row.querySelector('.hp-fill');
+    const val = row.querySelector('.hp-val');
+    if (!bar || !fill || !val) return;
+
+    const damage = p.damage || 0;
+    if (damage <= 0) return;
+
+    const beforeHp = clamp(p.hp + damage, 0, CONFIG.MAX_HP);
+    const beforePct = (beforeHp / CONFIG.MAX_HP) * 100;
+    const afterPct = (p.hp / CONFIG.MAX_HP) * 100;
+    const damagePct = (damage / CONFIG.MAX_HP) * 100;
+
+    // Estado previo al daño + capa roja parpadeante del tramo que se pierde.
+    fill.style.width = beforePct + '%';
+    val.textContent = Math.round(beforeHp);
+
+    const layer = document.createElement('div');
+    layer.className = 'hp-damage';
+    layer.style.left = afterPct + '%';
+    layer.style.width = damagePct + '%';
+    bar.appendChild(layer);
+
+    setTimeout(() => {
+      // Se aplica el daño: desaparece la capa y la barra queda con su color real.
+      layer.remove();
+      fill.style.width = afterPct + '%';
+      fill.className = 'hp-fill ' + hpColorClass(afterPct);
+      val.textContent = Math.round(p.hp);
+    }, 1400);
+  });
 }
 
 function renderTimer({ seconds, danger }) {
   const el = $('#hudTimer');
-  el.textContent = String(Math.max(0, seconds));
+  if (seconds == null) {
+    el.textContent = '';
+  } else {
+    el.textContent = String(Math.max(0, seconds));
+  }
   el.classList.toggle('danger', !!danger);
 }
 
@@ -234,23 +305,30 @@ function renderResult(result) {
   $('#gameOverPanel').classList.add('hidden');
 
   // Solo: mapa a pantalla completa + botón flotante de "siguiente".
-  // Duelo: mantiene el panel con la info y el minimapa expandido.
+  // Multijugador: mapa a pantalla completa con las chinchetas, sin cuadro de puntos.
   if (result.mode === 'solo') {
     minimap.setFullscreen(true);
     $('#resultPanel').classList.add('result-overlay');
   } else {
-    minimap.setFullscreen(false);
+    minimap.setFullscreen(true);
     $('#resultPanel').classList.remove('result-overlay');
-    expandMinimap(true);
+    $('#resultPanel').classList.add('hidden');
+    const hudTop = $('.hud-top');
+    if (hudTop) hudTop.classList.add('over-map');
   }
 
   // Revela la respuesta en el mapa (fitBounds con el tamaño ya correcto).
   minimap.setInteractive(false);
-  minimap.reveal({
-    real: result.real,
-    mine: result.mine,
-    opp: result.opp,
-  });
+  if (result.mode === 'multi') {
+    minimap.revealMulti(result.players, result.real);
+    animateMultiHp(result);
+  } else {
+    minimap.reveal({
+      real: result.real,
+      mine: result.mine,
+      opp: result.opp,
+    });
+  }
 
   const title = $('#resultTitle');
   const stats = $('#resultStats');
@@ -270,32 +348,31 @@ function renderResult(result) {
     note.classList.add('hidden');
     $('#hudScoreValue').textContent = formatNumber(result.myTotalScore);
   } else {
-    const won = result.won;
-    if (won === null) {
-      title.textContent = 'Empate';
-      title.className = 'panel-title panel-title-neutral';
-    } else if (won) {
+    // Multijugador
+    if (result.wonRound) {
       title.textContent = '¡Ganaste la ronda!';
       title.className = 'panel-title panel-title-win';
     } else {
-      title.textContent = 'Perdiste la ronda';
-      title.className = 'panel-title panel-title-lose';
+      title.textContent = 'Ronda completada';
+      title.className = 'panel-title panel-title-neutral';
     }
 
-    stats.innerHTML = [
-      statRow('Tú', `${formatNumber(result.myScore)} pts · ${result.myDistanceKm != null ? formatKm(result.myDistanceKm) : 'sin guess'}`),
-      statRow(result.names.opp, `${formatNumber(result.oppScore)} pts · ${result.oppDistanceKm != null ? formatKm(result.oppDistanceKm) : 'sin guess'}`),
-      statRow('Multiplicador', 'x' + result.multiplier.toFixed(1)),
-      statRow('Daño infligido', result.damage > 0 ? '-' + formatNumber(result.damage) + ' HP' : '0'),
-    ].join('');
+    stats.innerHTML = result.players.map((p) =>
+      statRow(
+        p.name,
+        `${formatNumber(p.score)} pts · ${p.distance != null ? formatKm(p.distance) : 'sin guess'}` +
+        (p.damage > 0 ? ` · -${formatNumber(p.damage)} HP` : '')
+      )
+    ).join('');
 
     nextBtn.classList.add('hidden');
     note.classList.remove('hidden');
     note.textContent = 'Siguiente ronda en unos segundos…';
-    updateHP(result.myHp, result.oppHp);
   }
 
-  $('#resultPanel').classList.remove('hidden');
+  if (result.mode === 'solo') {
+    $('#resultPanel').classList.remove('hidden');
+  }
 }
 
 async function handleGameOver(result) {
@@ -312,6 +389,8 @@ async function handleGameOver(result) {
 
 function renderGameOver(result) {
   resetGuessUI();
+  const hudTop = $('.hud-top');
+  if (hudTop) hudTop.classList.remove('over-map');
   $('#resultPanel').classList.add('hidden');
   $('#resultPanel').classList.remove('result-overlay');
   minimap.setFullscreen(false);
@@ -329,21 +408,20 @@ function renderGameOver(result) {
       statRow('Tiempo', result.timedOut ? 'Límite alcanzado' : formatTime(result.timeMs)),
     ].join('');
   } else {
-    if (result.won === null) {
-      title.textContent = 'Empate';
-      title.className = 'panel-title panel-title-neutral';
-    } else if (result.won) {
+    // Multijugador: ranking final.
+    if (result.won) {
       title.textContent = '¡VICTORIA!';
       title.className = 'panel-title panel-title-win';
     } else {
-      title.textContent = 'Derrota';
-      title.className = 'panel-title panel-title-lose';
+      title.textContent = 'Fin de partida';
+      title.className = 'panel-title panel-title-neutral';
     }
-    stats.innerHTML = [
-      statRow(result.names.me, `${formatNumber(result.myTotalScore)} pts · ${formatNumber(result.myHp)} HP`),
-      statRow(result.names.opp, `${formatNumber(result.oppTotalScore)} pts · ${formatNumber(result.oppHp)} HP`),
-      statRow('Motivo', result.reason === 'hp' ? 'KO (vida a 0)' : 'Fin de rondas'),
-    ].join('');
+    stats.innerHTML = result.players.map((p) =>
+      statRow(
+        `#${p.rank} ${p.name}`,
+        `${formatNumber(p.score)} pts · ${formatNumber(p.hp)} HP`
+      )
+    ).join('');
   }
 
   $('#gameOverPanel').classList.remove('hidden');
@@ -359,6 +437,8 @@ function resetGuessUI() {
 
 function resetGameUI() {
   resetGuessUI();
+  const hudTop = $('.hud-top');
+  if (hudTop) hudTop.classList.remove('over-map');
   $('#resultPanel').classList.add('hidden');
   $('#resultPanel').classList.remove('result-overlay');
   $('#gameOverPanel').classList.add('hidden');
@@ -405,17 +485,21 @@ function renderLobby() {
     });
   }
 
-  $('#playersCount').textContent = `${players.length} / 2`;
+  const limit = net.limit || CONFIG.ROOM_MAX_PLAYERS;
+  $('#playersCount').textContent = `${players.length} / ${limit}`;
+
+  const roundsInfo = $('#roomRoundsInfo');
+  if (roundsInfo) roundsInfo.textContent = `${net.rounds || CONFIG.DUEL_ROUNDS} rondas`;
 
   const startBtn = $('#startBtn');
   startBtn.classList.toggle('hidden', !isHost);
-  startBtn.disabled = !(isHost && players.length >= 2);
+  startBtn.disabled = !(isHost && players.length >= CONFIG.ROOM_MIN_PLAYERS);
 
   const note = $('#lobbyNote');
   if (isHost) {
-    note.textContent = players.length >= 2
+    note.textContent = players.length >= CONFIG.ROOM_MIN_PLAYERS
       ? 'Todo listo. ¡Inicia la partida!'
-      : (isPublic ? 'Sala pública. Espera a que alguien se una…' : 'Comparte el código y espera a tu rival…');
+      : (isPublic ? 'Sala pública. Espera a que alguien se una…' : 'Comparte el código y espera jugadores…');
   } else {
     note.textContent = 'Esperando a que el anfitrión inicie la partida…';
   }
@@ -538,10 +622,13 @@ function renderPublicList(rooms) {
 }
 
 /* --------------------------- Red --------------------------------------- */
-function handleNetMessage(data) {
+function handleNetMessage(data, fromPeerId) {
   if (data.type === 'players') {
     players = data.players || [];
-    if (data.hostName) net.remoteName = data.hostName;
+    if (data.config) {
+      net.rounds = data.config.rounds;
+      net.limit = data.config.limit;
+    }
     renderLobby();
     return;
   }
@@ -550,7 +637,7 @@ function handleNetMessage(data) {
     guestPrepareStart();
     return;
   }
-  game.handleNetworkMessage(data);
+  game.handleNetworkMessage(data, fromPeerId);
 }
 
 async function guestPrepareStart() {
@@ -608,7 +695,9 @@ async function hostStartGame() {
 
 function createRoom(isPublic = false) {
   audio.ensure();
-  net.createRoom(meName, isPublic);
+  const rounds = Number($('#roomRounds').value) || CONFIG.DUEL_ROUNDS;
+  const limit = Number($('#roomLimit').value) || CONFIG.ROOM_MAX_PLAYERS;
+  net.createRoom(meName, isPublic, { rounds, limit });
 }
 
 function joinRoom(code) {
@@ -787,7 +876,7 @@ function wire() {
     audio.click();
   });
   $('#leaveGameBtn').addEventListener('click', () => {
-    if (game.mode === 'duel') leaveEverything();
+    if (game.mode === 'multi') leaveEverything();
     resetToMenu('Partida abandonada');
   });
   $('#resultNextBtn').addEventListener('click', () => {
@@ -797,7 +886,7 @@ function wire() {
     game.nextRound();
   });
   $('#gameOverBtn').addEventListener('click', () => {
-    if (game.mode === 'duel') leaveEverything();
+    if (game.mode === 'multi') leaveEverything();
     resetToMenu();
   });
 
@@ -809,12 +898,6 @@ function wire() {
   });
   wrap.addEventListener('mouseleave', () => {
     if (!minimapPinned) wrap.classList.remove('expanded');
-  });
-  $('#minimapToggle').addEventListener('click', () => {
-    minimapPinned = !minimapPinned;
-    wrap.classList.toggle('pinned', minimapPinned);
-    wrap.classList.toggle('expanded', minimapPinned);
-    minimap.refreshSize();
   });
 }
 
@@ -849,31 +932,30 @@ function wireNet() {
   };
 
   net.cb.onGuestJoin = (peerId, name) => {
-    net.remoteName = name;
-    players = [
-      { id: net.myId, name: meName, isHost: true },
-      { id: peerId, name, isHost: false },
-    ];
+    players = net.players;
     renderLobby();
-    net.send({ type: 'players', players, hostName: meName });
-    net.updatePublicCount(players.length);
     audio.join();
     showToast(`${name} se unió a la sala`);
   };
 
-  net.cb.onGuestLeave = (reason) => {
+  net.cb.onPlayers = (list, config) => {
+    players = list;
+    renderLobby();
+  };
+
+  net.cb.onGuestLeave = (peerId) => {
     if (net.role === 'host') {
-      if (reason === 'guest-left') {
-        players = players.filter((p) => p.isHost);
-        net.updatePublicCount(players.length);
-        if (gameInProgress()) {
+      players = net.players;
+      renderLobby();
+      if (gameInProgress()) {
+        game.removePlayer(peerId);
+        if (players.length < CONFIG.ROOM_MIN_PLAYERS) {
           leaveEverything();
-          resetToMenu('El rival abandonó la partida');
+          resetToMenu('No quedan suficientes jugadores');
           return;
         }
-        renderLobby();
-        showToast('El rival se fue', 'error');
       }
+      showToast('Un jugador abandonó la sala', 'error');
     } else {
       // Guest perdió al host.
       leaveEverything();

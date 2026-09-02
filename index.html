@@ -38,7 +38,7 @@
                 <button class="mode-card" id="createBtn">
                     <span class="icon">＋</span>
                     <h2>Crear sala</h2>
-                    <p>Duelo 1v1 · genera un código para tu rival.</p>
+                    <p>Partida multijugador · genera un código para tu sala.</p>
                 </button>
                 <button class="mode-card" id="joinBtn">
                     <span class="icon">→</span>
@@ -93,6 +93,31 @@
                 <button class="btn-primary" id="createPublicBtn">🌐 Pública</button>
                 <button class="btn-ghost" id="createPrivateBtn">🔒 Privada</button>
             </div>
+
+            <div class="room-config">
+                <label class="config-label" for="roomRounds">Rondas</label>
+                <select id="roomRounds" class="config-select">
+                    <option value="5" selected>5 rondas</option>
+                    <option value="7">7 rondas</option>
+                    <option value="10">10 rondas</option>
+                </select>
+
+                <label class="config-label" for="roomLimit">Tamaño máximo de sala</label>
+                <select id="roomLimit" class="config-select">
+                    <option value="2" selected>2 jugadores</option>
+                    <option value="3">3 jugadores</option>
+                    <option value="4">4 jugadores</option>
+                    <option value="5">5 jugadores</option>
+                    <option value="6">6 jugadores</option>
+                    <option value="7">7 jugadores</option>
+                    <option value="8">8 jugadores</option>
+                    <option value="9">9 jugadores</option>
+                    <option value="10">10 jugadores</option>
+                    <option value="11">11 jugadores</option>
+                    <option value="12">12 jugadores</option>
+                </select>
+            </div>
+
             <p class="coming-soon">Pública: cualquiera puede unirse desde el listado. Privada: solo con código.</p>
             <button class="btn-ghost" id="createBackBtn">Volver</button>
         </div>
@@ -126,6 +151,7 @@
                 <div class="room-code-value" id="roomCodeValue">----</div>
                 <button class="btn-ghost btn-copy" id="copyCodeBtn">Copiar código</button>
             </div>
+            <p class="lobby-note" id="roomRoundsInfo"></p>
             <h3 class="players-title">Jugadores <span id="playersCount"></span></h3>
             <ul class="players-list" id="playersList"></ul>
             <div class="lobby-actions">
@@ -166,18 +192,7 @@
                     <span class="hud-score-label">PUNTOS</span>
                     <span class="hud-score-value" id="hudScoreValue">0</span>
                 </div>
-                <div class="hud-hp hidden" id="hudHp">
-                    <div class="hp-row">
-                        <span class="hp-name" id="hpMeName">Tú</span>
-                        <div class="hp-bar"><div class="hp-fill hp-me" id="hpMeFill"></div></div>
-                        <span class="hp-val" id="hpMeVal">6000</span>
-                    </div>
-                    <div class="hp-row">
-                        <span class="hp-name" id="hpOppName">Rival</span>
-                        <div class="hp-bar"><div class="hp-fill hp-opp" id="hpOppFill"></div></div>
-                        <span class="hp-val" id="hpOppVal">6000</span>
-                    </div>
-                </div>
+                <div class="hud-hp hidden" id="hudHp"></div>
             </div>
         </div>
 
@@ -201,12 +216,11 @@
         <!-- Controles inferiores -->
         <div class="hud-bottom">
             <button class="btn-ghost" id="recenterBtn" title="Recentrar la vista">⌖ Recentrar</button>
-            <button class="btn-confirm" id="confirmBtn" disabled>CONFIRMAR GUESS</button>
         </div>
 
-        <!-- Minimapa -->
+        <!-- Minimapa + confirmar -->
         <div class="minimap-wrap collapsed" id="minimapWrap">
-            <button class="minimap-toggle" id="minimapToggle" title="Expandir/contraer">🗺</button>
+            <button class="btn-confirm" id="confirmBtn" disabled>CONFIRMAR GUESS</button>
             <div class="minimap-panel" id="minimapPanel">
                 <div id="minimap"></div>
             </div>

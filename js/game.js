@@ -3,11 +3,11 @@
 //
 // Eventos emitidos hacia la UI (app.js):
 //   'data'        {count}                         coordenadas cargadas
-//   'hud'         {mode, round, total, me, opp, multiplier}
+//   'hud'         {mode, round, total, me, players, multiplier}
 //   'timer'       {seconds, danger}
 //   'confirm'     {enabled}                       botón confirmar habilitado
-//   'waiting'     {waiting}                       ya adiviné, espero al rival
-//   'countdown'   {seconds|null}                  banner cuenta regresiva rival
+//   'waiting'     {waiting}                       ya adiviné, espero a los demás
+//   'prepare'     {seconds|null}
 //   'result'      result                          resumen de ronda
 //   'gameover'    result                          fin de partida
 //   'toast'       {message, kind}
@@ -33,7 +33,7 @@ export class Game {
     this.coordenadas = [];
     this.meName = '';
 
-    this.mode = 'solo'; // 'solo' | 'duel'
+    this.mode = 'solo'; // 'solo' | 'multi'
     this.role = 'solo'; // 'solo' | 'host' | 'guest'
     this.state = 'idle';
 
@@ -47,28 +47,25 @@ export class Game {
     this.currentCoord = null;
 
     this.myGuess = null;
-    this.hostGuess = null;
-    this.guestGuess = null;
-    this.hostGuessed = false;
-    this.guestGuessed = false;
-    this.hostDeadline = 0;
-    this.guestDeadline = 0;
     this.roundEnd = 0;
 
-    this.hp = { me: CONFIG.MAX_HP, opp: CONFIG.MAX_HP };
-    this.scores = { me: 0, opp: 0 };
-    this.names = { me: '', opp: '' };
+    // Multijugador
+    this.players = [];        // [{id,name,score,hp,guess,guessed}]
+
+    // Solo (para no romper el leaderboard)
+    this.scores = { me: 0 };
 
     this._resolved = false;
     this._over = false;
     this._hostStarted = false;
     this._roundActive = false;
-    this.guestOffset = 0;   // reloj guest - reloj host (ms), estimado al inicio
+    this._readyCount = 0;
     this._master = null;
     this._tick = null;
-    this._countdown = null;
     this._prepare = null;
     this._resultTimer = null;
+    this._hurry = null;
+    this.hurryEnd = 0;
   }
 
   /* ------------------------------------------------------------------ */
@@ -116,42 +113,54 @@ export class Game {
     this._beginRound(1);
   }
 
-  /** Host: inicia la partida y envía la semilla/orden al guest. */
+  /** Host: inicia la partida y envía la semilla/orden a los invitados. */
   hostStart() {
     this._reset();
-    this.mode = 'duel';
+    this.mode = 'multi';
     this.role = 'host';
-    this.rounds = CONFIG.DUEL_ROUNDS;
-    this.names.me = this.meName;
-    this.names.opp = this.net.remoteName || 'Rival';
+    this.rounds = this.net.rounds || CONFIG.DUEL_ROUNDS;
+
+    this.players = this.net.players.map((p) => ({
+      id: p.id,
+      name: p.name,
+      score: 0,
+      hp: CONFIG.MAX_HP,
+      guess: null,
+      guessed: false,
+    }));
 
     const seed = (Math.random() * 0xffffffff) >>> 0;
     this.locations = pickIndices(this.coordenadas.length, this.rounds);
 
-    this.net.send({
+    this.net.broadcast({
       type: 'start',
       seed,
       rounds: this.rounds,
       locations: this.locations,
-      mode: 'duel',
-      names: { host: this.names.me, guest: this.names.opp },
+      mode: 'multi',
+      players: this.players.map((p) => ({ id: p.id, name: p.name })),
     });
 
-    // Espera el 'ready' del guest antes de lanzar la ronda 1.
-    this._hostStarted = false;
-    this.emit('toast', { message: 'Esperando a que el rival cargue…', kind: 'info' });
+    this._hostStarted = true;
+    this._readyCount = 1; // el host ya está listo
+    this.emit('toast', { message: 'Esperando a que carguen los jugadores…', kind: 'info' });
   }
 
   /** Guest: recibe el mensaje 'start' del host. */
   guestOnStart(data) {
     this._reset();
-    this.mode = 'duel';
+    this.mode = 'multi';
     this.role = 'guest';
     this.rounds = data.rounds || CONFIG.DUEL_ROUNDS;
     this.locations = data.locations || [];
-    this.names.me = data.names ? data.names.guest : this.meName;
-    this.names.opp = data.names ? data.names.host : 'Anfitrión';
-    // Espera el primer 'roundStart' del host.
+    this.players = (data.players || []).map((p) => ({
+      id: p.id,
+      name: p.name,
+      score: 0,
+      hp: CONFIG.MAX_HP,
+      guess: null,
+      guessed: false,
+    }));
     this.emit('toast', { message: '¡Comienza la partida!', kind: 'info' });
   }
 
@@ -163,17 +172,13 @@ export class Game {
     this.currentRound = 0;
     this.locations = [];
     this.myGuess = null;
-    this.hostGuess = null;
-    this.guestGuess = null;
-    this.hostGuessed = false;
-    this.guestGuessed = false;
-    this.hp = { me: CONFIG.MAX_HP, opp: CONFIG.MAX_HP };
-    this.scores = { me: 0, opp: 0 };
+    this.players = [];
+    this.scores = { me: 0 };
     this._resolved = false;
     this._over = false;
     this._hostStarted = false;
     this._roundActive = false;
-    this.guestOffset = 0;
+    this._readyCount = 0;
     this.currentCoord = null;
     this.soloTimedOut = false;
   }
@@ -184,10 +189,11 @@ export class Game {
     this._resolved = false;
     this._roundActive = false;
     this.myGuess = null;
-    this.hostGuess = null;
-    this.guestGuess = null;
-    this.hostGuessed = false;
-    this.guestGuessed = false;
+
+    this.players.forEach((p) => {
+      p.guess = null;
+      p.guessed = false;
+    });
 
     const idx = this.locations[round - 1];
     const coord = this.coordenadas[idx];
@@ -197,40 +203,35 @@ export class Game {
       this.roundHeading = Math.floor(Math.random() * 360);
     }
 
-    // Mostrar panorámica y preparar el minimapa (sin adivinar todavía).
     this.pano.setPano(coord.pano_id, this.roundHeading, 0);
     this.map.reset();
     this.map.setInteractive(false);
 
     this.emit('waiting', { waiting: false });
-    this.emit('countdown', { seconds: null });
     this.emit('confirm', { enabled: false });
     this._emitHud();
 
     const now = Date.now();
-    const prepareMs = this.mode === 'duel' ? CONFIG.PREPARE_DURATION * 1000 : 0;
+    const prepareMs = this.mode === 'multi' ? CONFIG.PREPARE_DURATION * 1000 : 0;
     const startAt = now + prepareMs;
 
     if (this.role === 'host') {
-      this.net.send({
+      this.net.broadcast({
         type: 'roundStart',
         round,
         locationIndex: idx,
         duration: CONFIG.ROUND_DURATION,
         heading: this.roundHeading,
         startAt,
-        offset: this.guestOffset,
       });
       this._startPrepare(startAt, round);
     } else {
-      // Solo: arranque inmediato.
       this._startPrepare(startAt, round);
     }
   }
 
   /**
-   * Fase "prepárate": ambos jugadores ven el panorama y cuentan atrás hasta
-   * `startAtLocal` (ya convertido al reloj local). Al llegar, activa la ronda.
+   * Fase "prepárate": cuenta atrás hasta activar la ronda.
    */
   _startPrepare(startAtLocal, round) {
     this._clearPrepare();
@@ -265,19 +266,17 @@ export class Game {
 
     const now = Date.now();
     if (this.mode === 'solo') {
-      // Temporizador global: tiempo máximo para TODAS las rondas.
       this.roundEnd = this.soloStartTime + this.soloTotalSeconds * 1000;
     } else {
-      this.roundEnd = now + CONFIG.ROUND_DURATION * 1000;
+      // Multijugador: sin límite de tiempo por ronda.
+      this.roundEnd = 0;
     }
     this.emit('timer', {
-      seconds: Math.max(0, Math.ceil((this.roundEnd - now) / 1000)),
+      seconds: this.mode === 'solo' ? Math.max(0, Math.ceil((this.roundEnd - now) / 1000)) : null,
       danger: false,
     });
 
     if (this.role === 'host') {
-      this.hostDeadline = now + CONFIG.ROUND_DURATION * 1000;
-      this.guestDeadline = now + CONFIG.ROUND_DURATION * 1000;
       this._startHostTimers();
     } else if (this.role === 'guest') {
       this._startGuestTimers();
@@ -293,23 +292,13 @@ export class Game {
     }
   }
 
-  /** Sincroniza el reloj con el guest (estima el offset guest - host). */
-  _syncClock() {
-    this.net.send({ type: 'sync', t0: Date.now() });
-  }
-
   /* ------------------------------------------------------------------ */
   /* Colocación de marcador y confirmación                               */
   /* ------------------------------------------------------------------ */
   placePick(lat, lng) {
     if (this.state === 'result' || this._over || !this._roundActive) return;
     this.myGuess = { lat, lng };
-    const guessed = this.role === 'host' ? this.hostGuessed : this.guestGuessed;
-    if (this.role === 'solo') {
-      this.emit('confirm', { enabled: true });
-    } else if (!guessed) {
-      this.emit('confirm', { enabled: true });
-    }
+    this.emit('confirm', { enabled: true });
   }
 
   confirmGuess() {
@@ -317,7 +306,7 @@ export class Game {
       this._soloConfirm();
       return;
     }
-    this._duelConfirm();
+    this._multiConfirm();
   }
 
   _soloConfirm() {
@@ -333,21 +322,9 @@ export class Game {
       total: this.rounds,
       real: { lat: this.currentCoord.lat, lng: this.currentCoord.lng },
       mine: guess,
-      opp: null,
       myScore: score,
-      oppScore: null,
       myDistanceKm: distance,
-      oppDistanceKm: null,
-      damage: null,
-      myDamageTaken: null,
-      oppDamageTaken: null,
-      multiplier: null,
-      winner: null,
-      won: null,
-      myHp: null,
-      oppHp: null,
       myTotalScore: this.scores.me,
-      oppTotalScore: null,
       names: { me: this.meName, opp: null },
     };
 
@@ -358,40 +335,83 @@ export class Game {
     this.emit('result', result);
   }
 
-  _duelConfirm() {
+  _multiConfirm() {
     if (!this.myGuess || this.state === 'result' || this._over || !this._roundActive) return;
     this.audio.confirm();
     this._submitGuess(this.myGuess);
   }
 
   _submitGuess(guess) {
-    if (this.role === 'host') {
-      if (this.hostGuessed) return;
-      this.hostGuessed = true;
-      this.hostGuess = guess;
-      this.emit('confirm', { enabled: false });
-      this.emit('waiting', { waiting: true });
-      this.emit('countdown', { seconds: null });
-      this._clearCountdown();
-      if (!this.guestGuessed) {
-        const d = Date.now() + CONFIG.OPPONENT_COUNTDOWN * 1000;
-        this.guestDeadline = Math.min(this.guestDeadline, d);
-        this.net.send({ type: 'opponentGuessed' });
-      }
-    } else if (this.role === 'guest') {
-      if (this.guestGuessed) return;
-      this.guestGuessed = true;
-      this.guestGuess = guess;
-      this.emit('confirm', { enabled: false });
-      this.emit('waiting', { waiting: true });
-      this.emit('countdown', { seconds: null });
-      this._clearCountdown();
+    const me = this.players.find((p) => p.id === this.net.myId);
+    if (me) {
+      me.guessed = true;
+      me.guess = guess;
+    }
+    this.emit('confirm', { enabled: false });
+    this.emit('waiting', { waiting: true });
+
+    if (this.role === 'guest') {
       this.net.send({
         type: 'guess',
         round: this.currentRound,
         lat: guess ? guess.lat : null,
         lng: guess ? guess.lng : null,
       });
+    } else if (this.role === 'host') {
+      if (this._allGuessed()) {
+        this._resolveMultiRound();
+      } else {
+        // Arranca el contador de 15s para los que aún no envían.
+        this._startHurry();
+      }
+    }
+  }
+
+  /** Contador de 15 segundos cuando queda al menos un jugador sin adivinar. */
+  _startHurry() {
+    if (this.hurryEnd) return;
+    this.hurryEnd = Date.now() + CONFIG.OPPONENT_COUNTDOWN * 1000;
+    this.net.broadcast({
+      type: 'hurryStart',
+      round: this.currentRound,
+      seconds: CONFIG.OPPONENT_COUNTDOWN,
+    });
+    // El propio host también ve el contador si aún no adivinó (normalmente ya lo hizo).
+    this.emit('countdown', { seconds: CONFIG.OPPONENT_COUNTDOWN });
+  }
+
+  _onHurryStart(data) {
+    if (this.role !== 'guest' || this._resolved) return;
+    this._hurryEnd = Date.now() + (data.seconds || CONFIG.OPPONENT_COUNTDOWN) * 1000;
+    this.emit('countdown', { seconds: data.seconds || CONFIG.OPPONENT_COUNTDOWN });
+    this._clearHurry();
+    this._hurry = setInterval(() => {
+      const left = Math.ceil((this._hurryEnd - Date.now()) / 1000);
+      this.emit('countdown', { seconds: left > 0 ? left : 0 });
+      if (left <= 0) {
+        this._clearHurry();
+        this.emit('countdown', { seconds: null });
+      }
+    }, 1000);
+  }
+
+  _clearHurry() {
+    if (this._hurry) {
+      clearInterval(this._hurry);
+      this._hurry = null;
+    }
+  }
+
+  _allGuessed() {
+    return this.players.length > 0 && this.players.every((p) => p.guessed);
+  }
+
+  /** Elimina a un jugador desconectado durante la partida. */
+  removePlayer(peerId) {
+    if (!peerId) return;
+    this.players = this.players.filter((p) => p.id !== peerId);
+    if (this.players.length > 0 && this.players.every((p) => p.guessed) && !this._resolved) {
+      this._resolveMultiRound();
     }
   }
 
@@ -400,51 +420,24 @@ export class Game {
   /* ------------------------------------------------------------------ */
   _startHostTimers() {
     this._clearTimers();
-    let lastSecond = -1;
-
     this._master = setInterval(() => {
-      const now = Date.now();
-
-      // Auto-submit por vencimiento del plazo (principal o de 15s).
-      if (!this.hostGuessed && now >= this.hostDeadline) {
-        this.hostGuessed = true;
-        this.hostGuess = null;
-        this._clearCountdown();
-        this.emit('confirm', { enabled: false });
-        this.emit('waiting', { waiting: true });
-        this.emit('countdown', { seconds: null });
-      }
-      if (!this.guestGuessed && now >= this.guestDeadline) {
-        this.guestGuessed = true;
-        this.guestGuess = null;
-      }
-
-      // Tick del HUD (1 por segundo).
-      const remaining = Math.max(0, Math.ceil((this.roundEnd - now) / 1000));
-      if (remaining !== lastSecond) {
-        lastSecond = remaining;
-        this.emit('timer', { seconds: remaining, danger: remaining <= 5 });
-        this.net.send({ type: 'tick', round: this.currentRound, remaining });
-      }
-
-      if (this.hostGuessed && this.guestGuessed && !this._resolved) {
-        this._resolveDuelRound();
+      if (this.hurryEnd && Date.now() >= this.hurryEnd && !this._resolved) {
+        this.hurryEnd = 0;
+        // Los que no adivinaron quedan sin guess.
+        this.players.forEach((p) => {
+          if (!p.guessed) {
+            p.guessed = true;
+            p.guess = null;
+          }
+        });
+        this._resolveMultiRound();
       }
     }, 200);
   }
 
   _startGuestTimers() {
     this._clearTimers();
-    this._tick = setInterval(() => {
-      const remaining = Math.max(0, Math.ceil((this.roundEnd - Date.now()) / 1000));
-      if (remaining <= 0 && !this.guestGuessed && !this._resolved) {
-        // Respaldo: si el host no cerró la ronda, auto-submit sin guess.
-        this.guestGuessed = true;
-        this.guestGuess = null;
-        this.emit('confirm', { enabled: false });
-        this.net.send({ type: 'guess', round: this.currentRound, lat: null, lng: null });
-      }
-    }, 1000);
+    // Los invitados se gestionan con el contador de 15s al recibir hurryStart.
   }
 
   _startSoloTimers() {
@@ -459,73 +452,36 @@ export class Game {
       if (remaining <= 0) {
         this._clearTimers();
         this.soloTimedOut = true;
-        this._endSoloGame(); // se acabó el tiempo total de la partida
+        this._endSoloGame();
       }
     }, 250);
-  }
-
-  _startCountdown() {
-    this._clearCountdown();
-    let s = CONFIG.OPPONENT_COUNTDOWN;
-    this.emit('countdown', { seconds: s });
-    this._countdown = setInterval(() => {
-      s -= 1;
-      if (s <= 0) {
-        this._clearCountdown();
-        this.emit('countdown', { seconds: null });
-        if (!(this.role === 'host' ? this.hostGuessed : this.guestGuessed)) {
-          this._submitGuess(null);
-        }
-      } else {
-        this.emit('countdown', { seconds: s });
-        if (s <= 5) this.audio.countdownTick();
-      }
-    }, 1000);
-  }
-
-  _clearCountdown() {
-    if (this._countdown) {
-      clearInterval(this._countdown);
-      this._countdown = null;
-    }
   }
 
   _clearTimers() {
     if (this._master) clearInterval(this._master);
     if (this._tick) clearInterval(this._tick);
     if (this._resultTimer) clearTimeout(this._resultTimer);
-    this._clearCountdown();
     this._clearPrepare();
+    this._clearHurry();
     this._master = null;
     this._tick = null;
     this._resultTimer = null;
+    this.hurryEnd = 0;
   }
 
   /* ------------------------------------------------------------------ */
   /* Red (mensajes entrantes)                                            */
   /* ------------------------------------------------------------------ */
-  handleNetworkMessage(data) {
+  handleNetworkMessage(data, fromPeerId) {
     switch (data.type) {
       case 'ready':
-        if (this.role === 'host' && !this._hostStarted) {
-          this._hostStarted = true;
-          // Sincroniza el reloj con el guest y luego arranca la ronda 1.
-          this._syncClock();
+        if (this.role === 'host') {
+          this._readyCount += 1;
+          if (this._readyCount >= this.players.length) {
+            this._beginRound(1);
+          }
         }
         break;
-      case 'sync':
-        // Guest: responder con su marca de tiempo local (para estimar offset).
-        this.net.send({ type: 'sync_reply', t0: data.t0, t1: Date.now() });
-        break;
-      case 'sync_reply': {
-        // Host: estima offset = relojGuest - relojHost.
-        const t3 = Date.now();
-        const t0 = data.t0 || t3;
-        const t1 = data.t1 || t3;
-        this.guestOffset = ((t1 - t0) - (t3 - t1)) / 2;
-        this._beginRound(1);
-        break;
-      }
       case 'roundStart': {
         this.currentRound = data.round;
         this.state = 'playing';
@@ -533,10 +489,10 @@ export class Game {
         this._resolved = false;
         this._roundActive = false;
         this.myGuess = null;
-        this.hostGuess = null;
-        this.guestGuess = null;
-        this.hostGuessed = false;
-        this.guestGuessed = false;
+        this.players.forEach((p) => {
+          p.guess = null;
+          p.guessed = false;
+        });
 
         const coord = this.coordenadas[data.locationIndex];
         this.currentCoord = coord;
@@ -544,14 +500,11 @@ export class Game {
         this.map.reset();
         this.map.setInteractive(false);
         this.emit('waiting', { waiting: false });
-        this.emit('countdown', { seconds: null });
         this.emit('confirm', { enabled: false });
         this._emitHud();
 
-        // Convierte el startAt (reloj host) al reloj local del guest.
         const startAt = data.startAt || Date.now();
-        const offset = data.offset || 0;
-        this._startPrepare(startAt + offset, this.currentRound);
+        this._startPrepare(startAt, this.currentRound);
         break;
       }
       case 'tick':
@@ -559,25 +512,28 @@ export class Game {
           this.emit('timer', { seconds: data.remaining, danger: data.remaining <= 5 });
         }
         break;
-      case 'opponentGuessed':
-        if (!this.guestGuessed) this._startCountdown();
-        break;
       case 'guess': {
-        if (this.role !== 'host' || this.guestGuessed) break;
-        this.guestGuessed = true;
-        this.guestGuess =
-          data.lat != null && data.lng != null
-            ? { lat: data.lat, lng: data.lng }
-            : null;
-        if (!this.hostGuessed) {
-          this.hostDeadline = Math.min(
-            this.hostDeadline,
-            Date.now() + CONFIG.OPPONENT_COUNTDOWN * 1000
-          );
-          this._startCountdown();
+        if (this.role !== 'host') break;
+        const p = this.players.find((x) => x.id === fromPeerId);
+        if (p && !p.guessed) {
+          p.guessed = true;
+          p.guess =
+            data.lat != null && data.lng != null
+              ? { lat: data.lat, lng: data.lng }
+              : null;
+        }
+        if (this._allGuessed() && !this._resolved) {
+          this.hurryEnd = 0;
+          this._resolveMultiRound();
+        } else if (!this._resolved && !this.hurryEnd) {
+          // El último que confirmó dispara el contador de 15s para los demás.
+          this._startHurry();
         }
         break;
       }
+      case 'hurryStart':
+        this._onHurryStart(data);
+        break;
       case 'roundResult':
         this._onRoundResult(data);
         break;
@@ -599,79 +555,56 @@ export class Game {
   }
 
   /* ------------------------------------------------------------------ */
-  /* Resolución de ronda (duelo, host autoritativo)                      */
+  /* Resolución de ronda (multijugador, host autoritativo)               */
   /* ------------------------------------------------------------------ */
-  _resolveDuelRound() {
+  _resolveMultiRound() {
     this._resolved = true;
     this._clearTimers();
     this.state = 'result';
 
     const real = { lat: this.currentCoord.lat, lng: this.currentCoord.lng };
-    const hostScoreInfo = this._score(this.hostGuess);
-    const guestScoreInfo = this._score(this.guestGuess);
+    const scored = this.players.map((p) => {
+      const info = this._score(p.guess);
+      p.score += info.score;
+      return { ...p, distance: info.distance, roundScore: info.score };
+    });
 
-    const hostScore = hostScoreInfo.score;
-    const guestScore = guestScoreInfo.score;
-
-    let winner = null;
-    if (hostScore > guestScore) winner = 'host';
-    else if (guestScore > hostScore) winner = 'guest';
-
-    const damage = winner
-      ? computeDamage(
-          Math.max(hostScore, guestScore),
-          Math.min(hostScore, guestScore),
-          this.currentRound
-        )
-      : 0;
-
-    let hostDamageTaken = 0;
-    let guestDamageTaken = 0;
-    if (winner === 'host') {
-      guestDamageTaken = damage;
-      this.hp.opp = clamp(this.hp.opp - damage, 0, CONFIG.MAX_HP);
-    } else if (winner === 'guest') {
-      hostDamageTaken = damage;
-      this.hp.me = clamp(this.hp.me - damage, 0, CONFIG.MAX_HP);
-    }
-
-    this.scores.me += hostScore;
-    this.scores.opp += guestScore;
+    // Daño individual: si no lograste puntuación perfecta (BASE_SCORE),
+    // pierdes vida según la diferencia. El multiplicador amplifica el castigo.
+    const results = scored.map((p) => {
+      const damage = p.roundScore < CONFIG.BASE_SCORE
+        ? computeDamage(CONFIG.BASE_SCORE, p.roundScore, this.currentRound)
+        : 0;
+      p.hp = clamp(p.hp - damage, 0, CONFIG.MAX_HP);
+      return {
+        id: p.id,
+        name: p.name,
+        guess: p.guess,
+        score: p.roundScore,
+        totalScore: p.score,
+        distance: p.distance,
+        hp: p.hp,
+        damage,
+      };
+    });
 
     const neutral = {
       round: this.currentRound,
       total: this.rounds,
       real,
-      host: {
-        name: this.names.me,
-        guess: this.hostGuess,
-        score: hostScore,
-        distance: hostScoreInfo.distance,
-        hp: this.hp.me,
-        damageTaken: hostDamageTaken,
-      },
-      guest: {
-        name: this.names.opp,
-        guess: this.guestGuess,
-        score: guestScore,
-        distance: guestScoreInfo.distance,
-        hp: this.hp.opp,
-        damageTaken: guestDamageTaken,
-      },
-      winner,
-      damage,
+      players: results,
       multiplier: damageMultiplier(this.currentRound),
     };
 
-    this.net.send({ type: 'roundResult', ...neutral });
-    this._showDuelResult(neutral);
+    this.net.broadcast({ type: 'roundResult', ...neutral });
+    this._showMultiResult(neutral);
     this._scheduleAdvance();
   }
 
-  _showDuelResult(neutral) {
+  _showMultiResult(neutral) {
     const result = this._adaptResult(neutral);
-    if (neutral.damage > 0) {
-      if (result.won) this.audio.roundWin();
+    if (neutral.players.some((p) => p.damage > 0)) {
+      if (result.wonRound) this.audio.roundWin();
       else this.audio.roundLose();
     }
     this.emit('result', result);
@@ -680,45 +613,37 @@ export class Game {
   _onRoundResult(neutral) {
     this._clearTimers();
     this.state = 'result';
-    this.hp.me = this.role === 'host' ? neutral.host.hp : neutral.guest.hp;
-    this.hp.opp = this.role === 'host' ? neutral.guest.hp : neutral.host.hp;
-    this.scores.me = this.role === 'host' ? neutral.host.score + this.scores.me : neutral.guest.score + this.scores.me;
-    this.scores.opp = this.role === 'host' ? neutral.guest.score + this.scores.opp : neutral.host.score + this.scores.opp;
+
+    neutral.players.forEach((r) => {
+      const p = this.players.find((x) => x.id === r.id);
+      if (p) {
+        p.score = r.totalScore;
+        p.hp = r.hp;
+      }
+    });
 
     const result = this._adaptResult(neutral);
-    if (neutral.damage > 0) {
-      if (result.won) this.audio.roundWin();
+    if (neutral.players.some((p) => p.damage > 0)) {
+      if (result.wonRound) this.audio.roundWin();
       else this.audio.roundLose();
     }
     this.emit('result', result);
   }
 
   _adaptResult(neutral) {
-    const isHost = this.role === 'host';
-    const me = isHost ? neutral.host : neutral.guest;
-    const opp = isHost ? neutral.guest : neutral.host;
+    const me = neutral.players.find((p) => p.id === this.net.myId) || neutral.players[0];
     return {
-      mode: 'duel',
+      mode: 'multi',
       round: neutral.round,
       total: neutral.total,
       real: neutral.real,
-      mine: me.guess,
-      opp: opp.guess,
+      players: neutral.players,
+      me,
       myScore: me.score,
-      oppScore: opp.score,
-      myDistanceKm: me.distance,
-      oppDistanceKm: opp.distance,
-      damage: neutral.damage,
-      myDamageTaken: me.damageTaken,
-      oppDamageTaken: opp.damageTaken,
-      multiplier: neutral.multiplier,
-      winner: neutral.winner,
-      won: neutral.winner === this.role,
+      myTotalScore: me.totalScore,
       myHp: me.hp,
-      oppHp: opp.hp,
-      myTotalScore: this.scores.me,
-      oppTotalScore: this.scores.opp,
-      names: { me: me.name, opp: opp.name },
+      multiplier: neutral.multiplier,
+      wonRound: me.score >= CONFIG.BASE_SCORE,
     };
   }
 
@@ -728,12 +653,13 @@ export class Game {
   _scheduleAdvance() {
     this._resultTimer = setTimeout(() => {
       if (this._over) return;
-      // Fin por KO (vida a 0).
-      if (this.hp.me <= 0 || this.hp.opp <= 0) {
+
+      // El KO solo termina la partida en 1v1 (2 jugadores).
+      // Con 3+ jugadores se sigue hasta agotar las rondas.
+      if (this.players.length === 2 && this.players.some((p) => p.hp <= 0)) {
         this._endGame('hp');
         return;
       }
-      // Fin por rondas.
       if (this.currentRound >= this.rounds) {
         this._endGame('rounds');
         return;
@@ -747,26 +673,30 @@ export class Game {
     this.state = 'gameover';
     this._clearTimers();
 
-    let winner = null;
-    if (this.hp.me > this.hp.opp) winner = this.role === 'host' ? 'host' : 'guest';
-    else if (this.hp.opp > this.hp.me) winner = this.role === 'host' ? 'guest' : 'host';
+    const ranked = [...this.players].sort((a, b) => {
+      if (b.hp !== a.hp) return b.hp - a.hp;
+      return b.score - a.score;
+    });
 
     const neutral = {
-      winner,
       reason,
       total: this.rounds,
-      host: { name: this.names.me, hp: this.hp.me, score: this.scores.me },
-      guest: { name: this.names.opp, hp: this.hp.opp, score: this.scores.opp },
+      players: ranked.map((p, i) => ({
+        id: p.id,
+        name: p.name,
+        hp: p.hp,
+        score: p.score,
+        rank: i + 1,
+      })),
     };
 
     if (this.role === 'host') {
-      this.net.send({ type: 'gameOver', ...neutral });
+      this.net.broadcast({ type: 'gameOver', ...neutral });
     }
 
     const result = this._adaptGameOver(neutral);
     if (result.won) this.audio.victory();
     else if (result.won === false) this.audio.defeat();
-    else this.audio.roundLose();
     this.emit('gameover', result);
   }
 
@@ -777,25 +707,21 @@ export class Game {
     const result = this._adaptGameOver(neutral);
     if (result.won) this.audio.victory();
     else if (result.won === false) this.audio.defeat();
-    else this.audio.roundLose();
     this.emit('gameover', result);
   }
 
   _adaptGameOver(neutral) {
-    const isHost = this.role === 'host';
-    const me = isHost ? neutral.host : neutral.guest;
-    const opp = isHost ? neutral.guest : neutral.host;
+    const me = neutral.players.find((p) => p.id === this.net.myId) || neutral.players[0];
     return {
-      mode: 'duel',
+      mode: 'multi',
       total: neutral.total,
       reason: neutral.reason,
-      won: neutral.winner === this.role,
-      winner: neutral.winner,
-      names: { me: me.name, opp: opp.name },
-      myHp: me.hp,
-      oppHp: opp.hp,
+      players: neutral.players,
+      me,
+      rank: me.rank,
+      won: me.rank === 1,
       myTotalScore: me.score,
-      oppTotalScore: opp.score,
+      myHp: me.hp,
     };
   }
 
@@ -803,26 +729,19 @@ export class Game {
   /* HUD                                                                 */
   /* ------------------------------------------------------------------ */
   _emitHud() {
+    const me = this.players.find((p) => p.id === this.net.myId) || null;
     this.emit('hud', {
       mode: this.mode,
       round: this.currentRound,
       total: this.rounds,
       multiplier: damageMultiplier(this.currentRound),
       me: {
-        name: this.names.me || this.meName || 'Tú',
-        hp: this.hp.me,
+        name: this.meName || 'Tú',
+        hp: me ? me.hp : CONFIG.MAX_HP,
         hpMax: CONFIG.MAX_HP,
-        score: this.scores.me,
+        score: me ? me.score : (this.scores ? this.scores.me : 0),
       },
-      opp:
-        this.mode === 'duel'
-          ? {
-              name: this.names.opp || 'Rival',
-              hp: this.hp.opp,
-              hpMax: CONFIG.MAX_HP,
-              score: this.scores.opp,
-            }
-          : null,
+      players: this.mode === 'multi' ? this.players : null,
     });
   }
 

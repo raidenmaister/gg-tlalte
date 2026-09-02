@@ -11,6 +11,15 @@ const MARKER = {
   opp:  { color: '#dc2626', size: 32, label: 'Marcador del rival' },
 };
 
+function escapeHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function makePin({ lat, lng, color, size, label }) {
   // La punta del pin (teardrop rotado -45°) queda a size*1.2071 del borde superior.
   const tipY = size * 1.2071;
@@ -22,6 +31,20 @@ function makePin({ lat, lng, color, size, label }) {
     popupAnchor: [0, -tipY + 4],
   });
   return L.marker([lat, lng], { icon }).bindPopup(label);
+}
+
+/** Pin de jugador con el nombre siempre visible encima de la chincheta. */
+function makePlayerPin({ lat, lng, color, size, label }) {
+  const tipY = size * 1.2071;
+  const labelH = 22;
+  const icon = L.divIcon({
+    className: 'gg-player-pin',
+    html: `<div class="gg-player-pin__label">${escapeHtml(label)}</div>
+      <div class="gg-pin__pin" style="--pin-color:${color}; width:${size}px; height:${size}px;"></div>`,
+    iconSize: [size, tipY + labelH],
+    iconAnchor: [size / 2, tipY + labelH],
+  });
+  return L.marker([lat, lng], { icon, interactive: false });
 }
 
 export class Minimap {
@@ -116,6 +139,38 @@ export class Minimap {
     this.map.setView(CONFIG.MAP_DEFAULT_CENTER, CONFIG.MAP_DEFAULT_ZOOM, {
       animate: false,
     });
+  }
+
+  /** Revela la respuesta multijugador: ubicación real + pin por jugador. */
+  revealMulti(players, real) {
+    this.clear();
+    const bounds = [];
+    real = real || null;
+    const colors = ['#2563eb', '#dc2626', '#16a34a', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
+
+    if (real) {
+      this.revealLayer.addLayer(
+        makePin({ lat: real.lat, lng: real.lng, ...MARKER.real })
+      );
+      bounds.push([real.lat, real.lng]);
+    }
+
+    (players || []).forEach((p, i) => {
+      if (!p.guess) return;
+      const color = colors[i % colors.length];
+      this.revealLayer.addLayer(
+        makePlayerPin({ lat: p.guess.lat, lng: p.guess.lng, color, size: 30, label: p.name })
+      );
+      bounds.push([p.guess.lat, p.guess.lng]);
+      if (real) {
+        const pts = greatCirclePoints(real.lat, real.lng, p.guess.lat, p.guess.lng, 96);
+        this.revealLayer.addLayer(
+          L.polyline(pts, { color, weight: 3, opacity: 0.9, dashArray: '6 8' })
+        );
+      }
+    });
+
+    if (bounds.length) this._fitBounds(bounds);
   }
 
   /** Revela la respuesta: ubicación real + guesses + líneas geodésicas. */

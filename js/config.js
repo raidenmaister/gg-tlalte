@@ -19,13 +19,13 @@ export const CONFIG = {
   CODE_LENGTH: 4,
 
   // --- Reglas de juego -------------------------------------------------------
-  MAX_HP: 6000,             // Vida inicial de cada jugador (duelo).
+  MAX_HP: 5000,             // Vida inicial de cada jugador.
   BASE_SCORE: 5000,         // Puntos máximos por ronda.
   SCORE_DISTANCE: 2000,     // Constante de decaimiento exponencial (km).
   PERFECT_DISTANCE: 0.025,  // Distancia (km) considerada "perfecta" (25 m).
 
   SOLO_ROUNDS: 5,           // Rondas por defecto en modo solitario.
-  DUEL_ROUNDS: 5,           // Rondas máximas en duelo (si no hay KO antes).
+  DUEL_ROUNDS: 5,           // Rondas por defecto en multijugador.
   ROUND_DURATION: 60,       // Segundos por ronda (límite principal).
   OPPONENT_COUNTDOWN: 15,   // Segundos extra para el rival tras adivinar.
 
@@ -35,6 +35,11 @@ export const CONFIG = {
     7: { label: '7 rondas', rounds: 7, totalSeconds: 120 },
     10: { label: '10 rondas', rounds: 10, totalSeconds: 150 },
   },
+
+  // Modo multijugador: nº de rondas disponibles y tamaño de sala.
+  MULTI_ROUND_OPTIONS: [5, 7, 10],
+  ROOM_MAX_PLAYERS: 12,     // Tamaño máximo permitido de sala.
+  ROOM_MIN_PLAYERS: 2,      // Mínimo para iniciar partida.
   RESULT_DURATION: 9000,    // ms que se muestra el resumen de ronda.
   PREPARE_DURATION: 3,      // Segundos de "prepárate" antes de adivinar (duelo).
 

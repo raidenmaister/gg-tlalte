@@ -1,6 +1,6 @@
 # GG-TLALTE
 
-Juego de adivinar ubicaciones con panorámicas 360° de Google Maps Street View, inspirado en GeoGuessr. Incluye modo solitario con leaderboard y duelos P2P 1v1.
+Juego de adivinar ubicaciones con panorámicas 360° de Google Maps Street View, inspirado en GeoGuessr. Incluye modo solitario con leaderboard y partidas multijugador P2P de hasta 12 jugadores.
 
 ## Características
 
@@ -11,9 +11,11 @@ Juego de adivinar ubicaciones con panorámicas 360° de Google Maps Street View,
 - **Leaderboard de solitario** separado en categorías de 5, 7 y 10 rondas.
 - **Puntuación equilibrada**: combina precisión (5000 pts por ronda) y velocidad, para que un intento rápido pero impreciso no quede por encima de uno acertado.
 - **Nombres de usuario únicos** (no repetidos, insensibles a mayúsculas/minúsculas).
-- **Duelos 1v1 P2P** con PeerJS:
+- **Partidas multijugador P2P** con PeerJS, de 2 a 12 jugadores:
   - Salas privadas con código de 4 caracteres.
   - Salas públicas con listado y heartbeat.
+  - Resultados sobre minimapa a pantalla completa: chincheta real y de cada jugador, con su nombre y conectadas por líneas.
+  - Barras de vida por jugador con previsualización de daño y color según la vida restante (verde, amarillo o rojo).
 - **Backend PHP** que persiste usuarios, salas y leaderboard en archivos JSON (sin base de datos).
 
 ## Estructura
@@ -77,4 +79,4 @@ El deploy se hace desde local con un script (`deploy.mjs`) que no se incluye en 
 node deploy.mjs
 ```
 
-Sube los archivos web al web root preservando los datos del juego (`users.json`, `leaderboard.json`, `rooms.json`).
+Sube los archivos web al web root preservando los datos del juego (`users.json`, `leaderboard.json`, `rooms.json`). El script excluye tooling local y secretos (`.env*`, `.commandcode/`, `node_modules/`, `deploy.mjs`, etc.).

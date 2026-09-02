@@ -19,7 +19,11 @@ export function loadGoogleMaps() {
       return;
     }
 
-    let key = (CONFIG.GOOGLE_API_KEY || '').trim();
+    let key = (
+      window.GG_GOOGLE_MAPS_API_KEY ||
+      CONFIG.GOOGLE_API_KEY ||
+      ''
+    ).trim();
     if (!key) {
       key = window.prompt(
         'Pega tu Google Maps API Key para cargar las panorámicas 360°:'

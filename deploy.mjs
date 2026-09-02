@@ -6,8 +6,8 @@
  *   2. Ejecuta `npm run build` para generar la carpeta `dist/`.
  *   3. Ejecuta `node deploy.mjs`.
  *
- * El script vacía por completo el directorio remoto y sube el contenido
- * de `dist/` (index.html + carpeta assets/).
+ * El script vacía el web root remoto (preservando los datos persistentes del
+ * juego) y sube los archivos web desde la raíz local.
  */
 import ftp from 'basic-ftp';
 import path from 'path';
@@ -23,17 +23,31 @@ const HOST = process.env.DEPLOY_HOST || 'ftpupload.net';
 const PORT = Number(process.env.DEPLOY_PORT || 21);
 const USER = process.env.DEPLOY_USER;
 const PASS = process.env.DEPLOY_PASS;
-const DIST_DIR = path.join(__dirname, 'dist');
+const ROOT_DIR = __dirname;
 const REMOTE_DIR = process.env.DEPLOY_DIR || 'htdocs';
+
+// Lo que NO debe subirse al hosting: solo se publica el frontend (html/css/js/php/json).
+const SKIP = new Set([
+  '.env',
+  '.env.deploy',
+  '.env.local',
+  '.git',
+  '.gitignore',
+  '.commandcode',
+  'node_modules',
+  'deploy.mjs',
+  'package.json',
+  'package-lock.json',
+  'descargar_panos.py',
+  'encontar-pano-valido.cjs',
+  'panorama.html',
+  'README.md',
+  'dist',
+]);
 
 if (!USER || !PASS) {
   console.error('❌ Faltan DEPLOY_USER o DEPLOY_PASS.');
   console.error('   Crea el archivo .env.deploy copiando .env.deploy.example y rellena tus credenciales.');
-  process.exit(1);
-}
-
-if (!fs.existsSync(DIST_DIR)) {
-  console.error(`❌ No existe la carpeta ${DIST_DIR}. Ejecuta primero: npm run build`);
   process.exit(1);
 }
 
@@ -43,7 +57,7 @@ client.ftp.verbose = false;
 async function uploadFiltered(client, localDir) {
   const entries = fs.readdirSync(localDir, { withFileTypes: true });
   for (const entry of entries) {
-    if (entry.name === '.commandcode') continue;
+    if (SKIP.has(entry.name)) continue;
     const localPath = path.join(localDir, entry.name);
     if (entry.isDirectory()) {
       await client.ensureDir(entry.name);
@@ -89,10 +103,9 @@ async function run() {
       }
     }
 
-    // 3. Subir todo el contenido de dist/ (index.html + assets/),
-    //    ignorando la carpeta .commandcode/.
-    await uploadFiltered(client, DIST_DIR);
-    console.log('🚀 Contenido de dist/ subido correctamente.');
+    // 3. Subir el frontend desde la raíz, ignorando tooling y secretos.
+    await uploadFiltered(client, ROOT_DIR);
+    console.log('🚀 Frontend subido correctamente.');
 
     // 4. Verificar.
     const remotoFinal = await client.list('.');

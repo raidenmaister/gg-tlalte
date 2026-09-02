@@ -3,9 +3,9 @@
 // ============================================================================
 
 export const CONFIG = {
-  // Google Maps JavaScript API Key (cliente). NO incluyas aquí tu key real si
-  // vas a subir el código a un repositorio. Si se deja vacía, el visor la
-  // pedirá por prompt al cargar.
+  // Fallback opcional de API Key (cliente). La key real se define en
+  // js/keys.js (window.GG_GOOGLE_MAPS_API_KEY), que se mantiene local y NO se
+  // sube a GitHub. Si ambas quedan vacías, el visor la pedirá por prompt.
   GOOGLE_API_KEY: '',
 
   // Archivo con las ubicaciones jugables ({lat,lng,pano_id,date}).

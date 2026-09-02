@@ -20,18 +20,23 @@ Juego de adivinar ubicaciones con panorámicas 360° de Google Maps Street View,
 
 ```
 gg-tlalte/
-├── dist/                     # Juego desplegable (se sube al hosting)
-│   ├── index.html
-│   ├── style.css
-│   ├── api.php               # Backend PHP (salas, usuarios, leaderboard)
-│   ├── rooms.json            # Salas públicas (plantilla)
-│   └── js/                   # app.js, game.js, net.js, etc.
-├── deploy.mjs                # Deploy FTP a InfinityFree
-├── descargar_panos.py        # Descarga de panorámicas
-├── encontar-pano-valido.cjs  # Validación de panorámicas
-├── panorama.html             # Visor auxiliar de panorámicas
-└── package.json
+├── index.html           # Estructura de la página
+├── style.css            # Estilos
+├── api.php              # Backend PHP (salas, usuarios, leaderboard)
+├── rooms.json           # Salas públicas (plantilla)
+├── coordenadas_validas.json
+└── js/
+    ├── app.js           # Punto de entrada y UI
+    ├── game.js          # Máquina de estados del juego
+    ├── net.js           # Capa de red PeerJS
+    ├── panorama.js      # Visor Street View
+    ├── minimap.js       # Minimapa Leaflet
+    ├── config.js        # Constantes y reglas
+    ├── audio.js
+    └── utils.js
 ```
+
+Los archivos auxiliares de desarrollo (deploy, descarga de panorámicas, visor de prueba) se mantienen fuera de este repositorio.
 
 ## Uso local
 
@@ -41,33 +46,35 @@ gg-tlalte/
    git clone https://github.com/raidenmaister/gg-tlalte.git
    ```
 
-2. Sirve la carpeta `dist/` con un servidor local (necesario para `fetch`):
+2. Sirve el proyecto con un servidor local (necesario para `fetch`):
 
    ```bash
-   cd gg-tlalte/dist
+   cd gg-tlalte
    python -m http.server 8000
    ```
 
-3. Abre `http://localhost:8000` e introduce tu API Key de Google Maps cuando se te solicite.
+3. Abre `http://localhost:8000`.
 
 > Las salas públicas y el leaderboard requieren un servidor con PHP. En local con `python -m http.server` no se ejecuta `api.php`, por lo que solo funcionarán las salas privadas y el modo solitario.
 
 ## API Key de Google Maps
 
-La API Key **no** está incluida en el código. Puedes configurarla de dos formas:
+La API Key **no** está incluida en este repositorio. Para que el juego no la pida, configura un archivo local `js/keys.js` con:
 
-- Dejar el campo vacío y escribirla en el prompt al abrir el juego.
-- Configurarla en `dist/js/config.js` en `GOOGLE_API_KEY` (sin subirla al repositorio).
+```js
+window.GG_GOOGLE_MAPS_API_KEY = 'TU_API_KEY';
+```
+
+Ese archivo está en `.gitignore`, así que no se sube a GitHub. Si no existe, el visor pedirá la key por prompt al cargar.
 
 Restringe la key a tu dominio (o a `localhost`) desde la consola de Google Cloud.
 
 ## Deploy a hosting con PHP
 
-1. Configura las credenciales FTP en `.env.deploy` (ver `.env.deploy` como referencia; no se sube a GitHub).
-2. Ejecuta:
+El deploy se hace desde local con un script (`deploy.mjs`) que no se incluye en GitHub. Configura las credenciales FTP en `.env.deploy` y ejecuta:
 
-   ```bash
-   node deploy.mjs
-   ```
+```bash
+node deploy.mjs
+```
 
-El script sube el contenido de `dist/` al web root, excluyendo la carpeta `.commandcode/` y preservando los archivos de datos (`users.json`, `leaderboard.json`, `rooms.json`) para no perder puntuaciones.
+Sube los archivos web al web root preservando los datos del juego (`users.json`, `leaderboard.json`, `rooms.json`).

@@ -6,15 +6,22 @@ node_modules/
 .env.deploy
 .env.local
 .env.*.local
+js/keys.js
 
 # Datos generados en el servidor
-dist/users.json
-dist/leaderboard.json
+users.json
+leaderboard.json
+
+# Herramientas internas (solo locales)
+.commandcode/
+deploy.mjs
+descargar_panos.py
+encontar-pano-valido.cjs
+panorama.html
+package.json
+package-lock.json
 
 # Logs y sistema
 *.log
 .DS_Store
 Thumbs.db
-
-# Herramientas internas
-.commandcode/

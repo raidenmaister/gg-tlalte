@@ -141,6 +141,7 @@ function expandMinimap(force = true) {
   }
   wrap.classList.add('expanded');
   minimap.refreshSize();
+  minimap.setInteractive(true);
 }
 
 function collapseMinimap() {
@@ -1086,6 +1087,11 @@ function wire() {
   });
   wrap.addEventListener('mouseleave', () => {
     if (!minimapPinned) wrap.classList.remove('expanded');
+  });
+  wrap.addEventListener('click', () => {
+    if (!wrap.classList.contains('expanded')) {
+      expandMinimap(true);
+    }
   });
 }
 

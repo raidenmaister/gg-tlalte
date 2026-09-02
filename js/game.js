@@ -222,7 +222,8 @@ export class Game {
 
     this.pano.setPano(coord.pano_id, this.roundHeading, 0);
     this.map.reset();
-    this.map.setInteractive(false);
+    this.map.setInteractive(true);
+    this._roundActive = true;
 
     this.emit('waiting', { waiting: false });
     this.emit('confirm', { enabled: false });
@@ -325,7 +326,8 @@ export class Game {
   /* Colocación de marcador y confirmación                               */
   /* ------------------------------------------------------------------ */
   placePick(lat, lng) {
-    if (this.state === 'result' || this._over || !this._roundActive) return;
+    if (this.state === 'result' || this._over) return;
+    this._roundActive = true;
     this.myGuess = { lat, lng };
     this.emit('confirm', { enabled: true });
   }
@@ -339,7 +341,7 @@ export class Game {
   }
 
   _soloConfirm() {
-    if (this.state === 'result' || this._over || !this._roundActive) return;
+    if (this.state === 'result' || this._over) return;
     const guess = this.myGuess || null;
     this._clearTimers();
     const { distance, score } = this._score(guess);
@@ -365,13 +367,13 @@ export class Game {
   }
 
   _multiConfirm() {
-    if (!this.myGuess || this.state === 'result' || this._over || !this._roundActive) return;
+    if (!this.myGuess || this.state === 'result' || this._over) return;
     this.audio.confirm();
     this._submitGuess(this.myGuess);
   }
 
   _submitGuess(guess) {
-    let me = this.players.find((p) => p.id === this.net.myId);
+    let me = this.players.find((p) => p.id === this.net.myId || p.name === this.meName);
     if (!me && this.role === 'host') {
       me = this.players.find((p) => p.isHost || p.id === this.net.roomId);
     }
@@ -393,6 +395,8 @@ export class Game {
         round: this.currentRound,
         lat: guess ? guess.lat : null,
         lng: guess ? guess.lng : null,
+        name: this.meName,
+        senderId: this.net.myId,
       });
     } else if (this.role === 'host') {
       if (this._allGuessed()) {
@@ -580,7 +584,8 @@ export class Game {
         this.currentCoord = coord;
         this.pano.setPano(coord.pano_id, this.roundHeading, 0);
         this.map.reset();
-        this.map.setInteractive(false);
+        this.map.setInteractive(true);
+        this._roundActive = true;
         this.emit('waiting', { waiting: false });
         this.emit('confirm', { enabled: false });
         this._emitHud();
@@ -596,7 +601,12 @@ export class Game {
         break;
       case 'guess': {
         if (this.role !== 'host') break;
-        let p = this.players.find((x) => x.id === fromPeerId || (data.senderId && x.id === data.senderId));
+        let p = this.players.find((x) =>
+          x.id === fromPeerId ||
+          (data.senderId && x.id === data.senderId) ||
+          (data.name && x.name === data.name) ||
+          (data.senderName && x.name === data.senderName)
+        );
         if (!p && this.players.length === 2) {
           p = this.players.find((x) => x.id !== this.net.myId && !x.isHost);
         }
@@ -647,21 +657,19 @@ export class Game {
     this.state = 'result';
 
     const real = { lat: this.currentCoord.lat, lng: this.currentCoord.lng };
-    const scored = this.players.map((p) => {
-      const info = this._score(p.guess);
-      p.score += info.score;
-      return { ...p, distance: info.distance, roundScore: info.score };
-    });
-
     const roundMult = damageMultiplier(this.currentRound);
 
-    const results = scored.map((p) => {
+    // Actualizamos directamente en this.players para que el daño y los puntos persistan
+    const results = this.players.map((p) => {
+      const info = this._score(p.guess);
+      p.score += info.score;
+
       let damage = 0;
       if (p.guess == null) {
         // Si no adivinó: penalización moderada (por defecto 1200 HP) en vez de 5000 puntos
         damage = Math.round((CONFIG.NO_GUESS_PENALTY || 1200) * roundMult);
-      } else if (p.roundScore < CONFIG.BASE_SCORE) {
-        damage = Math.round((CONFIG.BASE_SCORE - p.roundScore) * roundMult * 0.45);
+      } else if (info.score < CONFIG.BASE_SCORE) {
+        damage = Math.round((CONFIG.BASE_SCORE - info.score) * roundMult * 0.45);
         damage = Math.min(damage, Math.round((CONFIG.MAX_ROUND_DAMAGE || 1800) * roundMult));
       }
       p.hp = clamp(p.hp - damage, 0, CONFIG.MAX_HP);
@@ -669,9 +677,9 @@ export class Game {
         id: p.id,
         name: p.name,
         guess: p.guess,
-        score: p.roundScore,
+        score: info.score,
         totalScore: p.score,
-        distance: p.distance,
+        distance: info.distance,
         hp: p.hp,
         damage,
       };
@@ -704,10 +712,11 @@ export class Game {
     this.state = 'result';
 
     neutral.players.forEach((r) => {
-      const p = this.players.find((x) => x.id === r.id);
+      const p = this.players.find((x) => x.id === r.id || x.name === r.name);
       if (p) {
         p.score = r.totalScore;
         p.hp = r.hp;
+        p.guess = r.guess;
       }
     });
 

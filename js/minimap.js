@@ -73,7 +73,7 @@ export class Minimap {
     this.pickMarker = null;
     this.revealLayer = null;
     this.pick = null;          // {lat, lng}
-    this.interactive = false;  // si acepta clics para adivinar
+    this.interactive = true;   // por defecto interactivo durante el juego
   }
 
   init() {
@@ -100,7 +100,7 @@ export class Minimap {
     this.revealLayer = L.layerGroup().addTo(this.map);
 
     this.map.on('click', (e) => {
-      if (!this.interactive) return;
+      if (this.interactive === false) return;
       const { lat, lng } = e.latlng;
       this.setPick(lat, lng);
       if (this.callbacks.onPick) this.callbacks.onPick(lat, lng);
@@ -112,8 +112,10 @@ export class Minimap {
 
   /** Activa/desactiva la recogida de clics (modo adivinar). */
   setInteractive(active) {
-    this.interactive = active;
-    this.map.getContainer().style.cursor = active ? 'crosshair' : '';
+    this.interactive = active !== false;
+    if (this.map && this.map.getContainer()) {
+      this.map.getContainer().style.cursor = this.interactive ? 'crosshair' : '';
+    }
   }
 
   /** Coloca (o mueve) el marcador del jugador. */

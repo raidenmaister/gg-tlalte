@@ -237,22 +237,25 @@ export class Game {
       return;
     }
 
-    const now = Date.now();
-    const prepareMs = CONFIG.PREPARE_DURATION * 1000;
-    const startAt = now + prepareMs;
+    const prepSecs = CONFIG.PREPARE_DURATION || 3;
 
     if (this.role === 'host') {
       this.net.broadcast({
         type: 'roundStart',
         round,
         locationIndex: idx,
-        duration: CONFIG.ROUND_DURATION,
         heading: this.roundHeading,
-        startAt,
+        prepareSeconds: prepSecs,
+        players: this.players.map((p) => ({
+          id: p.id,
+          name: p.name,
+          hp: typeof p.hp === 'number' && !isNaN(p.hp) ? p.hp : CONFIG.MAX_HP,
+          score: p.score || 0,
+        })),
       });
-      this._startPrepare(startAt, round);
+      this._startPrepare(prepSecs, round);
     } else {
-      this._startPrepare(startAt, round);
+      this._startPrepare(prepSecs, round);
     }
   }
 
@@ -266,31 +269,22 @@ export class Game {
   }
 
   /**
-   * Fase "prepárate": cuenta atrás hasta activar la ronda.
+   * Fase "prepárate": cuenta atrás fija de 3 segundos (sin depender del reloj del SO).
    */
-  _startPrepare(startAtLocal, round) {
+  _startPrepare(durationSeconds, round) {
     this._clearPrepare();
-    const remaining = startAtLocal - Date.now();
-    this.emit('prepare', { seconds: remaining > 0 ? Math.ceil(remaining / 1000) : 0 });
+    let left = durationSeconds || CONFIG.PREPARE_DURATION || 3;
+    this.emit('prepare', { seconds: left });
 
-    if (remaining <= 0) {
-      this._activateRound(round);
-      return;
-    }
-
-    let last = -1;
     this._prepare = setInterval(() => {
-      const left = startAtLocal - Date.now();
-      const secs = Math.ceil(left / 1000);
-      if (secs !== last) {
-        last = secs;
-        this.emit('prepare', { seconds: secs });
-      }
-      if (left <= 0) {
+      left--;
+      if (left > 0) {
+        this.emit('prepare', { seconds: left });
+      } else {
         this._clearPrepare();
         this._activateRound(round);
       }
-    }, 100);
+    }, 1000);
   }
 
   /** Activa el temporizador de adivinar y habilita el minimapa. */
@@ -405,36 +399,44 @@ export class Game {
         this._clearHurry();
         this._resolveMultiRound();
       } else {
-        // Arranca el contador de 15s para los que aún no envían.
-        this._startHurry();
+        // Arranca el contador de 15s para los que aún no envían, anunciando quién adivinó
+        this._startHurry(me ? me.name : (this.meName || 'Un jugador'));
       }
     }
   }
 
-  /** Contador de 15 segundos cuando queda al menos un jugador sin adivinar. */
-  _startHurry() {
-    if (this.hurryEnd) return;
-    this.hurryEnd = Date.now() + CONFIG.OPPONENT_COUNTDOWN * 1000;
+  /** Contador de 15 segundos cuando el primer jugador adivina. */
+  _startHurry(guesserName = '') {
+    if (this._hurryActive) return;
+    this._hurryActive = true;
+    this.hurryGuesser = guesserName;
+    const seconds = CONFIG.OPPONENT_COUNTDOWN || 15;
     this.net.broadcast({
       type: 'hurryStart',
       round: this.currentRound,
-      seconds: CONFIG.OPPONENT_COUNTDOWN,
-      endTime: this.hurryEnd,
+      seconds,
+      guesserName,
     });
-    this._runHurryCountdown(this.hurryEnd);
+    this._runHurryCountdown(seconds, guesserName);
   }
 
   _onHurryStart(data) {
     if (this._resolved) return;
-    this.hurryEnd = data.endTime || (Date.now() + (data.seconds || CONFIG.OPPONENT_COUNTDOWN) * 1000);
-    this._runHurryCountdown(this.hurryEnd);
+    this._hurryActive = true;
+    const seconds = data.seconds || CONFIG.OPPONENT_COUNTDOWN || 15;
+    const guesserName = data.guesserName || '';
+    this._runHurryCountdown(seconds, guesserName);
   }
 
-  _runHurryCountdown(endTime) {
+  _runHurryCountdown(totalSeconds, guesserName = '') {
     this._clearHurryTimer();
-    const tick = () => {
-      const left = Math.max(0, Math.ceil((endTime - Date.now()) / 1000));
-      this.emit('countdown', { seconds: left });
+    let left = totalSeconds;
+    this.emit('countdown', { seconds: left, guesserName });
+    this._hurry = setInterval(() => {
+      left--;
+      if (left >= 0) {
+        this.emit('countdown', { seconds: left, guesserName });
+      }
       if (left <= 0) {
         this._clearHurry();
         this.emit('countdown', { seconds: null });
@@ -448,9 +450,7 @@ export class Game {
           this._resolveMultiRound();
         }
       }
-    };
-    tick();
-    this._hurry = setInterval(tick, 1000);
+    }, 1000);
   }
 
   _clearHurryTimer() {
@@ -462,6 +462,8 @@ export class Game {
 
   _clearHurry() {
     this._clearHurryTimer();
+    this._hurryActive = false;
+    this.hurryGuesser = '';
     this.hurryEnd = 0;
   }
 
@@ -556,10 +558,23 @@ export class Game {
         this._resolved = false;
         this._roundActive = false;
         this.myGuess = null;
-        this.players.forEach((p) => {
-          p.guess = null;
-          p.guessed = false;
-        });
+
+        if (data.players && Array.isArray(data.players)) {
+          this.players = data.players.map((dp) => ({
+            id: dp.id,
+            name: dp.name,
+            score: dp.score || 0,
+            hp: typeof dp.hp === 'number' && !isNaN(dp.hp) ? dp.hp : CONFIG.MAX_HP,
+            guess: null,
+            guessed: false,
+          }));
+        } else {
+          this.players.forEach((p) => {
+            p.guess = null;
+            p.guessed = false;
+            if (typeof p.hp !== 'number' || isNaN(p.hp)) p.hp = CONFIG.MAX_HP;
+          });
+        }
 
         const coord = this.coordenadas[data.locationIndex];
         this.currentCoord = coord;
@@ -570,8 +585,8 @@ export class Game {
         this.emit('confirm', { enabled: false });
         this._emitHud();
 
-        const startAt = data.startAt || Date.now();
-        this._startPrepare(startAt, this.currentRound);
+        const prepSecs = data.prepareSeconds || CONFIG.PREPARE_DURATION || 3;
+        this._startPrepare(prepSecs, this.currentRound);
         break;
       }
       case 'tick':
@@ -594,9 +609,9 @@ export class Game {
         if (this._allGuessed() && !this._resolved) {
           this._clearHurry();
           this._resolveMultiRound();
-        } else if (!this._resolved && !this.hurryEnd) {
-          // El primer jugador en adivinar dispara el contador de 15s para los demás.
-          this._startHurry();
+        } else if (!this._resolved && !this._hurryActive) {
+          // El primer jugador en adivinar dispara el contador de 15s para los demás con su nombre
+          this._startHurry(p ? p.name : 'Un rival');
         }
         break;
       }
@@ -638,14 +653,16 @@ export class Game {
       return { ...p, distance: info.distance, roundScore: info.score };
     });
 
-    // A MENOS que se logre puntaje perfecto (BASE_SCORE = 5000), a TODOS los jugadores se les quita vida
-    // en base a los puntos perdidos multiplicados por el factor de ronda.
     const roundMult = damageMultiplier(this.currentRound);
 
     const results = scored.map((p) => {
       let damage = 0;
-      if (p.roundScore < CONFIG.BASE_SCORE) {
-        damage = Math.round((CONFIG.BASE_SCORE - p.roundScore) * roundMult);
+      if (p.guess == null) {
+        // Si no adivinó: penalización moderada (por defecto 1200 HP) en vez de 5000 puntos
+        damage = Math.round((CONFIG.NO_GUESS_PENALTY || 1200) * roundMult);
+      } else if (p.roundScore < CONFIG.BASE_SCORE) {
+        damage = Math.round((CONFIG.BASE_SCORE - p.roundScore) * roundMult * 0.45);
+        damage = Math.min(damage, Math.round((CONFIG.MAX_ROUND_DAMAGE || 1800) * roundMult));
       }
       p.hp = clamp(p.hp - damage, 0, CONFIG.MAX_HP);
       return {

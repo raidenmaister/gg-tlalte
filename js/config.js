@@ -63,6 +63,8 @@ export const CONFIG = {
   ROOM_MIN_PLAYERS: 2,      // Mínimo para iniciar partida.
   RESULT_DURATION: 9000,    // ms que se muestra el resumen de ronda.
   PREPARE_DURATION: 3,      // Segundos de "prepárate" antes de adivinar (duelo).
+  NO_GUESS_PENALTY: 1200,   // Daño si el jugador no adivina a tiempo (en vez de 5000)
+  MAX_ROUND_DAMAGE: 1800,   // Daño máximo por ronda para partidas equilibradas
 
   // 12 colores únicos y contrastantes para hasta 12 jugadores simultáneos
   PLAYER_COLORS: [

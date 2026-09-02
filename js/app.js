@@ -211,14 +211,15 @@ function renderMultiHp(players) {
     bar.className = 'hp-bar';
     bar.style.borderColor = `${color}45`;
     const fill = document.createElement('div');
-    const pct = clamp((p.hp / CONFIG.MAX_HP) * 100, 0, 100);
+    const hp = (typeof p.hp === 'number' && !isNaN(p.hp)) ? p.hp : CONFIG.MAX_HP;
+    const pct = clamp((hp / CONFIG.MAX_HP) * 100, 0, 100);
     fill.className = 'hp-fill ' + hpColorClass(pct);
     fill.style.width = pct + '%';
     bar.appendChild(fill);
 
     const val = document.createElement('span');
     val.className = 'hp-val';
-    val.textContent = Math.round(p.hp);
+    val.textContent = Math.round(hp);
 
     const diff = document.createElement('span');
     diff.className = 'hp-diff';
@@ -320,7 +321,7 @@ function renderWaiting({ waiting }) {
   if (waiting) collapseMinimap();
 }
 
-function renderCountdown({ seconds }) {
+function renderCountdown({ seconds, guesserName }) {
   const banner = $('#countdownBanner');
   const num = $('#countdownNumber');
   const label = banner ? banner.querySelector('.countdown-label') : null;
@@ -328,10 +329,16 @@ function renderCountdown({ seconds }) {
     banner.classList.add('hidden');
   } else {
     banner.classList.remove('hidden');
-    num.textContent = String(seconds);
+    num.textContent = `${seconds}s`;
     banner.classList.toggle('urgent', seconds <= 5);
     if (label) {
-      label.textContent = game.myGuess ? 'Tiempo para tu rival:' : '¡Tu rival ya adivinó!';
+      if (game.myGuess) {
+        label.textContent = 'Tiempo para tus rivales:';
+      } else if (guesserName) {
+        label.textContent = `¡${guesserName} ya adivinó!`;
+      } else {
+        label.textContent = '¡Ya adivinaron!';
+      }
     }
   }
 }

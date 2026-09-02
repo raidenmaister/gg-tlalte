@@ -407,6 +407,37 @@ input {
     color: #cfe0ff;
 }
 
+.player-item-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.btn-kick {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid rgba(239, 68, 68, 0.45);
+    color: #ef4444;
+    font-size: 0.85rem;
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    line-height: 1;
+    padding: 0;
+    transition: background 0.18s, color 0.18s, transform 0.18s;
+}
+
+.btn-kick:hover {
+    background: #ef4444;
+    color: #fff;
+    transform: scale(1.12);
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
+}
+
 .lobby-actions {
     display: flex;
     flex-direction: column;

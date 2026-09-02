@@ -160,6 +160,39 @@ export class Network {
     }
   }
 
+  /**
+   * Host expulsa a un jugador de la sala.
+   * @param {string} peerId ID del peer a expulsar.
+   * @param {string} [playerName] Nombre del jugador expulsado.
+   */
+  kickPlayer(peerId, playerName = '') {
+    if (!this.isHost || !peerId) return;
+    LOG('kickPlayer', { peerId, playerName });
+
+    // 1. Enviar orden de expulsión al invitado
+    this.sendTo(peerId, {
+      type: 'kicked',
+      reason: 'El anfitrión te expulsó de la sala',
+    });
+
+    // 2. Cerrar la conexión P2P con ese jugador
+    const conn = this.conns.get(peerId);
+    if (conn) {
+      try { conn.close(); } catch (e) {}
+      this.conns.delete(peerId);
+    }
+
+    // 3. Eliminar de la lista de invitados
+    this.guestNames.delete(peerId);
+
+    // 4. Sincronizar nueva lista de jugadores con los restantes y el servidor PHP
+    this._syncPlayers();
+
+    if (this.cb.onGuestLeave) {
+      this.cb.onGuestLeave(peerId, playerName);
+    }
+  }
+
   /* ------------------------- API PHP y Relay ---------------------------- */
   async _api(action, data = {}) {
     try {
@@ -331,6 +364,15 @@ export class Network {
           clearTimeout(this._connTimeout);
           this._connTimeout = null;
         }
+      }
+      return;
+    }
+
+    if (data.type === 'kicked') {
+      this._closing = true;
+      this.leave();
+      if (this.cb.onKicked) {
+        this.cb.onKicked(data.reason || 'El anfitrión te expulsó de la sala');
       }
       return;
     }

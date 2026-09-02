@@ -552,13 +552,34 @@ function renderLobby() {
       name.className = 'name';
       name.textContent = p.name;
 
+      const actions = document.createElement('div');
+      actions.className = 'player-item-actions';
+
       const badges = document.createElement('span');
       badges.className = 'badges';
       if (p.isHost) badges.innerHTML += '<span class="host-badge">anfitrión</span>';
       if (p.id === net.myId) badges.innerHTML += '<span class="you-badge">tú</span>';
+      actions.appendChild(badges);
+
+      // Botón de expulsar: visible solo para el host en jugadores que no son él mismo
+      if (isHost && !p.isHost && p.id !== net.myId) {
+        const kickBtn = document.createElement('button');
+        kickBtn.className = 'btn-kick';
+        kickBtn.title = `Expulsar a ${p.name}`;
+        kickBtn.setAttribute('aria-label', `Expulsar a ${p.name}`);
+        kickBtn.innerHTML = '✕';
+        kickBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          audio.ensure();
+          if (confirm(`¿Expulsar a ${p.name} de la sala?`)) {
+            net.kickPlayer(p.id, p.name);
+          }
+        });
+        actions.appendChild(kickBtn);
+      }
 
       li.appendChild(name);
-      li.appendChild(badges);
+      li.appendChild(actions);
       list.appendChild(li);
     });
   }
@@ -746,6 +767,12 @@ function handleNetMessage(data, fromPeerId) {
   if (data.type === 'start') {
     game.guestOnStart(data);
     guestPrepareStart();
+    return;
+  }
+  if (data.type === 'kicked') {
+    localStorage.removeItem(ROOM_KEY);
+    net.leave();
+    resetToMenu(data.reason || 'El anfitrión te expulsó de la sala');
     return;
   }
   game.handleNetworkMessage(data, fromPeerId);
@@ -1121,6 +1148,12 @@ function wireNet() {
       leaveEverything();
       resetToMenu('El anfitrión se desconectó');
     }
+  };
+
+  net.cb.onKicked = (reason) => {
+    localStorage.removeItem(ROOM_KEY);
+    leaveEverything();
+    resetToMenu(reason || 'El anfitrión te expulsó de la sala');
   };
 
   net.cb.onError = (type) => {

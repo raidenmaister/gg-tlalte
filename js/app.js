@@ -804,7 +804,12 @@ async function guestPrepareStart() {
     showScreen('game');
     resetGameUI();
     await ensureViewers();
-    setTimeout(() => pano.refresh(), 60);
+    setTimeout(() => {
+      pano.refresh();
+      if (game.currentCoord) {
+        pano.setPano(game.currentCoord.pano_id, game.roundHeading || 0, 0);
+      }
+    }, 60);
     net.send({ type: 'ready' });
   } catch (err) {
     showError('No se pudo preparar la partida: ' + err.message);

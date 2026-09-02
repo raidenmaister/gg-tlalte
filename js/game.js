@@ -129,6 +129,12 @@ export class Game {
       guessed: false,
     }));
 
+    // No permitir iniciar un duelo si el anfitrión está solo
+    if (this.players.length <= 1) {
+      this.emit('toast', { message: 'Se necesitan al menos 2 jugadores para iniciar.', kind: 'error' });
+      return;
+    }
+
     const seed = (Math.random() * 0xffffffff) >>> 0;
     this.locations = pickIndices(this.coordenadas.length, this.rounds);
 
@@ -142,24 +148,13 @@ export class Game {
     });
 
     this._hostStarted = true;
-    this._readyCount = 1; // el host ya está listo
+    this.emit('toast', { message: 'Iniciando partida…', kind: 'info' });
 
-    // No permitir iniciar un duelo si el anfitrión está solo
-    if (this.players.length <= 1) {
-      this.emit('toast', { message: 'Se necesitan al menos 2 jugadores para iniciar.', kind: 'error' });
-      return;
-    }
-
-    // Timeout de seguridad: si en 3.5 segundos algún invitado tarda en cargar o responder 'ready',
-    // arranca la ronda de todas formas para que la partida nunca se quede congelada.
+    // Iniciar ronda 1 de inmediato tras 400ms para que la partida nunca se quede en negro
     clearTimeout(this._readyTimer);
     this._readyTimer = setTimeout(() => {
-      if (this.state !== 'playing' && this._hostStarted) {
-        this._beginRound(1);
-      }
-    }, 3500);
-
-    this.emit('toast', { message: 'Iniciando partida…', kind: 'info' });
+      this._beginRound(1);
+    }, 400);
   }
 
   /** Guest: recibe el mensaje 'start' del host. */
@@ -198,6 +193,7 @@ export class Game {
     this.currentCoord = null;
     this.soloTimedOut = false;
     this.soloStartTime = 0;
+    this.state = 'idle';
   }
 
   _beginRound(round) {

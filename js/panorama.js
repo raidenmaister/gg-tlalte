@@ -110,6 +110,10 @@ export class PanoramaViewer {
 
     this._blockNavigation(el);
 
+    if (this.currentPanoId) {
+      this.setPano(this.currentPanoId, this.initialHeading, this.initialPitch);
+    }
+
     if (this.callbacks.onReady) this.callbacks.onReady();
     return this.panorama;
   }
@@ -148,11 +152,14 @@ export class PanoramaViewer {
 
   /** Muestra una panorámica por su pano_id y fija el punto de vista inicial. */
   setPano(panoId, heading = 0, pitch = 0) {
-    if (!this.panorama) return;
     this.initialHeading = heading;
     this.initialPitch = pitch;
-    this.status = null;
     this.currentPanoId = panoId;
+    if (!this.panorama) {
+      // Guardado en cola: se renderizará en cuanto init() finalice
+      return;
+    }
+    this.status = null;
     this.refresh();
     this.panorama.setPano(panoId);
     this.panorama.setPov({ heading, pitch });

@@ -902,6 +902,7 @@ function resetToMenu(message) {
 }
 
 function leaveEverything() {
+  localStorage.removeItem(ROOM_KEY);
   net.leave();
 }
 
@@ -1171,24 +1172,19 @@ function wireNet() {
 
   net.cb.onError = (type) => {
     LOG('onError', type);
+    leaveEverything();
     if (type === 'NO_EXISTE') {
-      showToast('No existe esa sala', 'error');
-      leaveEverything();
-      showScreen('join');
+      resetToMenu('La sala ya no existe o finalizó');
     } else if (type === 'LLENA') {
-      showToast('La sala está llena', 'error');
-      leaveEverything();
-      showScreen('menu');
+      resetToMenu('La sala está llena');
     } else if (type === 'unavailable-id') {
       showToast('Regenerando código…');
     } else if (type === 'public-register') {
-      showToast('No se pudo registrar la sala pública (requiere servidor PHP)', 'error');
+      showToast('No se pudo registrar la sala pública', 'error');
     } else if (type === 'peer-unavailable') {
-      showToast('No se pudo conectar con el anfitrión (NAT/firewall)', 'error');
-      leaveEverything();
-      showScreen('join');
+      resetToMenu('La sala no respondió o ya no está disponible');
     } else {
-      showToast('Error de conexión: ' + type, 'error');
+      resetToMenu('Error de conexión: ' + type);
     }
   };
 
@@ -1246,8 +1242,21 @@ function boot() {
           net.rejoinHostRoom(room);
           return;
         } else if (room && room.role === 'guest') {
-          setLoadingText('Reconectando a tu sala…');
+          setLoadingText('Reconectando a la sala…');
           showScreen('loading');
+
+          // Timeout de seguridad: si la sala ya no existe o no responde en 4 segundos, volver al menú
+          let reconTimeout = setTimeout(() => {
+            leaveEverything();
+            resetToMenu('La sala anterior ya no existe');
+          }, 4000);
+
+          const origOnPlayers = net.cb.onPlayers;
+          net.cb.onPlayers = (list, config) => {
+            clearTimeout(reconTimeout);
+            if (origOnPlayers) origOnPlayers(list, config);
+          };
+
           if (room.isPublic && room.roomId) {
             net.joinPublicRoom(room.roomId, meName);
           } else if (room.roomCode) {

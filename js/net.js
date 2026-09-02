@@ -64,9 +64,16 @@ export class Network {
 
   get players() {
     if (this.isHost) {
-      const list = [{ id: this.myId || 'host', name: this._localName || 'Anfitrión', isHost: true }];
+      const hostName = (this._localName || 'Anfitrión').trim();
+      const list = [{ id: this.myId || 'host', name: hostName, isHost: true }];
+      const seenNames = new Set([hostName.toLowerCase()]);
       this.guestNames.forEach((name, peerId) => {
-        list.push({ id: peerId, name, isHost: false });
+        const clean = (name || 'Anónimo').trim();
+        const lower = clean.toLowerCase();
+        if (!seenNames.has(lower)) {
+          seenNames.add(lower);
+          list.push({ id: peerId, name: clean, isHost: false });
+        }
       });
       return list;
     }
@@ -166,26 +173,34 @@ export class Network {
    * @param {string} [playerName] Nombre del jugador expulsado.
    */
   kickPlayer(peerId, playerName = '') {
-    if (!this.isHost || !peerId) return;
+    if (!this.isHost) return;
     LOG('kickPlayer', { peerId, playerName });
+    const targetName = (playerName || '').trim().toLowerCase();
 
     // 1. Enviar orden de expulsión al invitado
-    this.sendTo(peerId, {
-      type: 'kicked',
-      reason: 'El anfitrión te expulsó de la sala',
-    });
-
-    // 2. Cerrar la conexión P2P con ese jugador
-    const conn = this.conns.get(peerId);
-    if (conn) {
-      try { conn.close(); } catch (e) {}
-      this.conns.delete(peerId);
+    if (peerId) {
+      this.sendTo(peerId, {
+        type: 'kicked',
+        reason: 'El anfitrión te expulsó de la sala',
+      });
     }
 
-    // 3. Eliminar de la lista de invitados
-    this.guestNames.delete(peerId);
+    // 2. Cerrar la conexión y eliminar todas las instancias de ese jugador
+    for (const [id, name] of this.guestNames.entries()) {
+      if (id === peerId || (targetName && name.trim().toLowerCase() === targetName)) {
+        const conn = this.conns.get(id);
+        if (conn) {
+          try {
+            conn.send(JSON.stringify({ type: 'kicked', reason: 'El anfitrión te expulsó de la sala' }));
+            conn.close();
+          } catch (e) {}
+          this.conns.delete(id);
+        }
+        this.guestNames.delete(id);
+      }
+    }
 
-    // 4. Sincronizar nueva lista de jugadores con los restantes y el servidor PHP
+    // 3. Sincronizar nueva lista de jugadores con los restantes y el servidor PHP
     this._syncPlayers();
 
     if (this.cb.onGuestLeave) {
@@ -321,13 +336,14 @@ export class Network {
     LOG('Incoming message:', data.type, 'from:', peerId);
 
     if (data.type === 'join') {
-      const name = data.name || data.senderName || 'Anónimo';
+      const name = (data.name || data.senderName || 'Anónimo').trim();
       if (this.role === 'host') {
-        // Soporte de reconexión: si ya existía un invitado con este mismo nombre (p.ej. recargó página),
+        const lower = name.toLowerCase();
+        // Soporte de reconexión / deduplicación: si ya existía un invitado con este mismo nombre,
         // reemplazamos el peerId anterior por el nuevo sin bloquearlo por 'full'.
         for (const [oldPeerId, oldName] of this.guestNames.entries()) {
-          if (oldName === name && oldPeerId !== peerId) {
-            LOG('Reconexión de invitado detectada:', name, 'reemplazando', oldPeerId, 'por', peerId);
+          if (oldName.trim().toLowerCase() === lower && oldPeerId !== peerId) {
+            LOG('Reconexión / deduplicación de invitado:', name, 'reemplazando', oldPeerId, 'por', peerId);
             this.guestNames.delete(oldPeerId);
             const oldConn = this.conns.get(oldPeerId);
             if (oldConn) {
@@ -337,7 +353,7 @@ export class Network {
           }
         }
 
-        if (this.guestNames.size >= this.limit - 1) {
+        if (this.guestNames.size >= this.limit - 1 && !this.guestNames.has(peerId)) {
           this.sendTo(peerId, { type: 'full' });
           return;
         }

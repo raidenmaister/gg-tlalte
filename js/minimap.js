@@ -50,10 +50,10 @@ function makeRealPin({ lat, lng, color, size, label }) {
 /** Pin de jugador con el nombre siempre visible encima de la chincheta. */
 function makePlayerPin({ lat, lng, color, size, label }) {
   const tipY = size * 1.2071;
-  const labelH = 22;
+  const labelH = 24;
   const icon = L.divIcon({
     className: 'gg-player-pin',
-    html: `<div class="gg-player-pin__label">${escapeHtml(label)}</div>
+    html: `<div class="gg-player-pin__label" style="--pin-color:${color}; border-color:${color}; color:${color};">${escapeHtml(label)}</div>
       <div class="gg-pin__pin" style="--pin-color:${color}; width:${size}px; height:${size}px;"></div>`,
     iconSize: [size, tipY + labelH],
     iconAnchor: [size / 2, tipY + labelH],
@@ -160,7 +160,11 @@ export class Minimap {
     this.clear();
     const bounds = [];
     real = real || null;
-    const colors = ['#2563eb', '#dc2626', '#16a34a', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
+    const colors = CONFIG.PLAYER_COLORS || [
+      '#38bdf8', '#f87171', '#34d399', '#fbbf24',
+      '#a78bfa', '#f472b6', '#2dd4bf', '#fb923c',
+      '#a3e635', '#818cf8', '#e879f9', '#facc15'
+    ];
 
     if (real) {
       this.revealLayer.addLayer(

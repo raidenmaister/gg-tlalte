@@ -189,7 +189,14 @@ function renderMultiHp(players) {
   const box = $('#hudHp');
   if (!box) return;
   box.innerHTML = '';
-  (players || []).forEach((p) => {
+  const colors = CONFIG.PLAYER_COLORS || [
+    '#38bdf8', '#f87171', '#34d399', '#fbbf24',
+    '#a78bfa', '#f472b6', '#2dd4bf', '#fb923c',
+    '#a3e635', '#818cf8', '#e879f9', '#facc15'
+  ];
+
+  (players || []).forEach((p, i) => {
+    const color = colors[i % colors.length];
     const row = document.createElement('div');
     row.className = 'hp-row';
     row.dataset.id = p.id;
@@ -197,9 +204,12 @@ function renderMultiHp(players) {
     const name = document.createElement('span');
     name.className = 'hp-name';
     name.textContent = p.name;
+    name.style.color = color;
+    name.style.textShadow = `0 0 8px ${color}55, 0 1px 3px rgba(0,0,0,0.9)`;
 
     const bar = document.createElement('div');
     bar.className = 'hp-bar';
+    bar.style.borderColor = `${color}45`;
     const fill = document.createElement('div');
     const pct = clamp((p.hp / CONFIG.MAX_HP) * 100, 0, 100);
     fill.className = 'hp-fill ' + hpColorClass(pct);
@@ -402,15 +412,25 @@ function renderResult(result) {
     title.textContent = `Ronda ${result.round}/${result.total} · Multiplicador x${result.multiplier || 1}`;
     title.className = 'panel-title panel-title-neutral';
 
-    stats.innerHTML = result.players.map((p) => {
-      const isWinner = p.damage <= 0;
+    const colors = CONFIG.PLAYER_COLORS || [
+      '#38bdf8', '#f87171', '#34d399', '#fbbf24',
+      '#a78bfa', '#f472b6', '#2dd4bf', '#fb923c',
+      '#a3e635', '#818cf8', '#e879f9', '#facc15'
+    ];
+
+    stats.innerHTML = result.players.map((p, i) => {
+      const color = colors[i % colors.length];
+      const isPerfect = p.damage <= 0;
       const damageBadge = p.damage > 0
         ? `<span class="res-damage-badge hit">-${formatNumber(p.damage)} HP</span>`
-        : `<span class="res-damage-badge safe">👑 0 HP</span>`;
+        : `<span class="res-damage-badge safe">⭐ ¡PERFECTO! 0 HP</span>`;
       return `
         <div class="res-multi-row">
           <div class="res-multi-info">
-            <div class="res-multi-name">${p.name} ${isWinner ? '👑' : ''}</div>
+            <div class="res-multi-name" style="color:${color};">
+              <span class="res-color-dot" style="background:${color};"></span>
+              ${escapeHtml(p.name)} ${isPerfect ? '⭐' : ''}
+            </div>
             <div class="res-multi-meta">
               +${formatNumber(p.score)} pts · ${p.distance != null ? formatKm(p.distance) : 'sin guess'}
             </div>

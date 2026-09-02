@@ -626,15 +626,14 @@ export class Game {
       return { ...p, distance: info.distance, roundScore: info.score };
     });
 
-    // En Duelo: el jugador con mejor puntaje en la ronda recibe 0 de daño.
-    // Los rivales reciben daño igual a la diferencia de puntos multiplicada por el factor de ronda.
-    const maxRoundScore = Math.max(0, ...scored.map((p) => p.roundScore));
+    // A MENOS que se logre puntaje perfecto (BASE_SCORE = 5000), a TODOS los jugadores se les quita vida
+    // en base a los puntos perdidos multiplicados por el factor de ronda.
     const roundMult = damageMultiplier(this.currentRound);
 
     const results = scored.map((p) => {
       let damage = 0;
-      if (p.roundScore < maxRoundScore) {
-        damage = Math.round((maxRoundScore - p.roundScore) * roundMult);
+      if (p.roundScore < CONFIG.BASE_SCORE) {
+        damage = Math.round((CONFIG.BASE_SCORE - p.roundScore) * roundMult);
       }
       p.hp = clamp(p.hp - damage, 0, CONFIG.MAX_HP);
       return {

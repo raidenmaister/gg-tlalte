@@ -64,6 +64,22 @@ export const CONFIG = {
   RESULT_DURATION: 9000,    // ms que se muestra el resumen de ronda.
   PREPARE_DURATION: 3,      // Segundos de "prepárate" antes de adivinar (duelo).
 
+  // 12 colores únicos y contrastantes para hasta 12 jugadores simultáneos
+  PLAYER_COLORS: [
+    '#38bdf8', // 1: Celeste brillante
+    '#f87171', // 2: Rojo coral
+    '#34d399', // 3: Verde esmeralda
+    '#fbbf24', // 4: Ámbar / Oro
+    '#a78bfa', // 5: Violeta pastel
+    '#f472b6', // 6: Rosa fuerte
+    '#2dd4bf', // 7: Turquesa
+    '#fb923c', // 8: Naranja neón
+    '#a3e635', // 9: Lima brillante
+    '#818cf8', // 10: Índigo luminoso
+    '#e879f9', // 11: Fucsia / Orquídea
+    '#facc15', // 12: Amarillo intenso
+  ],
+
   // --- Mapa (Leaflet) --------------------------------------------------------
   TILE_URL: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
   TILE_ATTRIBUTION:

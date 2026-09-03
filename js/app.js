@@ -851,6 +851,11 @@ function handleNetMessage(data, fromPeerId) {
     guestPrepareStart();
     return;
   }
+  if (data.type === 'hostLeft') {
+    leaveEverything();
+    resetToMenu(data.reason || 'El anfitrión abandonó la partida. La sala fue cerrada.');
+    return;
+  }
   if (data.type === 'kicked') {
     localStorage.removeItem(ROOM_KEY);
     net.leave();
@@ -867,14 +872,9 @@ async function guestPrepareStart() {
     showScreen('game');
     resetGameUI();
     await ensureViewers();
-    // Asegura que el panorama se cargue antes de procesar roundStart.
+    // Refrescar tamaño y visibilidad del StreetView
     pano.refresh();
-    if (game.currentCoord) {
-      pano.setPano(game.currentCoord.pano_id, game.roundHeading || 0, 0);
-    }
-    // Esperar a que la imagen panorámica esté visible para evitar pantalla azul.
-    await pano.waitForReady().catch(() => {});
-    // Ahora sí: marcar al guest como listo (procesa roundStart pendiente si lo hay).
+    // Marcar al guest como listo de inmediato para procesar roundStart sin retrasos
     game.guestSetReady();
     net.send({ type: 'ready' });
   } catch (err) {
@@ -964,19 +964,20 @@ function persistActiveRoom() {
 }
 
 function leaveRoom() {
-  // Sale de la sala sin eliminarla: la sala anfitriona se conserva para que
-  // al recargar la página puedas reincorporarte a ella.
+  if (net.role === 'host') {
+    try { net.broadcast({ type: 'hostLeft', reason: 'El anfitrión cerró la sala.' }); } catch (e) {}
+    if (net.roomId) apiPost('delete', { id: net.roomId }).catch(() => {});
+  }
   leaveEverything();
-  resetToMenu();
+  resetToMenu('Saliste de la sala');
 }
 
 function deleteRoom() {
-  // Elimina la sala del servidor y la persistencia local.
-  if (net.role === 'host' && net.isPublic && net.roomId) {
-    apiPost('delete', { id: net.roomId }).catch(() => {});
+  if (net.role === 'host') {
+    try { net.broadcast({ type: 'hostLeft', reason: 'El anfitrión eliminó la sala.' }); } catch (e) {}
+    if (net.roomId) apiPost('delete', { id: net.roomId }).catch(() => {});
   }
-  net.leave();
-  localStorage.removeItem(ROOM_KEY);
+  leaveEverything();
   resetToMenu('Sala eliminada');
 }
 
@@ -1275,7 +1276,18 @@ function wire() {
     game.confirmGuess();
   });
   $('#leaveGameBtn').addEventListener('click', () => {
-    if (game.mode === 'multi') leaveEverything();
+    if (game.mode === 'multi') {
+      if (net.role === 'host') {
+        try { net.broadcast({ type: 'hostLeft', reason: 'El anfitrión abandonó la partida. La sala fue cerrada.' }); } catch (e) {}
+        if (net.roomId) apiPost('delete', { id: net.roomId }).catch(() => {});
+        setTimeout(() => {
+          leaveEverything();
+          resetToMenu('Has abandonado la partida');
+        }, 50);
+        return;
+      }
+      leaveEverything();
+    }
     resetToMenu('Partida abandonada');
   });
   $('#resultNextBtn').addEventListener('click', () => {
@@ -1434,7 +1446,7 @@ function wireNet() {
     } else {
       // Guest perdió al host.
       leaveEverything();
-      resetToMenu('El anfitrión se desconectó');
+      resetToMenu('El anfitrión abandonó la partida. La sala fue cerrada.');
     }
   };
 
@@ -1463,6 +1475,18 @@ function wireNet() {
   };
 
   net.cb.onMessage = handleNetMessage;
+
+  // Si el anfitrión cierra o recarga la pestaña, notifica y cierra la sala
+  window.addEventListener('beforeunload', () => {
+    if (net.role === 'host' && (net.roomId || net.roomCode)) {
+      try { net.broadcast({ type: 'hostLeft', reason: 'El anfitrión cerró la ventana.' }); } catch (e) {}
+      if (net.roomId) {
+        const data = new FormData();
+        data.append('id', net.roomId);
+        navigator.sendBeacon('api.php?action=delete', data);
+      }
+    }
+  });
 }
 
 /* --------------------------- Inicio ------------------------------------- */

@@ -314,6 +314,10 @@ export class Network {
             LOG('Error parseando mensaje', e);
           }
         }
+      } else if (res && !res.ok && !this.isHost && (res.error === 'sala no encontrada' || res.error === 'sala cerrada')) {
+        if (this.cb.onGuestLeave) {
+          this.cb.onGuestLeave(null);
+        }
       }
     }, 2500);
   }
@@ -662,11 +666,20 @@ export class Network {
       if (this._closing) return;
       if (isGuestSide) {
         this.conns.delete('__host__');
+        this._p2pConnected = false;
+        if (this.cb.onGuestLeave) {
+          this.cb.onGuestLeave(null);
+        }
       } else {
-        this.conns.delete(conn.peer);
-        if (this.guestNames.has(conn.peer)) {
-          this.guestNames.delete(conn.peer);
+        const peerId = conn.peer;
+        const pName = this.guestNames.get(peerId);
+        this.conns.delete(peerId);
+        if (this.guestNames.has(peerId)) {
+          this.guestNames.delete(peerId);
           this._syncPlayers();
+        }
+        if (this.cb.onGuestLeave) {
+          this.cb.onGuestLeave(peerId, pName);
         }
       }
       if (this.conns.size === 0) {

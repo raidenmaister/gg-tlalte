@@ -177,11 +177,11 @@ export class Game {
     this._hostStarted = true;
     this.emit('toast', { message: 'Iniciando partida…', kind: 'info' });
 
-    // Iniciar ronda 1 de inmediato tras 400ms para que la partida nunca se quede en negro
+    // Iniciar ronda 1 tras 1000ms o cuando todos los jugadores reporten 'ready'
     clearTimeout(this._readyTimer);
     this._readyTimer = setTimeout(() => {
       this._beginRound(1);
-    }, 400);
+    }, 1000);
   }
 
   /** Guest: recibe el mensaje 'start' del host. */
@@ -209,6 +209,7 @@ export class Game {
     this.emit('toast', { message: '¡Comienza la partida!', kind: 'info' });
     this._guestReady = false;
     this._pendingRoundStart = null;
+    this._pendingSyncStart = null;
     this._pendingHurryStart = null;
     this._pendingRoundResult = null;
     this._pendingGameOver = null;
@@ -220,6 +221,7 @@ export class Game {
     if (this._pendingGameOver) {
       const data = this._pendingGameOver;
       this._pendingRoundStart = null;
+      this._pendingSyncStart = null;
       this._pendingHurryStart = null;
       this._pendingRoundResult = null;
       this._pendingGameOver = null;
@@ -229,6 +231,7 @@ export class Game {
     if (this._pendingRoundResult) {
       const data = this._pendingRoundResult;
       this._pendingRoundStart = null;
+      this._pendingSyncStart = null;
       this._pendingHurryStart = null;
       this._pendingRoundResult = null;
       this._onRoundResult(data);
@@ -238,6 +241,11 @@ export class Game {
       const data = this._pendingRoundStart;
       this._pendingRoundStart = null;
       this.handleNetworkMessage(data, null);
+      if (this._pendingSyncStart) {
+        const sync = this._pendingSyncStart;
+        this._pendingSyncStart = null;
+        this._onSyncStart(sync);
+      }
       if (this._pendingHurryStart) {
         const hurry = this._pendingHurryStart;
         this._pendingHurryStart = null;
@@ -414,7 +422,10 @@ export class Game {
   }
 
   _onSyncStart(data) {
-    if (this.currentRound !== data.round) return;
+    if (data.round != null) {
+      this.currentRound = data.round;
+    }
+    this.pano.refresh();
     const prepSecs = data.prepareSeconds || 3;
     this.pano.setBlind(true, '¡Prepárate!', `La imagen se mostrará en ${prepSecs} segundos`, false);
     this._startPrepare(prepSecs, this.currentRound);
@@ -441,7 +452,8 @@ export class Game {
         this.pano.setBlind(true, '¡Prepárate!', `La imagen se mostrará en ${left} segundos`, false);
       } else {
         this._clearPrepare();
-        // Destapar la imagen al mismo milisegundo para todos
+        // Forzar visibilidad y resize del StreetView al destapar
+        this.pano.refresh();
         this.pano.setBlind(false);
         this._activateRound(round);
         if (this.gameMode === 'temporal') {
@@ -885,6 +897,10 @@ export class Game {
         break;
       }
       case 'syncStart': {
+        if (this.role === 'guest' && !this._guestReady) {
+          this._pendingSyncStart = data;
+          break;
+        }
         this._onSyncStart(data);
         break;
       }
@@ -1220,7 +1236,13 @@ export class Game {
   /** Cancela cualquier partida en curso (salida de sala, etc.). */
   abort() {
     this._clearTimers();
+    this._clearPrepare();
     this._clearTemporal();
+    this._pendingRoundStart = null;
+    this._pendingSyncStart = null;
+    this._pendingHurryStart = null;
+    this._pendingRoundResult = null;
+    this._pendingGameOver = null;
     if (this.pano) {
       this.pano.setBlind(false);
       this.pano.setStatic(false);

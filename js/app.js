@@ -1305,28 +1305,16 @@ function wire() {
   const wrap = $('#minimapWrap');
   const panel = $('#minimapPanel');
 
-  // Refresca Leaflet progresivamente mientras el panel se anima (evita tiles en blanco).
-  let _minimapResizeRaf = null;
+  // Refresca Leaflet sin saturar la GPU en equipos modestos
   let _minimapResizeTimeout = null;
   function startMinimapRefresh() {
     stopMinimapRefresh();
     if (wrap.classList.contains('fullscreen')) return;
-    const tick = () => {
-      minimap.refreshSize();
-      _minimapResizeRaf = requestAnimationFrame(tick);
-    };
-    _minimapResizeRaf = requestAnimationFrame(tick);
-    // Timeout de seguridad: nunca dejar el loop corriendo más de 450ms si no dispara transitionend.
     _minimapResizeTimeout = setTimeout(() => {
-      stopMinimapRefresh();
       minimap.refreshSize();
-    }, 450);
+    }, 130);
   }
   function stopMinimapRefresh() {
-    if (_minimapResizeRaf) {
-      cancelAnimationFrame(_minimapResizeRaf);
-      _minimapResizeRaf = null;
-    }
     if (_minimapResizeTimeout) {
       clearTimeout(_minimapResizeTimeout);
       _minimapResizeTimeout = null;

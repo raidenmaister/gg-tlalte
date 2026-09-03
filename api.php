@@ -358,10 +358,36 @@ switch ($action) {
 
         // Soporte retrocompatible para puntuaciones previas
         $entries = [];
+        $actualKey = $key;
         if (isset($leaderboard[$key]) && is_array($leaderboard[$key])) {
             $entries = $leaderboard[$key];
         } elseif ($gameMode === 'normal' && isset($leaderboard[(string)$rounds]) && is_array($leaderboard[(string)$rounds])) {
             $entries = $leaderboard[(string)$rounds];
+            $actualKey = (string)$rounds;
+        }
+
+        // Calibrar/normalizar puntuaciones según el tiempo límite oficial actual de la categoría
+        $timeMax = soloTimeMax($rounds);
+        $dirty = false;
+        foreach ($entries as $i => &$entry) {
+            $pts = intval($entry['points'] ?? 0);
+            $tMs = intval($entry['timeMs'] ?? 0);
+            $expectedScore = leaderScore($rounds, $pts, $tMs, $timeMax);
+            if (!isset($entry['timeMax']) || intval($entry['timeMax']) !== $timeMax || intval($entry['score'] ?? 0) !== $expectedScore) {
+                $entry['timeMax'] = $timeMax;
+                $entry['score'] = $expectedScore;
+                $dirty = true;
+            }
+        }
+        unset($entry);
+
+        if ($dirty) {
+            usort($entries, function ($a, $b) {
+                if ($b['score'] === $a['score']) return $a['timeMs'] - $b['timeMs'];
+                return $b['score'] - $a['score'];
+            });
+            $leaderboard[$actualKey] = $entries;
+            saveJson($leaderboardFile, $leaderboard);
         }
 
         echo json_encode(['ok' => true, 'rounds' => $rounds, 'mode' => $gameMode, 'entries' => $entries]);

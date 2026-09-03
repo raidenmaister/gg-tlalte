@@ -231,17 +231,22 @@ export class PanoramaViewer {
     if (this.panorama) this.panorama.setOptions({ clickToGo: false, scrollwheel: enabled });
   }
 
-  /** Activa/desactiva el modo estático bloqueando completamente la interacción. */
+  /** Activa/desactiva el modo estático bloqueando completamente la interacción y el arrastre. */
   setStatic(enabled) {
     const el = document.getElementById(this.containerId);
     if (el) {
       el.classList.toggle('pano-static', !!enabled);
+    }
+    const overlay = document.getElementById('panoStaticOverlay');
+    if (overlay) {
+      overlay.classList.toggle('hidden', !enabled);
     }
     if (this.panorama) {
       this.panorama.setOptions({
         clickToGo: false,
         scrollwheel: !enabled,
         disableDoubleClickZoom: !!enabled,
+        gestureHandling: enabled ? 'none' : 'greedy',
       });
     }
   }

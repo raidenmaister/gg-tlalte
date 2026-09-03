@@ -9,7 +9,7 @@
 
     <!-- Leaflet (minimapa) -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-    <link rel="stylesheet" href="style.css?v=2.3">
+    <link rel="stylesheet" href="style.css?v=2.4">
 </head>
 <body>
 
@@ -260,6 +260,8 @@
     <!-- ====================== PANTALLA: JUEGO ====================== -->
     <div id="screen-game" class="screen hidden">
         <div id="pano"></div>
+        <!-- Capa física de bloqueo para modos estático y temporal -->
+        <div id="panoStaticOverlay" class="pano-static-overlay hidden"></div>
         <!-- Cortina visual para sincronización anti-trampas y modo temporal -->
         <div class="pano-blind hidden" id="panoBlind">
             <div class="blind-content">

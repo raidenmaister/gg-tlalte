@@ -306,8 +306,8 @@ export class Game {
       this.roundHeading = Math.floor(Math.random() * 360);
     }
 
-    // Configurar modo estático según la regla
-    this.pano.setStatic(this.gameMode === 'static');
+    // Configurar modo estático/bloqueo de arrastre (modos estático y temporal)
+    this.pano.setStatic(this.gameMode === 'static' || this.gameMode === 'temporal');
     this.map.reset();
 
     // Asignar el color real de la chincheta según el jugador (Req 7)
@@ -846,6 +846,7 @@ export class Game {
 
         const coord = this.coordenadas[data.locationIndex];
         this.currentCoord = coord;
+        this.pano.setStatic(this.gameMode === 'static' || this.gameMode === 'temporal');
         this.map.reset();
         const myIndex = this.players.findIndex((p) => p.id === this.net.myId);
         const assignedColor = CONFIG.PLAYER_COLORS[myIndex >= 0 ? myIndex % CONFIG.PLAYER_COLORS.length : 0];

@@ -113,10 +113,7 @@ input {
     align-items: center;
     justify-content: center;
     padding: clamp(16px, 4vw, 64px);
-    background:
-        radial-gradient(1200px 600px at 50% -10%, #1b2440 0%, transparent 60%),
-        radial-gradient(900px 500px at 80% 110%, #24132f 0%, transparent 55%),
-        var(--bg);
+    background: transparent;
     overflow: auto;
 }
 
@@ -126,8 +123,8 @@ input {
     background: #000;
 }
 
-#screen-menu {
-    background: transparent;
+#screen-loading {
+    background: #060812;
 }
 
 #screen-name,
@@ -539,8 +536,26 @@ input {
     z-index: 0;
 }
 
-#pano.pano-static {
+#pano.pano-static,
+#pano.pano-static * {
     pointer-events: none !important;
+    user-select: none !important;
+    touch-action: none !important;
+}
+
+/* Capa transparente invisible para impedir arrastre en modos estático y temporal */
+.pano-static-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    background: transparent;
+    cursor: default;
+    touch-action: none;
+    pointer-events: all;
+}
+
+.pano-static-overlay.hidden {
+    display: none !important;
 }
 
 /* Cortina de sincronización anti-trampas y modo temporal */

@@ -1108,7 +1108,11 @@ function resetToMenu(message) {
 
 function leaveEverything() {
   localStorage.removeItem(ROOM_KEY);
-  net.leave();
+  try {
+    net.leave();
+  } catch (e) {
+    LOG('leaveEverything error:', e);
+  }
 }
 
 /* --------------------------- Wiring ------------------------------------ */
@@ -1429,16 +1433,20 @@ function wire() {
   $('#gameOverBtn').addEventListener('click', () => {
     audio.ensure();
     audio.click();
-    if (game.mode === 'multi') {
-      if (net.role === 'host') {
-        const msg = { type: 'hostLeft', reason: 'El anfitrión finalizó la partida y volvió al menú.' };
-        try { net.broadcast(msg); } catch (e) {}
-        if (net.roomId) {
-          apiPost('send-msg', { id: net.roomId, from: 'host', to: 'all', payload: JSON.stringify(msg) }).catch(() => {});
-          apiPost('delete', { id: net.roomId }).catch(() => {});
+    try {
+      if (game.mode === 'multi') {
+        if (net.role === 'host') {
+          const msg = { type: 'hostLeft', reason: 'El anfitrión finalizó la partida y volvió al menú.' };
+          try { net.broadcast(msg); } catch (e) {}
+          if (net.roomId) {
+            apiPost('send-msg', { id: net.roomId, from: 'host', to: 'all', payload: JSON.stringify(msg) }).catch(() => {});
+            apiPost('delete', { id: net.roomId }).catch(() => {});
+          }
         }
+        leaveEverything();
       }
-      leaveEverything();
+    } catch (e) {
+      LOG('gameOverBtn multi leave error:', e);
     }
     resetToMenu();
   });

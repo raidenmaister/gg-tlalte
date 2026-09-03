@@ -819,8 +819,8 @@ export class Network {
     this._closing = true;
     this._clearHeartbeat();
     this._stopPolling();
-    this._stopHostPing();
-    this._stopGuestWatchdog();
+    this._gameInProgress = false;
+    this.roomStatus = 'waiting';
     if (this._connTimeout) {
       clearTimeout(this._connTimeout);
       this._connTimeout = null;

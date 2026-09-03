@@ -232,11 +232,17 @@ function renderMultiHp(players) {
     const bar = document.createElement('div');
     bar.className = 'hp-bar';
     bar.style.borderColor = `${color}45`;
+
+    const ghost = document.createElement('div');
+    ghost.className = 'hp-ghost';
+
     const fill = document.createElement('div');
     const hp = (typeof p.hp === 'number' && !isNaN(p.hp)) ? p.hp : CONFIG.MAX_HP;
     const pct = clamp((hp / CONFIG.MAX_HP) * 100, 0, 100);
     fill.className = 'hp-fill ' + hpColorClass(pct);
     fill.style.width = pct + '%';
+    ghost.style.width = pct + '%';
+    bar.appendChild(ghost);
     bar.appendChild(fill);
 
     const val = document.createElement('span');
@@ -275,6 +281,12 @@ function animateMultiHp(result) {
 
     const bar = row.querySelector('.hp-bar');
     const fill = row.querySelector('.hp-fill');
+    let ghost = row.querySelector('.hp-ghost');
+    if (!ghost && bar) {
+      ghost = document.createElement('div');
+      ghost.className = 'hp-ghost';
+      bar.insertBefore(ghost, fill);
+    }
     const val = row.querySelector('.hp-val');
     let diff = row.querySelector('.hp-diff');
     if (!diff) {
@@ -285,12 +297,15 @@ function animateMultiHp(result) {
     if (!bar || !fill || !val) return;
 
     const damage = p.damage || 0;
-    const afterPct = (p.hp / CONFIG.MAX_HP) * 100;
+    const afterPct = clamp((p.hp / CONFIG.MAX_HP) * 100, 0, 100);
+    const beforeHp = clamp(p.hp + damage, 0, CONFIG.MAX_HP);
+    const beforePct = clamp((beforeHp / CONFIG.MAX_HP) * 100, 0, 100);
 
     if (damage <= 0) {
       diff.className = 'hp-diff safe';
       diff.textContent = '0 pts';
       fill.style.width = afterPct + '%';
+      if (ghost) ghost.style.width = afterPct + '%';
       fill.className = 'hp-fill ' + hpColorClass(afterPct);
       val.textContent = Math.round(p.hp);
       return;
@@ -307,27 +322,22 @@ function animateMultiHp(result) {
     row.appendChild(floatEl);
     setTimeout(() => floatEl.remove(), 2500);
 
-    const beforeHp = clamp(p.hp + damage, 0, CONFIG.MAX_HP);
-    const beforePct = (beforeHp / CONFIG.MAX_HP) * 100;
-    const damagePct = (damage / CONFIG.MAX_HP) * 100;
-
-    // Estado previo + tramo rojo parpadeante
+    // 1. Ambas barras comienzan en el porcentaje previo
+    if (ghost) ghost.style.width = beforePct + '%';
     fill.style.width = beforePct + '%';
     val.textContent = Math.round(beforeHp);
 
-    const layer = document.createElement('div');
-    layer.className = 'hp-damage';
-    layer.style.left = afterPct + '%';
-    layer.style.width = damagePct + '%';
-    bar.appendChild(layer);
-
+    // 2. A los 200ms la barra verde se retrae, revelando claramente la sección roja de vida perdida
     setTimeout(() => {
-      // Se aplica el daño real: desaparece la capa y la barra se contrae
-      layer.remove();
       fill.style.width = afterPct + '%';
       fill.className = 'hp-fill ' + hpColorClass(afterPct);
       val.textContent = Math.round(p.hp);
-    }, 1100);
+    }, 200);
+
+    // 3. A los 850ms, la barra roja se drena suavemente hasta alcanzar el nuevo valor
+    setTimeout(() => {
+      if (ghost) ghost.style.width = afterPct + '%';
+    }, 850);
   });
 }
 
@@ -830,6 +840,18 @@ function renderPublicList(rooms) {
 }
 
 /* --------------------------- Red --------------------------------------- */
+function handleHostDeparture(reason) {
+  if (gameInProgress() && game.mode === 'multi' && game.players.length === 2) {
+    // Si es 1vs1 y el anfitrión abandona la partida, el jugador restante gana por abandono
+    game.abort();
+    leaveEverything();
+    resetToMenu('¡Victoria por abandono! El anfitrión abandonó la partida.');
+    return;
+  }
+  leaveEverything();
+  resetToMenu(reason || 'El anfitrión abandonó la partida. La sala fue cerrada.');
+}
+
 function handleNetMessage(data, fromPeerId) {
   LOG('handleNetMessage', { data, fromPeerId });
   if (data.type === 'players') {
@@ -852,8 +874,7 @@ function handleNetMessage(data, fromPeerId) {
     return;
   }
   if (data.type === 'hostLeft') {
-    leaveEverything();
-    resetToMenu(data.reason || 'El anfitrión abandonó la partida. La sala fue cerrada.');
+    handleHostDeparture(data.reason);
     return;
   }
   if (data.type === 'kicked') {
@@ -1278,12 +1299,16 @@ function wire() {
   $('#leaveGameBtn').addEventListener('click', () => {
     if (game.mode === 'multi') {
       if (net.role === 'host') {
-        try { net.broadcast({ type: 'hostLeft', reason: 'El anfitrión abandonó la partida. La sala fue cerrada.' }); } catch (e) {}
-        if (net.roomId) apiPost('delete', { id: net.roomId }).catch(() => {});
+        const msg = { type: 'hostLeft', reason: 'El anfitrión abandonó la partida. La sala fue cerrada.' };
+        try { net.broadcast(msg); } catch (e) {}
+        if (net.roomId) {
+          apiPost('send-msg', { id: net.roomId, from: 'host', to: 'all', payload: JSON.stringify(msg) }).catch(() => {});
+          apiPost('delete', { id: net.roomId }).catch(() => {});
+        }
         setTimeout(() => {
           leaveEverything();
           resetToMenu('Has abandonado la partida');
-        }, 50);
+        }, 200);
         return;
       }
       leaveEverything();
@@ -1433,9 +1458,12 @@ function wireNet() {
       showToast('Un jugador abandonó la sala', 'error');
     } else {
       // Guest perdió al host.
-      leaveEverything();
-      resetToMenu('El anfitrión abandonó la partida. La sala fue cerrada.');
+      handleHostDeparture('El anfitrión abandonó la partida.');
     }
+  };
+
+  net.cb.onHostLeft = (reason) => {
+    handleHostDeparture(reason);
   };
 
   net.cb.onKicked = (reason) => {

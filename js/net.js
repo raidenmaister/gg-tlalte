@@ -287,12 +287,8 @@ export class Network {
     // Polling ligero (2.5s) que se apaga automáticamente cuando WebRTC P2P conecta con todos los clientes
     this._pollTimer = setInterval(async () => {
       if (this._closing || !this.roomId) return;
-      // Si P2P ya está activo con todos los invitados (o host en guest), no gastar peticiones en PHP
+      // Si P2P ya está activo con todos los invitados (solo host), no gastar peticiones en PHP
       if (this.isHost && this._p2pConnected && this.conns.size >= this.guestNames.size && this.guestNames.size > 0) {
-        this._stopPolling();
-        return;
-      }
-      if (!this.isHost && this._p2pConnected && this.conns.get('__host__')?.open) {
         this._stopPolling();
         return;
       }
@@ -315,11 +311,14 @@ export class Network {
           }
         }
       } else if (res && !res.ok && !this.isHost && (res.error === 'sala no encontrada' || res.error === 'sala cerrada')) {
-        if (this.cb.onGuestLeave) {
+        this._stopPolling();
+        if (this.cb.onHostLeft) {
+          this.cb.onHostLeft('El anfitrión abandonó la partida.');
+        } else if (this.cb.onGuestLeave) {
           this.cb.onGuestLeave(null);
         }
       }
-    }, 2500);
+    }, 2000);
   }
 
   _stopPolling() {
@@ -438,6 +437,17 @@ export class Network {
       this.leave();
       if (this.cb.onKicked) {
         this.cb.onKicked(data.reason || 'El anfitrión te expulsó de la sala');
+      }
+      return;
+    }
+
+    if (data.type === 'hostLeft') {
+      this._closing = true;
+      this.leave();
+      if (this.cb.onHostLeft) {
+        this.cb.onHostLeft(data.reason || 'El anfitrión abandonó la partida.');
+      } else if (this.cb.onGuestLeave) {
+        this.cb.onGuestLeave(null);
       }
       return;
     }
@@ -732,7 +742,15 @@ export class Network {
   }
 
   /** Cierra todas las conexiones y destruye el Peer. */
-  leave() {
+  leave(reason = null) {
+    if (this.isHost && !this._closing) {
+      const msg = { type: 'hostLeft', reason: reason || 'El anfitrión abandonó la partida.' };
+      try { this.broadcast(msg); } catch (e) {}
+      if (this.roomId) {
+        this._api('send-msg', { id: this.roomId, from: this.myId || 'host', to: 'all', payload: JSON.stringify(msg) });
+        this._api('delete', { id: this.roomId });
+      }
+    }
     this._closing = true;
     this._clearHeartbeat();
     this._stopPolling();

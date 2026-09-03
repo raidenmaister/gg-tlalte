@@ -172,25 +172,41 @@ export class PanoramaViewer {
   /**
    * Resuelve cuando la panorámica solicitada terminó de cargarse.
    * @returns {Promise<void>} Rechaza si el pano no existe o hay error.
+  /**
+   * Resuelve cuando la panorámica solicitada terminó de cargarse y renderizarse en alta definición.
+   * @param {number} maxTimeout Tiempo máximo de espera antes de continuar (por defecto 2500ms).
+   * @returns {Promise<void>}
    */
-  waitForReady() {
+  waitForReady(maxTimeout = 2500) {
     if (!this.panorama) return Promise.resolve();
-    if (this.status === 'OK') return Promise.resolve();
 
     return new Promise((resolve, reject) => {
       const prev = this.callbacks.onStatusChange;
       let timer = null;
+      let bufferTimer = null;
+      let done = false;
 
       const restore = () => {
         if (timer) clearTimeout(timer);
+        if (bufferTimer) clearTimeout(bufferTimer);
         this.callbacks.onStatusChange = prev;
+      };
+
+      const finishSuccess = () => {
+        if (done) return;
+        done = true;
+        // Margen de 250ms para que Street View descargue y decodifique las teselas HD evitando imágenes borrosas
+        bufferTimer = setTimeout(() => {
+          restore();
+          this.refresh();
+          resolve();
+        }, 250);
       };
 
       const onStatus = (s) => {
         this.status = s;
         if (s === 'OK') {
-          restore();
-          resolve();
+          finishSuccess();
         } else if (s && s !== 'LOADING' && s !== 'UNKNOWN') {
           restore();
           reject(new Error('Panorámica no disponible'));
@@ -198,13 +214,21 @@ export class PanoramaViewer {
       };
 
       this.callbacks.onStatusChange = onStatus;
-      onStatus(this.status);
+      if (this.status === 'OK') {
+        finishSuccess();
+      } else {
+        onStatus(this.status);
+      }
 
-      // Timeout de seguridad: nunca bloquear la partida más de 15s.
+      // Timeout de seguridad: nunca congelar la partida más de maxTimeout si el internet es lento
       timer = setTimeout(() => {
-        restore();
-        resolve();
-      }, 15000);
+        if (!done) {
+          done = true;
+          restore();
+          this.refresh();
+          resolve();
+        }
+      }, maxTimeout);
     });
   }
 

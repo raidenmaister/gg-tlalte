@@ -336,14 +336,15 @@ export class Game {
     this._emitHud();
 
     if (this.mode === 'solo') {
-      // En solitario: cortina de carga activa hasta decodificar la imagen
-      this.pano.setBlind(true, 'Cargando ubicación…', 'Preparando la imagen 360°', true);
+      // En solitario: cortina de carga activa hasta decodificar y rasterizar las teselas en alta definición
+      this.pano.setBlind(true, 'Ronda ' + round, 'Cargando ubicación en alta definición…', true);
       this.pano.setPano(coord.pano_id, this.roundHeading, 0);
 
-      this.pano.waitForReady()
+      this.pano.waitForReady(2500)
         .catch(() => {})
         .then(() => {
           if (this.state !== 'playing' || this.currentRound !== round) return;
+          this.pano.refresh();
           this.pano.setBlind(false);
           this._startSoloRoundTimer(round);
           if (this.gameMode === 'temporal') {
@@ -353,8 +354,8 @@ export class Game {
       return;
     }
 
-    // Multijugador: Barrera de sincronización anti-trampas
-    this.pano.setBlind(true, 'Sincronizando jugadores…', 'Cargando la panorámica en segundo plano', true);
+    // Multijugador: Cortina de preparación ágil
+    this.pano.setBlind(true, 'Ronda ' + round, 'Cargando ubicación en alta definición…', true);
     this.pano.setPano(coord.pano_id, this.roundHeading, 0);
 
     if (this.role === 'host') {
@@ -377,18 +378,18 @@ export class Game {
         })),
       });
 
-      // El anfitrión también espera a que su propio visor decodifique
-      this.pano.waitForReady()
+      // El anfitrión también espera a que su visor decodifique
+      this.pano.waitForReady(2500)
         .catch(() => {})
         .then(() => {
           this._panoReadyPeers.add(this.net.myId);
           this._checkAllPanoReady(round);
         });
 
-      // Timeout de seguridad de 6s en caso de que algún jugador tenga lag severo
+      // Margen de sincronización ultra ágil: máximo 1200ms para no demorar la partida si un rival tiene conexión lenta
       this._syncTimeout = setTimeout(() => {
         this._triggerSyncStart(round);
-      }, 6000);
+      }, 1200);
     }
   }
 
@@ -870,15 +871,14 @@ export class Game {
         this.emit('temporalTimer', { seconds: null });
         this._emitHud();
 
-        // Barrera anti-trampas: cortina activa mientras se carga el panorama
-        this.pano.setBlind(true, 'Sincronizando jugadores…', 'Cargando la panorámica en segundo plano', true);
+        // Cortina de carga activa mientras se prepara el panorama
+        this.pano.setBlind(true, 'Ronda ' + data.round, 'Cargando ubicación en alta definición…', true);
         this.pano.setPano(coord.pano_id, this.roundHeading, 0);
 
-        this.pano.waitForReady()
+        this.pano.waitForReady(2500)
           .catch(() => {})
           .then(() => {
             if (this.state !== 'playing' || this.currentRound !== data.round) return;
-            this.pano.setBlind(true, 'Esperando a los demás jugadores…', 'La ronda iniciará en sincronía');
             this.net.send({
               type: 'panoReady',
               round: this.currentRound,

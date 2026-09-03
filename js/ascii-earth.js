@@ -81,13 +81,10 @@ export class AsciiEarthBackground {
 
     this.ctx = this.canvas.getContext('2d');
 
-    // Capa estática: espacio, estrellas, rayos y sol (se recalcula al resize).
-    this.staticCanvas = document.createElement('canvas');
-    this.staticCtx = this.staticCanvas.getContext('2d');
-
     this.rotation = -Math.PI / 2; // centra América al frente
     this.rotationSpeed = 0.05;    // rad/s
 
+    this.stars = [];
     this._running = false;
     this._raf = 0;
     this._last = 0;
@@ -98,7 +95,7 @@ export class AsciiEarthBackground {
     window.addEventListener('resize', this._onResize);
 
     this._resize();
-    this._renderFrame();
+    this._renderFrame(performance.now());
   }
 
   start() {
@@ -127,7 +124,7 @@ export class AsciiEarthBackground {
       this._frameAccum = 0;
       this.rotation += this.rotationSpeed * dt;
       if (this.rotation > Math.PI * 2) this.rotation -= Math.PI * 2;
-      this._renderFrame();
+      this._renderFrame(now);
     }
 
     this._raf = requestAnimationFrame((t) => this._loop(t));
@@ -142,8 +139,6 @@ export class AsciiEarthBackground {
 
     this.canvas.width = w;
     this.canvas.height = h;
-    this.staticCanvas.width = w;
-    this.staticCanvas.height = h;
 
     // Cuadrícula ASCII: celda entre 10 y 16 px según el tamaño de pantalla.
     this.cell = Math.max(10, Math.min(16, Math.round(Math.min(w, h) / 56)));
@@ -153,11 +148,8 @@ export class AsciiEarthBackground {
     this.ctx.font = `bold ${this.cell}px "Courier New", Consolas, monospace`;
     this.ctx.textAlign = 'center';
     this.ctx.textBaseline = 'middle';
-    this.staticCtx.font = this.ctx.font;
-    this.staticCtx.textAlign = 'center';
-    this.staticCtx.textBaseline = 'middle';
 
-    // Esfera gigante desplazada fuera de la pantalla, abajo a la derecha.
+    // Esfera gigante desplazada hacia abajo a la derecha.
     const cx = w * 0.75;
     const cy = h * 1.2;
     const R = Math.min(w, h) * 0.9;
@@ -166,28 +158,17 @@ export class AsciiEarthBackground {
     this.cy = cy;
     this.R = R;
 
-    // Sol: clavado en el limbo (sobre el arco), a media-altura izquierda.
-    // Dirección desde el centro hacia el sol en la pantalla.
-    const dirx = -0.72;
-    const diry = -0.62;
-    const dl = Math.sqrt(dirx * dirx + diry * diry);
-    const sunX = cx + R * (dirx / dl);
-    const sunY = cy + R * (diry / dl);
-    this.sunX = sunX;
-    this.sunY = sunY;
-
-    // Dirección de la luz (hacia el sol) en el espacio 3D de la esfera.
-    // dx, dy se leen en la pantalla; z aporta una luz de relleno hacia la cámara.
-    const ldx = sunX - cx;
-    const ldy = sunY - cy;
-    const lz = R * 0.22;
+    // Dirección de la luz en 3D para iluminar el globo terráqueo de forma natural
+    const ldx = -0.55;
+    const ldy = -0.45;
+    const lz = 0.70;
     const ll = Math.sqrt(ldx * ldx + ldy * ldy + lz * lz);
     this.lightX = ldx / ll;
     this.lightY = ldy / ll;
     this.lightZ = lz / ll;
 
     this._rebuildCells();
-    this._rebuildStatic();
+    this._buildStars();
   }
 
   // Precalcula la posición y geometría de cada celda interior a la esfera.
@@ -218,25 +199,21 @@ export class AsciiEarthBackground {
     this.cells = list;
   }
 
-  // Capa estática: espacio, estrellas, rayos y núcleo solar.
-  _rebuildStatic() {
-    const ctx = this.staticCtx;
-    const w = this.canvas.width;
-    const h = this.canvas.height;
-    const cell = this.cell;
+  // Genera estrellas ASCII parpadeantes en el espacio profundo
+  _buildStars() {
+    // Densidad moderada y limpia
+    const count = Math.floor(this.cols * this.rows * 0.035);
+    const stars = [];
 
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, w, h);
+    // Colores sutiles y elegantes (blanco y luz estelar suave)
+    const starColors = ['#ffffff', '#c8d6ff'];
 
-    this._drawStars(ctx);
-    this._drawRays(ctx);
-    this._drawSunCore(ctx);
-  }
-
-  _drawStars(ctx) {
-    const count = Math.floor(this.cols * this.rows * 0.045);
-    const chars = ['.', '*', '+'];
-    ctx.fillStyle = '#b9c6ff';
+    const charSets = [
+      ['.', '*'],
+      ['·', '+'],
+      ['.', '·'],
+      ['+', '*'],
+    ];
 
     for (let i = 0; i < count; i++) {
       const col = Math.floor(Math.random() * this.cols);
@@ -244,100 +221,63 @@ export class AsciiEarthBackground {
       const x = col * this.cell + this.cell / 2;
       const y = row * this.cell + this.cell / 2;
 
-      // Solo en el espacio exterior (fuera de la esfera).
+      // Solo en el espacio exterior (fuera de la Tierra)
       const dx = x - this.cx;
       const dy = y - this.cy;
       if (dx * dx + dy * dy <= this.R * this.R) continue;
 
-      ctx.fillText(chars[(Math.random() * chars.length) | 0], x, y);
+      stars.push({
+        x,
+        y,
+        chars: charSets[Math.floor(Math.random() * charSets.length)],
+        color: starColors[Math.floor(Math.random() * starColors.length)],
+        speed: 0.35 + Math.random() * 0.65, // velocidad de titileo suave y pausada
+        phase: Math.random() * Math.PI * 2,
+        baseAlpha: 0.3 + Math.random() * 0.6,
+      });
     }
+
+    this.stars = stars;
   }
 
-  _drawRays(ctx) {
-    const sunX = this.sunX;
-    const sunY = this.sunY;
-    const R = this.R;
-    const cx = this.cx;
-    const cy = this.cy;
-    const cell = this.cell;
-    const w = this.canvas.width;
-    const h = this.canvas.height;
+  // Dibuja las estrellas ASCII con animación de parpadeo armónico
+  _drawStars(ctx, timeSec) {
+    if (!this.stars || this.stars.length === 0) return;
 
-    for (let row = 0; row < this.rows; row++) {
-      const y = row * cell + cell / 2;
-      for (let col = 0; col < this.cols; col++) {
-        const x = col * cell + cell / 2;
+    for (let i = 0; i < this.stars.length; i++) {
+      const s = this.stars[i];
+      // Ciclo senoidal de parpadeo suave
+      const wave = 0.5 + 0.5 * Math.sin(timeSec * s.speed + s.phase);
 
-        // Solo espacio exterior.
-        const ddx = x - cx;
-        const ddy = y - cy;
-        if (ddx * ddx + ddy * ddy <= R * R) continue;
+      // Variación del carácter según la intensidad de brillo
+      const charIdx = Math.min(s.chars.length - 1, Math.floor(wave * s.chars.length));
+      const char = s.chars[charIdx];
 
-        const dsx = x - sunX;
-        const dsy = y - sunY;
-        const ds = Math.sqrt(dsx * dsx + dsy * dsy);
-        if (ds < cell * 1.2) continue;
-        if (ds > R * 0.85) continue;
+      const alpha = Math.max(0.12, s.baseAlpha * (0.2 + 0.8 * wave));
 
-        const theta = Math.atan2(dsy, dsx);
-        // Patrón armónico que crea un abanico de rayos direccionales.
-        const wave = Math.sin(8 * theta) + Math.sin(16 * theta);
-        if (wave <= 0.35) continue;
-
-        // Densidad inversa a la distancia al sol.
-        const density = Math.max(0.25, 1 - ds / (R * 0.85));
-        if (Math.random() > density * 0.75) continue;
-
-        const c = this._rayChar(dsx, dsy);
-        const bright = Math.min(1, density + 0.35);
-        ctx.fillStyle = `rgba(255,238,190,${bright})`;
-        ctx.fillText(c, x, y);
-      }
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = s.color;
+      ctx.fillText(char, s.x, s.y);
     }
-  }
-
-  _rayChar(dx, dy) {
-    const ax = Math.abs(dx);
-    const ay = Math.abs(dy);
-    if (ax > ay * 2) return '-';
-    if (ay > ax * 2) return '|';
-    if (dx * dy > 0) return '\\';
-    return '/';
-  }
-
-  _drawSunCore(ctx) {
-    const sunX = this.sunX;
-    const sunY = this.sunY;
-    const cell = this.cell;
-    const r = Math.max(2, Math.round(cell * 0.42));
-
-    ctx.fillStyle = '#fff7e0';
-    for (let dy = -r; dy <= r; dy++) {
-      for (let dx = -r; dx <= r; dx++) {
-        const d = Math.sqrt(dx * dx + dy * dy);
-        if (d > r) continue;
-
-        let c;
-        if (d < r * 0.4) c = '@';
-        else if (d < r * 0.7) c = '0';
-        else c = '#';
-
-        ctx.fillText(c, sunX + dx * cell, sunY + dy * cell);
-      }
-    }
+    ctx.globalAlpha = 1.0;
   }
 
   /* ------------------------------------------------------------------ */
-  /* Render del planeta (única pasada por celda interior)                */
+  /* Render del cuadro (estrellas parpadeantes + planeta)                */
   /* ------------------------------------------------------------------ */
-  _renderFrame() {
+  _renderFrame(now = 0) {
     const ctx = this.ctx;
     const w = this.canvas.width;
     const h = this.canvas.height;
 
-    ctx.clearRect(0, 0, w, h);
-    ctx.drawImage(this.staticCanvas, 0, 0);
+    // Fondo oscuro espacial profundo
+    ctx.fillStyle = '#04060e';
+    ctx.fillRect(0, 0, w, h);
 
+    // 1. Estrellas parpadeantes en el espacio
+    this._drawStars(ctx, now * 0.001);
+
+    // 2. Planeta Tierra girando en 3D
     this._drawPlanet(ctx);
   }
 

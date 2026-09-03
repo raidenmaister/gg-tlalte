@@ -2,7 +2,7 @@
 // app.js — Punto de entrada. Coordina UI, red, visor panorámico y juego.
 // ============================================================================
 
-import { $, formatKm, formatNumber, clamp } from './utils.js';
+import { $, formatKm, formatNumber, clamp, escapeHtml } from './utils.js';
 import { CONFIG } from './config.js';
 import { audio } from './audio.js';
 import { PanoramaViewer } from './panorama.js';
@@ -38,9 +38,19 @@ function showScreen(id) {
   const el = document.getElementById('screen-' + id);
   if (el) el.classList.remove('hidden');
 
-  // El fondo orbital solo se anima en el menú principal.
-  if (id === 'menu') asciiEarth.start();
-  else asciiEarth.stop();
+  // El fondo orbital y de estrellas persiste entre todos los menús (Req 3)
+  const isMenu = ['name', 'menu', 'solo', 'create', 'join', 'leaderboard', 'lobby'].includes(id);
+  if (isMenu) {
+    asciiEarth.start();
+  } else {
+    asciiEarth.stop();
+  }
+
+  // El badge BETA v1.0.0 solo se muestra en los menús (Req 4)
+  const badge = document.getElementById('versionBadge');
+  if (badge) {
+    badge.classList.toggle('hidden', !isMenu);
+  }
 }
 
 let toastTimer = null;
@@ -87,9 +97,9 @@ async function saveScoreToLeaderboard(entry) {
   return apiPost('save-score', entry);
 }
 
-async function fetchLeaderboard(rounds) {
+async function fetchLeaderboard(rounds, mode = leaderboardMode || 'normal') {
   try {
-    const res = await fetch(`${API_URL}?action=leaderboard&rounds=${rounds}&_t=${Date.now()}`, {
+    const res = await fetch(`${API_URL}?action=leaderboard&rounds=${rounds}&mode=${mode}&_t=${Date.now()}`, {
       cache: 'no-store',
     });
     const data = await res.json();
@@ -103,7 +113,10 @@ async function fetchLeaderboard(rounds) {
 /* --------------------------- Carga de datos ---------------------------- */
 function ensureData() {
   if (!dataPromise) {
-    dataPromise = game.loadData();
+    dataPromise = game.loadData().catch((err) => {
+      dataPromise = null;
+      throw err;
+    });
   }
   return dataPromise;
 }
@@ -166,6 +179,13 @@ function renderHud(hud) {
   $('#hudScore').classList.toggle('hidden', isMulti);
   $('#hudHp').classList.toggle('hidden', !isMulti);
 
+  const roundEl = $('#hudRound');
+  if (isMulti && hud.penalty) {
+    roundEl.textContent = `RONDA ${hud.round}/${hud.total} · SIN GUESS: -${hud.penalty} PTS`;
+  } else {
+    roundEl.textContent = `RONDA ${hud.round}/${hud.total}`;
+  }
+
   if (!isMulti) {
     $('#hudScoreValue').textContent = formatNumber(hud.me.score);
   } else {
@@ -190,11 +210,12 @@ function renderMultiHp(players) {
   const box = $('#hudHp');
   if (!box) return;
   box.innerHTML = '';
-  const colors = CONFIG.PLAYER_COLORS || [
-    '#38bdf8', '#f87171', '#34d399', '#fbbf24',
-    '#a78bfa', '#f472b6', '#2dd4bf', '#fb923c',
-    '#a3e635', '#818cf8', '#e879f9', '#facc15'
-  ];
+  if (players && players.length > 10) {
+    box.classList.add('many-players');
+  } else {
+    box.classList.remove('many-players');
+  }
+  const colors = CONFIG.PLAYER_COLORS;
 
   (players || []).forEach((p, i) => {
     const color = colors[i % colors.length];
@@ -244,7 +265,7 @@ function animateMultiHp(result) {
       const rows = box.querySelectorAll('.hp-row');
       for (const r of rows) {
         const nameEl = r.querySelector('.hp-name');
-        if (nameEl && nameEl.textContent === p.name) {
+        if (nameEl && nameEl.textContent.trim() === (p.name || '').trim()) {
           row = r;
           break;
         }
@@ -268,16 +289,23 @@ function animateMultiHp(result) {
 
     if (damage <= 0) {
       diff.className = 'hp-diff safe';
-      diff.textContent = '0 HP';
+      diff.textContent = '0 pts';
       fill.style.width = afterPct + '%';
       fill.className = 'hp-fill ' + hpColorClass(afterPct);
       val.textContent = Math.round(p.hp);
       return;
     }
 
-    // Mostrar badge rojo con la cantidad de vida que pierde
+    // Mostrar badge con la cantidad de puntos que pierde
     diff.className = 'hp-diff damage';
-    diff.textContent = `-${formatNumber(damage)}`;
+    diff.textContent = `-${formatNumber(damage)} pts`;
+
+    // Número flotante de combate que sube y se desvanece
+    const floatEl = document.createElement('div');
+    floatEl.className = 'hp-floating-damage';
+    floatEl.textContent = `-${formatNumber(damage)} pts`;
+    row.appendChild(floatEl);
+    setTimeout(() => floatEl.remove(), 2500);
 
     const beforeHp = clamp(p.hp + damage, 0, CONFIG.MAX_HP);
     const beforePct = (beforeHp / CONFIG.MAX_HP) * 100;
@@ -322,10 +350,11 @@ function renderWaiting({ waiting }) {
   if (waiting) collapseMinimap();
 }
 
-function renderCountdown({ seconds, guesserName }) {
+function renderCountdown({ seconds, guesserName, penalty }) {
   const banner = $('#countdownBanner');
   const num = $('#countdownNumber');
   const label = banner ? banner.querySelector('.countdown-label') : null;
+  const sub = banner ? banner.querySelector('.countdown-sub') : null;
   if (seconds == null || seconds <= 0) {
     banner.classList.add('hidden');
   } else {
@@ -339,6 +368,14 @@ function renderCountdown({ seconds, guesserName }) {
         label.textContent = `¡${guesserName} ya adivinó!`;
       } else {
         label.textContent = '¡Ya adivinaron!';
+      }
+    }
+    if (sub) {
+      if (!game.myGuess && penalty) {
+        sub.innerHTML = `¡Adivina ahora o perderás <strong>${penalty} puntos</strong>!`;
+        sub.classList.remove('hidden');
+      } else {
+        sub.classList.add('hidden');
       }
     }
   }
@@ -417,7 +454,8 @@ function renderResult(result) {
     $('#hudScoreValue').textContent = formatNumber(result.myTotalScore);
   } else {
     // Multijugador: tarjeta de resultados por ronda con daño exacto
-    title.textContent = `Ronda ${result.round}/${result.total} · Multiplicador x${result.multiplier || 1}`;
+    const penaltyText = result.penalty ? ` · Penalización base: -${result.penalty} pts` : '';
+    title.textContent = `Ronda ${result.round}/${result.total}${penaltyText}`;
     title.className = 'panel-title panel-title-neutral';
 
     const colors = CONFIG.PLAYER_COLORS || [
@@ -430,8 +468,8 @@ function renderResult(result) {
       const color = colors[i % colors.length];
       const isPerfect = p.damage <= 0;
       const damageBadge = p.damage > 0
-        ? `<span class="res-damage-badge hit">-${formatNumber(p.damage)} HP</span>`
-        : `<span class="res-damage-badge safe">⭐ ¡PERFECTO! 0 HP</span>`;
+        ? `<span class="res-damage-badge hit">Pierde: -${formatNumber(p.damage)} pts</span>`
+        : `<span class="res-damage-badge safe">⭐ ¡A salvo! 0 pts</span>`;
       return `
         <div class="res-multi-row">
           <div class="res-multi-info">
@@ -440,11 +478,11 @@ function renderResult(result) {
               ${escapeHtml(p.name)} ${isPerfect ? '⭐' : ''}
             </div>
             <div class="res-multi-meta">
-              +${formatNumber(p.score)} pts · ${p.distance != null ? formatKm(p.distance) : 'sin guess'}
+              ${p.guess ? `+${formatNumber(p.score)} pts · ${p.distance != null ? formatKm(p.distance) : ''}` : '<span class="res-no-guess">⚠️ No adivinó a tiempo</span>'}
             </div>
           </div>
           ${damageBadge}
-          <div class="res-hp-left">${formatNumber(p.hp)} HP</div>
+          <div class="res-hp-left">${formatNumber(p.hp)} pts</div>
         </div>
       `;
     }).join('');
@@ -465,6 +503,7 @@ async function handleGameOver(result) {
       rounds: result.total,
       points: result.myTotalScore,
       timeMs: result.timeMs || 0,
+      gameMode: result.gameMode || 'normal',
     });
   }
 }
@@ -492,16 +531,16 @@ function renderGameOver(result) {
   } else {
     // Multijugador: ranking final.
     if (result.won) {
-      title.textContent = '¡VICTORIA!';
+      title.textContent = result.reason === 'forfeit' ? '¡VICTORIA POR ABANDONO!' : '¡VICTORIA!';
       title.className = 'panel-title panel-title-win';
     } else {
-      title.textContent = 'Fin de partida';
+      title.textContent = result.reason === 'forfeit' ? 'Rival desconectado' : 'Fin de partida';
       title.className = 'panel-title panel-title-neutral';
     }
     stats.innerHTML = result.players.map((p) =>
       statRow(
         `#${p.rank} ${p.name}`,
-        `${formatNumber(p.score)} pts · ${formatNumber(p.hp)} HP`
+        `${formatNumber(p.score)} pts · ${formatNumber(p.hp)} pts de vida`
       )
     ).join('');
   }
@@ -513,8 +552,14 @@ function resetGuessUI() {
   $('#waitingBanner').classList.add('hidden');
   $('#countdownBanner').classList.add('hidden');
   $('#prepareBanner').classList.add('hidden');
+  const tempBanner = $('#temporalBanner');
+  if (tempBanner) tempBanner.classList.add('hidden');
   $('#hudTimer').classList.remove('prepare');
   $('#confirmBtn').disabled = true;
+  if (pano) {
+    pano.setBlind(false);
+    pano.setStatic(false);
+  }
 }
 
 function resetGameUI() {
@@ -546,31 +591,46 @@ function renderLobby() {
       ? 'Sala privada'
       : 'Sala';
 
-  // Deduplicación estricta en el cliente para garantizar nombres únicos en el lobby
+  // Deduplicación estricta para la vista del lobby
   const seenLobby = new Set();
-  const cleanPlayers = [];
+  const displayPlayers = [];
   for (const p of players) {
     const key = (p.name || '').trim().toLowerCase();
     if (key && !seenLobby.has(key)) {
       seenLobby.add(key);
-      cleanPlayers.push(p);
+      displayPlayers.push(p);
     }
   }
-  players = cleanPlayers;
 
   const list = $('#playersList');
   list.innerHTML = '';
 
-  if (!players.length) {
+  if (!displayPlayers.length) {
     list.innerHTML = '<li class="player-item muted">Conectando…</li>';
   } else {
-    players.forEach((p) => {
+    displayPlayers.forEach((p, i) => {
       const li = document.createElement('li');
       li.className = 'player-item';
+
+      const playerColor = (CONFIG.PLAYER_COLORS && CONFIG.PLAYER_COLORS[i % CONFIG.PLAYER_COLORS.length]) || '#38bdf8';
+
+      const main = document.createElement('div');
+      main.className = 'player-main';
+
+      const pin = document.createElement('span');
+      pin.className = 'player-pin-badge';
+      pin.style.color = playerColor;
+      pin.title = `Color de partida: ${playerColor}`;
+      pin.innerHTML = `<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 0 1 0-5 2.5 2.5 0 0 1 0 5z"/>
+      </svg>`;
 
       const name = document.createElement('span');
       name.className = 'name';
       name.textContent = p.name;
+
+      main.appendChild(pin);
+      main.appendChild(name);
 
       const actions = document.createElement('div');
       actions.className = 'player-item-actions';
@@ -598,26 +658,26 @@ function renderLobby() {
         actions.appendChild(kickBtn);
       }
 
-      li.appendChild(name);
+      li.appendChild(main);
       li.appendChild(actions);
       list.appendChild(li);
     });
   }
 
   const limit = net.limit || CONFIG.ROOM_MAX_PLAYERS;
-  $('#playersCount').textContent = `${players.length} / ${limit}`;
+  $('#playersCount').textContent = `${displayPlayers.length} / ${limit}`;
 
   const roundsInfo = $('#roomRoundsInfo');
   if (roundsInfo) roundsInfo.textContent = `${net.rounds || CONFIG.DUEL_ROUNDS} rondas`;
 
   const startBtn = $('#startBtn');
   startBtn.classList.toggle('hidden', !isHost);
-  const canStart = isHost && players.length >= 2;
+  const canStart = isHost && displayPlayers.length >= 2;
   startBtn.disabled = !canStart;
-  if (players.length < 2) {
-    startBtn.textContent = isHost ? `Esperando rivales… (1/${limit})` : 'Esperando al anfitrión…';
+  if (displayPlayers.length < 2) {
+    startBtn.textContent = isHost ? `Esperando rivales… (${displayPlayers.length}/${limit})` : 'Esperando al anfitrión…';
   } else {
-    startBtn.textContent = `Iniciar partida (${players.length}/${limit})`;
+    startBtn.textContent = `Iniciar partida (${displayPlayers.length}/${limit})`;
   }
 
   const deleteBtn = $('#deleteRoomBtn');
@@ -659,7 +719,7 @@ function renderLeaderboard() {
   list.innerHTML = '<p class="empty-hint">Cargando…</p>';
   empty.classList.add('hidden');
 
-  fetchLeaderboard(leaderboardRounds).then((entries) => {
+  fetchLeaderboard(leaderboardRounds, leaderboardMode).then((entries) => {
     list.innerHTML = '';
     if (!entries || !entries.length) {
       empty.classList.remove('hidden');
@@ -758,6 +818,7 @@ function renderPublicList(rooms) {
     LOG('renderPublicList sala', { id: room.id, name: room.name, limit, count, full, isMyOldRoom });
     btn.addEventListener('click', () => {
       LOG('click Unirse sala pública', { id: room.id, meName });
+      game.meName = meName;
       audio.ensure();
       net.joinPublicRoom(room.id, meName);
     });
@@ -785,6 +846,7 @@ function handleNetMessage(data, fromPeerId) {
     return;
   }
   if (data.type === 'start') {
+    game.meName = meName;
     game.guestOnStart(data);
     guestPrepareStart();
     return;
@@ -800,16 +862,20 @@ function handleNetMessage(data, fromPeerId) {
 
 async function guestPrepareStart() {
   try {
+    game.meName = meName;
     await ensureData();
     showScreen('game');
     resetGameUI();
     await ensureViewers();
-    setTimeout(() => {
-      pano.refresh();
-      if (game.currentCoord) {
-        pano.setPano(game.currentCoord.pano_id, game.roundHeading || 0, 0);
-      }
-    }, 60);
+    // Asegura que el panorama se cargue antes de procesar roundStart.
+    pano.refresh();
+    if (game.currentCoord) {
+      pano.setPano(game.currentCoord.pano_id, game.roundHeading || 0, 0);
+    }
+    // Esperar a que la imagen panorámica esté visible para evitar pantalla azul.
+    await pano.waitForReady().catch(() => {});
+    // Ahora sí: marcar al guest como listo (procesa roundStart pendiente si lo hay).
+    game.guestSetReady();
     net.send({ type: 'ready' });
   } catch (err) {
     showError('No se pudo preparar la partida: ' + err.message);
@@ -819,6 +885,11 @@ async function guestPrepareStart() {
 /* --------------------------- Flujo principal --------------------------- */
 let soloRounds = 5;
 let leaderboardRounds = 5;
+let leaderboardMode = 'normal';
+let currentSoloMode = 'normal';
+let currentSoloTemporalSecs = CONFIG.DEFAULT_TEMPORAL_SECONDS || 3;
+let currentMultiMode = 'normal';
+let currentMultiTemporalSecs = CONFIG.DEFAULT_TEMPORAL_SECONDS || 3;
 
 async function startSolo(rounds = soloRounds) {
   soloRounds = rounds;
@@ -832,7 +903,7 @@ async function startSolo(rounds = soloRounds) {
     await ensureViewers();
     setTimeout(() => pano.refresh(), 60);
     game.meName = meName;
-    game.startSolo(rounds);
+    game.startSolo(rounds, currentSoloMode, currentSoloTemporalSecs);
   } catch (err) {
     showError('Error al cargar: ' + err.message);
     showScreen('menu');
@@ -855,7 +926,7 @@ async function hostStartGame() {
     await ensureViewers();
     setTimeout(() => pano.refresh(), 60);
     game.meName = meName;
-    game.hostStart();
+    game.hostStart(currentMultiMode, currentMultiTemporalSecs);
   } catch (err) {
     showError('Error al cargar: ' + err.message);
     showScreen('lobby');
@@ -867,8 +938,13 @@ function createRoom(isPublic = false) {
   audio.ensure();
   const rounds = Number($('#roomRounds').value) || CONFIG.DUEL_ROUNDS;
   const limit = Number($('#roomLimit').value) || CONFIG.ROOM_MAX_PLAYERS;
-  LOG('createRoom', { isPublic, meName, rounds, limit });
-  net.createRoom(meName, isPublic, { rounds, limit });
+  LOG('createRoom', { isPublic, meName, rounds, limit, currentMultiMode, currentMultiTemporalSecs });
+  net.createRoom(meName, isPublic, {
+    rounds,
+    limit,
+    gameMode: currentMultiMode,
+    temporalSeconds: currentMultiTemporalSecs,
+  });
 }
 
 function persistActiveRoom() {
@@ -906,6 +982,7 @@ function deleteRoom() {
 
 function joinRoom(code) {
   LOG('joinRoom (app)', { code, meName });
+  game.meName = meName;
   audio.ensure();
   net.joinRoom(code, meName);
 }
@@ -947,6 +1024,7 @@ function wire() {
       return;
     }
     meName = name;
+    game.meName = name;
     localStorage.setItem(PLAYER_KEY, name);
     audio.ensure();
     audio.click();
@@ -976,19 +1054,60 @@ function wire() {
   $('#leaderboardBtn').addEventListener('click', () => {
     audio.ensure();
     showScreen('leaderboard');
+    if (typeof setLeaderboardMode === 'function') setLeaderboardMode('normal');
     setLeaderboardTab(5);
   });
 
-  // --- Selección de rondas (solitario) ---
-  document.querySelectorAll('.solo-rounds-btn').forEach((btn) => {
+  // --- Modos de juego (solitario) ---
+  document.querySelectorAll('#soloModeSelector .mode-tab').forEach((btn) => {
     btn.addEventListener('click', () => {
-      audio.ensure();
-      startSolo(Number(btn.dataset.rounds));
+      document.querySelectorAll('#soloModeSelector .mode-tab').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentSoloMode = btn.dataset.mode || 'normal';
+      const desc = CONFIG.GAME_MODES[currentSoloMode]?.desc || '';
+      const descEl = $('#soloModeDesc');
+      if (descEl) descEl.textContent = desc;
+      const tempConf = $('#soloTemporalConfig');
+      if (tempConf) tempConf.classList.toggle('hidden', currentSoloMode !== 'temporal');
     });
+  });
+  const soloTempSecsEl = $('#soloTemporalSeconds');
+  if (soloTempSecsEl) {
+    soloTempSecsEl.addEventListener('change', (e) => {
+      currentSoloTemporalSecs = Number(e.target.value) || 3;
+    });
+  }
+
+  // --- Selección de rondas (solitario) ---
+  let selectedSoloRounds = 5;
+  document.querySelectorAll('#soloRoundsSelector .round-tab').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#soloRoundsSelector .round-tab').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      selectedSoloRounds = Number(btn.dataset.rounds) || 5;
+    });
+  });
+  $('#soloStartBtn').addEventListener('click', () => {
+    audio.ensure();
+    startSolo(selectedSoloRounds);
   });
   $('#soloBackBtn').addEventListener('click', () => showScreen('menu'));
 
   // --- Leaderboard ---
+  function setLeaderboardMode(mode) {
+    leaderboardMode = mode;
+    document.querySelectorAll('.lb-mode-tab').forEach((tab) => {
+      tab.classList.toggle('active', tab.dataset.mode === mode);
+    });
+    renderLeaderboard();
+  }
+  document.querySelectorAll('.lb-mode-tab').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      audio.ensure();
+      setLeaderboardMode(tab.dataset.mode);
+    });
+  });
+
   function setLeaderboardTab(rounds) {
     leaderboardRounds = rounds;
     document.querySelectorAll('.lb-tab').forEach((tab) => {
@@ -1004,9 +1123,44 @@ function wire() {
   });
   $('#leaderboardBackBtn').addEventListener('click', () => showScreen('menu'));
 
-  // --- Crear sala (pública / privada) ---
-  $('#createPublicBtn').addEventListener('click', () => createRoom(true));
-  $('#createPrivateBtn').addEventListener('click', () => createRoom(false));
+  // --- Modos de juego (multijugador / crear sala) ---
+  document.querySelectorAll('#multiModeSelector .mode-tab').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#multiModeSelector .mode-tab').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentMultiMode = btn.dataset.mode || 'normal';
+      const desc = CONFIG.GAME_MODES[currentMultiMode]?.desc || '';
+      const descEl = $('#multiModeDesc');
+      if (descEl) descEl.textContent = desc;
+      const tempConf = $('#multiTemporalConfig');
+      if (tempConf) tempConf.classList.toggle('hidden', currentMultiMode !== 'temporal');
+    });
+  });
+  const multiTempSecsEl = $('#multiTemporalSeconds');
+  if (multiTempSecsEl) {
+    multiTempSecsEl.addEventListener('change', (e) => {
+      currentMultiTemporalSecs = Number(e.target.value) || 3;
+    });
+  }
+
+  // --- Visibilidad de sala (pública / privada) ---
+  let isRoomPublic = true;
+  document.querySelectorAll('#createVisibilitySelector .vis-tab').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#createVisibilitySelector .vis-tab').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      isRoomPublic = btn.dataset.public === 'true';
+      const descEl = $('#createVisibilityDesc');
+      if (descEl) {
+        descEl.textContent = isRoomPublic
+          ? 'Cualquiera puede unirse desde la lista de salas públicas.'
+          : 'Solo personas con el código de acceso pueden unirse.';
+      }
+    });
+  });
+
+  // --- Botón Crear sala ---
+  $('#createRoomConfirmBtn').addEventListener('click', () => createRoom(isRoomPublic));
   $('#createBackBtn').addEventListener('click', () => showScreen('menu'));
 
   // --- Sonido ---
@@ -1099,16 +1253,65 @@ function wire() {
 
   // --- Minimapa (colapsable) ---
   const wrap = $('#minimapWrap');
-  wrap.addEventListener('mouseenter', () => {
+  const panel = $('#minimapPanel');
+
+  // Refresca Leaflet progresivamente mientras el panel se anima (evita tiles en blanco).
+  let _minimapResizeRaf = null;
+  let _minimapResizeTimeout = null;
+  function startMinimapRefresh() {
+    stopMinimapRefresh();
+    if (wrap.classList.contains('fullscreen')) return;
+    const tick = () => {
+      minimap.refreshSize();
+      _minimapResizeRaf = requestAnimationFrame(tick);
+    };
+    _minimapResizeRaf = requestAnimationFrame(tick);
+    // Timeout de seguridad: nunca dejar el loop corriendo más de 450ms si no dispara transitionend.
+    _minimapResizeTimeout = setTimeout(() => {
+      stopMinimapRefresh();
+      minimap.refreshSize();
+    }, 450);
+  }
+  function stopMinimapRefresh() {
+    if (_minimapResizeRaf) {
+      cancelAnimationFrame(_minimapResizeRaf);
+      _minimapResizeRaf = null;
+    }
+    if (_minimapResizeTimeout) {
+      clearTimeout(_minimapResizeTimeout);
+      _minimapResizeTimeout = null;
+    }
+  }
+
+  panel.addEventListener('transitionend', (e) => {
+    if (e.target === panel && (e.propertyName === 'width' || e.propertyName === 'height')) {
+      stopMinimapRefresh();
+      minimap.refreshSize();
+    }
+  });
+
+  panel.addEventListener('mouseenter', () => {
     wrap.classList.add('expanded');
-    minimap.refreshSize();
+    startMinimapRefresh();
+    minimap.setInteractive(true);
   });
-  wrap.addEventListener('mouseleave', () => {
-    if (!minimapPinned) wrap.classList.remove('expanded');
+  panel.addEventListener('mouseleave', () => {
+    if (!minimapPinned) {
+      wrap.classList.remove('expanded');
+      startMinimapRefresh();
+    }
   });
-  wrap.addEventListener('click', () => {
-    if (!wrap.classList.contains('expanded')) {
-      expandMinimap(true);
+
+  // Al hacer clic en el panel del mapa se fija (pinned) para que no se cierre accidentalmente.
+  panel.addEventListener('click', () => {
+    expandMinimap(true);
+  });
+
+  // Al tocar o hacer clic fuera del minimapa (en la vista 360), se desancla y colapsa.
+  document.addEventListener('pointerdown', (e) => {
+    if (minimapPinned && !e.target.closest('#minimapWrap') && !e.target.closest('#resultPanel') && !e.target.closest('.hud-top')) {
+      collapseMinimap();
+      startMinimapRefresh();
     }
   });
 }
@@ -1124,6 +1327,22 @@ function wireGame() {
   game.on('result', renderResult);
   game.on('gameover', handleGameOver);
   game.on('toast', ({ message, kind }) => showToast(message, kind));
+  game.on('temporalTimer', ({ seconds }) => {
+    const banner = $('#temporalBanner');
+    const num = $('#temporalNumber');
+    if (!banner || !num) return;
+    if (seconds == null || seconds <= 0) {
+      banner.classList.add('hidden');
+    } else {
+      banner.classList.remove('hidden');
+      num.textContent = `${seconds}s`;
+    }
+  });
+  game.on('temporalBlind', ({ active }) => {
+    if (active) {
+      expandMinimap(true);
+    }
+  });
 }
 
 function wireNet() {
@@ -1243,6 +1462,7 @@ function boot() {
   const saved = localStorage.getItem(PLAYER_KEY);
   if (saved) {
     meName = saved;
+    game.meName = saved;
     $('#menuPlayerName').textContent = saved;
     // Asegura que el nombre siga registrado en el servidor (por si el JSON
     // se reinició o se desplegó desde cero).

@@ -6,7 +6,7 @@ header('Access-Control-Allow-Headers: Content-Type');
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 header('Pragma: no-cache');
 
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
     http_response_code(204);
     exit;
 }
@@ -201,9 +201,9 @@ switch ($action) {
             'time' => $now,
         ];
 
-        // Conservar solo los últimos 60 mensajes y purgar los de más de 60 segundos
-        if (count($rooms[$id]['messages']) > 60) {
-            $rooms[$id]['messages'] = array_slice($rooms[$id]['messages'], -60);
+        // Conservar los últimos 120 mensajes para soportar hasta 25 jugadores y purgar los de más de 60 segundos
+        if (count($rooms[$id]['messages']) > 120) {
+            $rooms[$id]['messages'] = array_slice($rooms[$id]['messages'], -120);
         }
         $rooms[$id]['messages'] = array_values(array_filter($rooms[$id]['messages'], function ($m) use ($now) {
             return ($now - intval($m['time'] ?? 0)) < 60;
@@ -297,7 +297,12 @@ switch ($action) {
             exit;
         }
 
-        $key = (string)$rounds;
+        $gameMode = trim($_POST['gameMode'] ?? 'normal');
+        if (!in_array($gameMode, ['normal', 'static', 'temporal'], true)) {
+            $gameMode = 'normal';
+        }
+
+        $key = $gameMode . '_' . $rounds;
         if (!isset($leaderboard[$key]) || !is_array($leaderboard[$key])) {
             $leaderboard[$key] = [];
         }
@@ -309,6 +314,7 @@ switch ($action) {
             'timeMs' => $timeMs,
             'timeMax' => $timeMax,
             'score' => $newScore,
+            'gameMode' => $gameMode,
             'date' => time(),
         ];
 
@@ -344,11 +350,21 @@ switch ($action) {
     case 'leaderboard': {
         $rounds = intval($_GET['rounds'] ?? $_POST['rounds'] ?? 5);
         if (!in_array($rounds, [5, 7, 10], true)) $rounds = 5;
-        $key = (string)$rounds;
-        $entries = isset($leaderboard[$key]) && is_array($leaderboard[$key])
-            ? $leaderboard[$key]
-            : [];
-        echo json_encode(['ok' => true, 'rounds' => $rounds, 'entries' => $entries]);
+        $gameMode = trim($_GET['mode'] ?? $_POST['mode'] ?? 'normal');
+        if (!in_array($gameMode, ['normal', 'static', 'temporal'], true)) {
+            $gameMode = 'normal';
+        }
+        $key = $gameMode . '_' . $rounds;
+
+        // Soporte retrocompatible para puntuaciones previas
+        $entries = [];
+        if (isset($leaderboard[$key]) && is_array($leaderboard[$key])) {
+            $entries = $leaderboard[$key];
+        } elseif ($gameMode === 'normal' && isset($leaderboard[(string)$rounds]) && is_array($leaderboard[(string)$rounds])) {
+            $entries = $leaderboard[(string)$rounds];
+        }
+
+        echo json_encode(['ok' => true, 'rounds' => $rounds, 'mode' => $gameMode, 'entries' => $entries]);
         break;
     }
 

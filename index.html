@@ -13,8 +13,11 @@
 </head>
 <body>
 
-    <!-- Fondo orbital ASCII (solo menú) -->
+    <!-- Fondo orbital ASCII -->
     <div id="ascii-earth" class="hidden"></div>
+
+    <!-- Badge de versión (menús) -->
+    <div id="versionBadge" class="version-badge">BETA v1.0.0</div>
 
     <!-- ====================== PANTALLA: NOMBRE ====================== -->
     <div id="screen-name" class="screen">
@@ -60,15 +63,53 @@
 
     <!-- ====================== PANTALLA: RONDAS SOLITARIO ====================== -->
     <div id="screen-solo" class="screen hidden">
-        <div class="card">
+        <div class="card solo-card">
             <h2>Jugar en solitario</h2>
-            <p>Elige el número de rondas. El tiempo es para toda la partida, no por ronda.</p>
-            <div class="option-buttons">
-                <button class="btn-primary solo-rounds-btn" data-rounds="5">5 rondas · 1:45</button>
-                <button class="btn-ghost solo-rounds-btn" data-rounds="7">7 rondas · 2:00</button>
-                <button class="btn-ghost solo-rounds-btn" data-rounds="10">10 rondas · 2:30</button>
+            <p>Configura tu partida:</p>
+
+            <div class="mode-select-section">
+                <label class="config-label">Modo de juego</label>
+                <div class="mode-select-row" id="soloModeSelector">
+                    <button type="button" class="mode-tab active" data-mode="normal">🎮 Normal</button>
+                    <button type="button" class="mode-tab" data-mode="static">🛑 Estático</button>
+                    <button type="button" class="mode-tab" data-mode="temporal">⏱️ Temporal</button>
+                </div>
+                <p class="mode-desc" id="soloModeDesc">Mueve la vista 360° y haz zoom libremente.</p>
+
+                <div id="soloTemporalConfig" class="temporal-config hidden">
+                    <label class="config-label" for="soloTemporalSeconds">Tiempo visible de la imagen</label>
+                    <select id="soloTemporalSeconds" class="config-select">
+                        <option value="1">1 segundo</option>
+                        <option value="2">2 segundos</option>
+                        <option value="3" selected>3 segundos</option>
+                        <option value="5">5 segundos</option>
+                        <option value="10">10 segundos</option>
+                    </select>
+                </div>
             </div>
-            <button class="btn-ghost" id="soloBackBtn">Volver</button>
+
+            <div class="solo-rounds-section">
+                <label class="config-label">Cantidad de rondas</label>
+                <div class="rounds-select-row" id="soloRoundsSelector">
+                    <button type="button" class="round-tab active" data-rounds="5">
+                        <span class="round-tab-title">5 rondas</span>
+                        <span class="round-tab-sub">⏱️ 1:45</span>
+                    </button>
+                    <button type="button" class="round-tab" data-rounds="7">
+                        <span class="round-tab-title">7 rondas</span>
+                        <span class="round-tab-sub">⏱️ 2:00</span>
+                    </button>
+                    <button type="button" class="round-tab" data-rounds="10">
+                        <span class="round-tab-title">10 rondas</span>
+                        <span class="round-tab-sub">⏱️ 2:30</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="card-actions">
+                <button class="btn-primary btn-action" id="soloStartBtn">▶️ ¡Jugar!</button>
+                <button class="btn-ghost btn-action" id="soloBackBtn">Volver</button>
+            </div>
         </div>
     </div>
 
@@ -76,10 +117,15 @@
     <div id="screen-leaderboard" class="screen hidden">
         <div class="card leaderboard-card">
             <h2>Leaderboard · Solitario</h2>
-            <div class="lb-tabs">
-                <button class="lb-tab active" data-rounds="5">5 rondas</button>
-                <button class="lb-tab" data-rounds="7">7 rondas</button>
-                <button class="lb-tab" data-rounds="10">10 rondas</button>
+            <div class="lb-mode-tabs" id="lbModeTabs">
+                <button type="button" class="lb-mode-tab active" data-mode="normal">🎮 Normal</button>
+                <button type="button" class="lb-mode-tab" data-mode="static">🛑 Estático</button>
+                <button type="button" class="lb-mode-tab" data-mode="temporal">⏱️ Temporal</button>
+            </div>
+            <div class="lb-tabs" id="lbRoundsTabs">
+                <button type="button" class="lb-tab active" data-rounds="5">5 rondas</button>
+                <button type="button" class="lb-tab" data-rounds="7">7 rondas</button>
+                <button type="button" class="lb-tab" data-rounds="10">10 rondas</button>
             </div>
             <div class="lb-list" id="leaderboardList"></div>
             <p class="empty-hint hidden" id="leaderboardEmpty">Aún no hay puntajes en esta categoría.</p>
@@ -89,40 +135,77 @@
 
     <!-- ====================== PANTALLA: CREAR ====================== -->
     <div id="screen-create" class="screen hidden">
-        <div class="card">
+        <div class="card create-card">
             <h2>Crear sala</h2>
-            <p>Elige el tipo de sala:</p>
-            <div class="option-buttons">
-                <button class="btn-primary" id="createPublicBtn">🌐 Pública</button>
-                <button class="btn-ghost" id="createPrivateBtn">🔒 Privada</button>
+            <p>Configura los parámetros de tu sala:</p>
+
+            <div class="visibility-section">
+                <label class="config-label">Tipo de sala</label>
+                <div class="visibility-row" id="createVisibilitySelector">
+                    <button type="button" class="vis-tab active" data-public="true">🌐 Pública</button>
+                    <button type="button" class="vis-tab" data-public="false">🔒 Privada</button>
+                </div>
+                <p class="visibility-desc" id="createVisibilityDesc">Cualquiera puede unirse desde la lista de salas públicas.</p>
             </div>
 
-            <div class="room-config">
-                <label class="config-label" for="roomRounds">Rondas</label>
-                <select id="roomRounds" class="config-select">
-                    <option value="5" selected>5 rondas</option>
-                    <option value="7">7 rondas</option>
-                    <option value="10">10 rondas</option>
-                </select>
+            <div class="mode-select-section">
+                <label class="config-label">Modo de juego</label>
+                <div class="mode-select-row" id="multiModeSelector">
+                    <button type="button" class="mode-tab active" data-mode="normal">🎮 Normal</button>
+                    <button type="button" class="mode-tab" data-mode="static">🛑 Estático</button>
+                    <button type="button" class="mode-tab" data-mode="temporal">⏱️ Temporal</button>
+                </div>
+                <p class="mode-desc" id="multiModeDesc">Mueve la vista 360° y haz zoom libremente.</p>
 
-                <label class="config-label" for="roomLimit">Tamaño máximo de sala</label>
-                <select id="roomLimit" class="config-select">
-                    <option value="2" selected>2 jugadores</option>
-                    <option value="3">3 jugadores</option>
-                    <option value="4">4 jugadores</option>
-                    <option value="5">5 jugadores</option>
-                    <option value="6">6 jugadores</option>
-                    <option value="7">7 jugadores</option>
-                    <option value="8">8 jugadores</option>
-                    <option value="9">9 jugadores</option>
-                    <option value="10">10 jugadores</option>
-                    <option value="11">11 jugadores</option>
-                    <option value="12">12 jugadores</option>
-                </select>
+                <div id="multiTemporalConfig" class="temporal-config hidden">
+                    <label class="config-label" for="multiTemporalSeconds">Tiempo visible de la imagen</label>
+                    <select id="multiTemporalSeconds" class="config-select">
+                        <option value="1">1 segundo</option>
+                        <option value="2">2 segundos</option>
+                        <option value="3" selected>3 segundos</option>
+                        <option value="5">5 segundos</option>
+                        <option value="10">10 segundos</option>
+                    </select>
+                </div>
             </div>
 
-            <p class="coming-soon">Pública: cualquiera puede unirse desde el listado. Privada: solo con código.</p>
-            <button class="btn-ghost" id="createBackBtn">Volver</button>
+            <div class="room-config-grid">
+                <div class="config-group">
+                    <label class="config-label" for="roomRounds">Rondas</label>
+                    <select id="roomRounds" class="config-select">
+                        <option value="5" selected>5 rondas</option>
+                        <option value="7">7 rondas</option>
+                        <option value="10">10 rondas</option>
+                    </select>
+                </div>
+
+                <div class="config-group">
+                    <label class="config-label" for="roomLimit">Tamaño máximo de sala</label>
+                    <select id="roomLimit" class="config-select">
+                        <option value="2">2 jugadores</option>
+                        <option value="3">3 jugadores</option>
+                        <option value="4">4 jugadores</option>
+                        <option value="5">5 jugadores</option>
+                        <option value="6">6 jugadores</option>
+                        <option value="7">7 jugadores</option>
+                        <option value="8" selected>8 jugadores</option>
+                        <option value="9">9 jugadores</option>
+                        <option value="10">10 jugadores</option>
+                        <option value="11">11 jugadores</option>
+                        <option value="12">12 jugadores</option>
+                        <option value="15">15 jugadores</option>
+                        <option value="18">18 jugadores</option>
+                        <option value="20">20 jugadores</option>
+                        <option value="22">22 jugadores</option>
+                        <option value="25">25 jugadores</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="card-actions">
+                <button class="btn-primary btn-action" id="createRoomConfirmBtn">🚀 Crear sala</button>
+                <button class="btn-ghost btn-action" id="createBackBtn">Volver</button>
+            </div>
         </div>
     </div>
 
@@ -177,6 +260,20 @@
     <!-- ====================== PANTALLA: JUEGO ====================== -->
     <div id="screen-game" class="screen hidden">
         <div id="pano"></div>
+        <!-- Cortina visual para sincronización anti-trampas y modo temporal -->
+        <div class="pano-blind hidden" id="panoBlind">
+            <div class="blind-content">
+                <div class="spinner blind-spinner" id="blindSpinner"></div>
+                <h2 class="blind-title" id="blindTitle">Sincronizando jugadores…</h2>
+                <p class="blind-sub" id="blindSub">Todos verán la imagen al mismo tiempo</p>
+            </div>
+        </div>
+
+        <!-- Banner modo temporal: tiempo visible restante -->
+        <div class="temporal-banner hidden" id="temporalBanner">
+            <span class="temporal-label">⏱️ Tiempo visible</span>
+            <span class="temporal-number" id="temporalNumber">3s</span>
+        </div>
 
         <!-- HUD superior -->
         <div class="hud-top">
@@ -210,8 +307,11 @@
 
         <!-- Banner: el rival ya adivinó -->
         <div class="countdown-banner hidden" id="countdownBanner">
-            <span class="countdown-label">¡Tu rival ya adivinó!</span>
-            <span class="countdown-number" id="countdownNumber">15</span>
+            <div class="countdown-main">
+                <span class="countdown-label">¡Tu rival ya adivinó!</span>
+                <span class="countdown-number" id="countdownNumber">15s</span>
+            </div>
+            <div class="countdown-sub hidden" id="countdownSub">¡Adivina ahora o perderás puntos!</div>
         </div>
 
         <!-- Banner: esperando al rival -->

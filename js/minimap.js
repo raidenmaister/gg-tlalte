@@ -20,16 +20,19 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
-function makePin({ lat, lng, color, size, label }) {
-  // La punta del pin (teardrop rotado -45°) queda a size*1.2071 del borde superior.
+function makePinIcon({ color, size }) {
   const tipY = size * 1.2071;
-  const icon = L.divIcon({
+  return L.divIcon({
     className: 'gg-pin',
     html: `<div class="gg-pin__pin" style="--pin-color:${color}; width:${size}px; height:${size}px;"></div>`,
     iconSize: [size, size],
     iconAnchor: [size / 2, tipY],
     popupAnchor: [0, -tipY + 4],
   });
+}
+
+function makePin({ lat, lng, color, size, label }) {
+  const icon = makePinIcon({ color, size });
   return L.marker([lat, lng], { icon }).bindPopup(label);
 }
 
@@ -47,13 +50,23 @@ function makeRealPin({ lat, lng, color, size, label }) {
   return L.marker([lat, lng], { icon, interactive: false });
 }
 
-/** Pin de jugador con el nombre siempre visible encima de la chincheta. */
-function makePlayerPin({ lat, lng, color, size, label }) {
+/** Pin de jugador con el nombre y puntos perdidos siempre visibles encima de la chincheta. */
+function makePlayerPin({ lat, lng, color, size, label, damage }) {
   const tipY = size * 1.2071;
-  const labelH = 24;
+  const labelH = 28;
+  const hasDamage = typeof damage === 'number';
+  const dmgBadge = hasDamage
+    ? (damage > 0
+        ? `<span class="gg-player-pin__dmg hit">-${damage} pts</span>`
+        : `<span class="gg-player-pin__dmg safe">⭐ 0 pts</span>`)
+    : '';
+
   const icon = L.divIcon({
     className: 'gg-player-pin',
-    html: `<div class="gg-player-pin__label" style="--pin-color:${color}; border-color:${color}; color:${color};">${escapeHtml(label)}</div>
+    html: `<div class="gg-player-pin__label" style="--pin-color:${color}; border-color:${color}; color:${color};">
+        <span class="gg-player-pin__name">${escapeHtml(label)}</span>
+        ${dmgBadge}
+      </div>
       <div class="gg-pin__pin" style="--pin-color:${color}; width:${size}px; height:${size}px;"></div>`,
     iconSize: [size, tipY + labelH],
     iconAnchor: [size / 2, tipY + labelH],
@@ -74,6 +87,11 @@ export class Minimap {
     this.revealLayer = null;
     this.pick = null;          // {lat, lng}
     this.interactive = true;   // por defecto interactivo durante el juego
+    this.myColor = null;       // Color asignado al jugador en la partida
+  }
+
+  setMyColor(color) {
+    this.myColor = color;
   }
 
   init() {
@@ -118,19 +136,23 @@ export class Minimap {
     }
   }
 
-  /** Coloca (o mueve) el marcador del jugador. */
+  /** Coloca (o mueve) el marcador del jugador con su color real. */
   setPick(lat, lng) {
     this.pick = { lat, lng };
+    const pinColor = this.myColor || MARKER.mine.color;
     if (!this.pickMarker) {
       this.pickMarker = makePin({
         lat,
         lng,
-        color: MARKER.mine.color,
+        color: pinColor,
         size: MARKER.mine.size,
         label: MARKER.mine.label,
       }).addTo(this.map);
     } else {
       this.pickMarker.setLatLng([lat, lng]);
+      if (this.pickMarker.setIcon) {
+        this.pickMarker.setIcon(makePinIcon({ color: pinColor, size: MARKER.mine.size }));
+      }
     }
   }
 
@@ -168,22 +190,37 @@ export class Minimap {
       '#a3e635', '#818cf8', '#e879f9', '#facc15'
     ];
 
-    if (real) {
+    const realLat = real ? Number(real.lat) : NaN;
+    const realLng = real ? Number(real.lng) : NaN;
+    const hasReal = !isNaN(realLat) && !isNaN(realLng);
+
+    if (hasReal) {
       this.revealLayer.addLayer(
-        makeRealPin({ lat: real.lat, lng: real.lng, ...MARKER.real })
+        makeRealPin({ lat: realLat, lng: realLng, ...MARKER.real })
       );
-      bounds.push([real.lat, real.lng]);
+      bounds.push([realLat, realLng]);
     }
 
     (players || []).forEach((p, i) => {
       if (!p.guess) return;
+      const lat = Number(p.guess.lat);
+      const lng = Number(p.guess.lng);
+      if (isNaN(lat) || isNaN(lng)) return;
+
       const color = colors[i % colors.length];
       this.revealLayer.addLayer(
-        makePlayerPin({ lat: p.guess.lat, lng: p.guess.lng, color, size: 30, label: p.name })
+        makePlayerPin({
+          lat,
+          lng,
+          color,
+          size: 30,
+          label: p.name,
+          damage: p.damage,
+        })
       );
-      bounds.push([p.guess.lat, p.guess.lng]);
-      if (real) {
-        const pts = greatCirclePoints(real.lat, real.lng, p.guess.lat, p.guess.lng, 96);
+      bounds.push([lat, lng]);
+      if (hasReal) {
+        const pts = greatCirclePoints(realLat, realLng, lat, lng, 96);
         this.revealLayer.addLayer(
           L.polyline(pts, { color, weight: 3, opacity: 0.9, dashArray: '6 8' })
         );
@@ -246,6 +283,10 @@ export class Minimap {
     requestAnimationFrame(() => {
       if (!this.map) return;
       this.map.invalidateSize();
+      if (bounds.length === 1) {
+        this.map.setView(bounds[0], 14, { animate: false });
+        return;
+      }
       this.map.fitBounds(L.latLngBounds(bounds), {
         padding: [60, 60],
         maxZoom: 16,

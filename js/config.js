@@ -59,14 +59,23 @@ export const CONFIG = {
 
   // Modo multijugador: nº de rondas disponibles y tamaño de sala.
   MULTI_ROUND_OPTIONS: [5, 7, 10],
-  ROOM_MAX_PLAYERS: 12,     // Tamaño máximo permitido de sala.
+  ROOM_MAX_PLAYERS: 25,     // Tamaño máximo permitido de sala (hasta 25 jugadores).
   ROOM_MIN_PLAYERS: 2,      // Mínimo para iniciar partida.
   RESULT_DURATION: 9000,    // ms que se muestra el resumen de ronda.
   PREPARE_DURATION: 3,      // Segundos de "prepárate" antes de adivinar (duelo).
-  NO_GUESS_PENALTY: 1200,   // Daño si el jugador no adivina a tiempo (en vez de 5000)
-  MAX_ROUND_DAMAGE: 1800,   // Daño máximo por ronda para partidas equilibradas
+  NO_GUESS_BASE_PENALTY: 100, // Ronda 1: 100 pts
+  NO_GUESS_STEP_PENALTY: 50,  // +50 pts cada ronda subsiguiente (150, 200, 250...)
 
-  // 12 colores únicos y contrastantes para hasta 12 jugadores simultáneos
+  // Modos de juego
+  GAME_MODES: {
+    normal: { id: 'normal', name: 'Normal', desc: 'Mueve la vista 360° y haz zoom libremente.' },
+    static: { id: 'static', name: 'Estático', desc: 'Vista fija: no puedes girar ni mover la cámara.' },
+    temporal: { id: 'temporal', name: 'Temporal', desc: 'La imagen se oculta tras x segundos y se abre el minimapa.' },
+  },
+  TEMPORAL_DURATIONS: [1, 2, 3, 5, 10],
+  DEFAULT_TEMPORAL_SECONDS: 3,
+
+  // 25 colores únicos y contrastantes para hasta 25 jugadores simultáneos
   PLAYER_COLORS: [
     '#38bdf8', // 1: Celeste brillante
     '#f87171', // 2: Rojo coral
@@ -80,6 +89,19 @@ export const CONFIG = {
     '#818cf8', // 10: Índigo luminoso
     '#e879f9', // 11: Fucsia / Orquídea
     '#facc15', // 12: Amarillo intenso
+    '#06b6d4', // 13: Cian
+    '#ec4899', // 14: Magenta
+    '#10b981', // 15: Menta
+    '#f59e0b', // 16: Mandarina
+    '#8b5cf6', // 17: Púrpura eléctrico
+    '#14b8a6', // 18: Aqua
+    '#ef4444', // 19: Rojo fuego
+    '#84cc16', // 20: Verde cítrico
+    '#6366f1', // 21: Azul eléctrico
+    '#d946ef', // 22: Orquídea neón
+    '#0ea5e9', // 23: Azul cielo
+    '#f97316', // 24: Naranja fuego
+    '#22c55e', // 25: Verde vivo
   ],
 
   // --- Mapa (Leaflet) --------------------------------------------------------
@@ -91,6 +113,15 @@ export const CONFIG = {
 };
 
 /**
+ * Penalización progresiva si el jugador no adivina:
+ * Ronda 1: 100 pts, Ronda 2: 150 pts, Ronda 3: 200 pts, Ronda 4: 250 pts, etc.
+ */
+export function getNoGuessPenalty(round) {
+  const r = Math.max(1, parseInt(round) || 1);
+  return 100 + (r - 1) * 50;
+}
+
+/**
  * Multiplicador de daño según la ronda (sistema de duelo).
  * Ronda 1-2: x1.0 · Ronda 3: x1.5 · Ronda 4: x2.0 · Ronda 5+: x3.0
  */
@@ -100,3 +131,4 @@ export function damageMultiplier(round) {
   if (round === 4) return 2.0;
   return 3.0;
 }
+

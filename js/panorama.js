@@ -124,7 +124,11 @@ export class PanoramaViewer {
    */
   _blockNavigation(el) {
     el.addEventListener('keydown', (e) => {
-      const navKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', ' ', 'Spacebar'];
+      const navKeys = [
+        'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+        'w', 'a', 's', 'd', 'W', 'A', 'S', 'D',
+        'Enter', ' ', 'Spacebar',
+      ];
       if (navKeys.includes(e.key) || navKeys.includes(e.code)) {
         e.preventDefault();
         e.stopPropagation();
@@ -225,6 +229,38 @@ export class PanoramaViewer {
   /** Habilita/deshabilita la interacción de arrastre. */
   setInteractivity(enabled) {
     if (this.panorama) this.panorama.setOptions({ clickToGo: false, scrollwheel: enabled });
+  }
+
+  /** Activa/desactiva el modo estático bloqueando completamente la interacción. */
+  setStatic(enabled) {
+    const el = document.getElementById(this.containerId);
+    if (el) {
+      el.classList.toggle('pano-static', !!enabled);
+    }
+    if (this.panorama) {
+      this.panorama.setOptions({
+        clickToGo: false,
+        scrollwheel: !enabled,
+        disableDoubleClickZoom: !!enabled,
+      });
+    }
+  }
+
+  /** Muestra/oculta la cortina opaca sobre la panorámica (sincronización / modo temporal). */
+  setBlind(visible, title = '', sub = '', showSpinner = false) {
+    const blind = document.getElementById('panoBlind');
+    if (!blind) return;
+    if (visible) {
+      blind.classList.remove('hidden');
+      const titleEl = document.getElementById('blindTitle');
+      const subEl = document.getElementById('blindSub');
+      const spinnerEl = document.getElementById('blindSpinner');
+      if (titleEl) titleEl.textContent = title;
+      if (subEl) subEl.textContent = sub;
+      if (spinnerEl) spinnerEl.style.display = showSpinner ? 'block' : 'none';
+    } else {
+      blind.classList.add('hidden');
+    }
   }
 
   destroy() {

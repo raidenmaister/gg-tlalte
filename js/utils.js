@@ -19,6 +19,16 @@ export function clamp(n, min, max) {
   return Math.min(max, Math.max(min, n));
 }
 
+/** Sanitiza cadenas para inserción segura en HTML. */
+export function escapeHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 /** Convierte grados a radianes. */
 const toRad = (deg) => (deg * Math.PI) / 180;
 
@@ -79,6 +89,57 @@ export function shuffle(array, rng = Math.random) {
 export function pickIndices(length, count, rng = Math.random) {
   const idx = Array.from({ length }, (_, i) => i);
   return shuffle(idx, rng).slice(0, count);
+}
+
+/**
+ * Devuelve n índices únicos donde cada ubicación consecutiva dista al menos
+ * minDistanceKm (por defecto 161 metros = 0.161 km) de la anterior.
+ */
+export function pickSeparatedIndices(coordenadas, count, minDistanceKm = 0.161, rng = Math.random) {
+  if (!Array.isArray(coordenadas) || coordenadas.length === 0) return [];
+  const total = coordenadas.length;
+  if (count >= total) {
+    return pickIndices(total, count, rng);
+  }
+
+  const selected = [];
+  const used = new Set();
+
+  let currentIdx = Math.floor(rng() * total);
+  selected.push(currentIdx);
+  used.add(currentIdx);
+
+  for (let i = 1; i < count; i++) {
+    const prev = coordenadas[currentIdx];
+    const candidates = [];
+    for (let idx = 0; idx < total; idx++) {
+      if (used.has(idx)) continue;
+      const c = coordenadas[idx];
+      const dist = haversineKm(prev.lat, prev.lng, c.lat, c.lng);
+      if (dist >= minDistanceKm) {
+        candidates.push(idx);
+      }
+    }
+
+    let nextIdx;
+    if (candidates.length > 0) {
+      nextIdx = candidates[Math.floor(rng() * candidates.length)];
+    } else {
+      // Fallback: si no hay candidatos a >= 161m, toma cualquiera no usado
+      const remaining = [];
+      for (let idx = 0; idx < total; idx++) {
+        if (!used.has(idx)) remaining.push(idx);
+      }
+      if (remaining.length === 0) break;
+      nextIdx = remaining[Math.floor(rng() * remaining.length)];
+    }
+
+    currentIdx = nextIdx;
+    selected.push(currentIdx);
+    used.add(currentIdx);
+  }
+
+  return selected;
 }
 
 /**

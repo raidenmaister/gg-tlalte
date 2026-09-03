@@ -95,6 +95,8 @@ export class Network {
     if (config) {
       this.rounds = config.rounds;
       this.limit = config.limit;
+      if (config.gameMode) this.gameMode = config.gameMode;
+      if (config.temporalSeconds) this.temporalSeconds = config.temporalSeconds;
     }
   }
 
@@ -282,11 +284,15 @@ export class Network {
 
   _startPolling() {
     this._stopPolling();
-    // Polling ligero (2.5s) que se apaga automáticamente cuando WebRTC P2P conecta
+    // Polling ligero (2.5s) que se apaga automáticamente cuando WebRTC P2P conecta con todos los clientes
     this._pollTimer = setInterval(async () => {
       if (this._closing || !this.roomId) return;
-      // Si P2P ya está activo, no gastar CPU ni peticiones en PHP
-      if (this._p2pConnected && this.conns.size > 0) {
+      // Si P2P ya está activo con todos los invitados (o host en guest), no gastar peticiones en PHP
+      if (this.isHost && this._p2pConnected && this.conns.size >= this.guestNames.size && this.guestNames.size > 0) {
+        this._stopPolling();
+        return;
+      }
+      if (!this.isHost && this._p2pConnected && this.conns.get('__host__')?.open) {
         this._stopPolling();
         return;
       }
@@ -341,8 +347,8 @@ export class Network {
       }
     }
 
-    const peerId = data.senderId || fromPeerId;
-    LOG('Incoming message:', data.type, 'from:', peerId);
+    const peerId = fromPeerId || data.senderId;
+    LOG('Incoming message:', data.type, 'from:', peerId, 'senderId:', data.senderId);
 
     if (data.type === 'join') {
       const name = (data.name || data.senderName || 'Anónimo').trim();
@@ -374,6 +380,13 @@ export class Network {
         if (!existingPeerId && uniqueOtherGuests.size >= maxGuestSlots) {
           LOG('Sala llena, rechazando a', name, { uniqueOthers: uniqueOtherGuests.size, maxGuestSlots });
           this.sendTo(peerId, { type: 'full' });
+          setTimeout(() => {
+            const rejectedConn = this.conns.get(peerId);
+            if (rejectedConn) {
+              try { rejectedConn.close(); } catch (e) {}
+              this.conns.delete(peerId);
+            }
+          }, 500);
           return;
         }
 
@@ -398,6 +411,7 @@ export class Network {
     }
 
     if (data.type === 'full') {
+      this.leave();
       this._emitError('LLENA');
       return;
     }
@@ -435,6 +449,8 @@ export class Network {
     this.role = 'host';
     this.isPublic = isPublic;
     this.rounds = opts.rounds || CONFIG.DUEL_ROUNDS;
+    this.gameMode = opts.gameMode || 'normal';
+    this.temporalSeconds = Number(opts.temporalSeconds) || CONFIG.DEFAULT_TEMPORAL_SECONDS;
     this.limit = Math.min(
       CONFIG.ROOM_MAX_PLAYERS,
       Math.max(CONFIG.ROOM_MIN_PLAYERS, opts.limit || CONFIG.ROOM_MAX_PLAYERS)
@@ -495,6 +511,7 @@ export class Network {
     this._connTimeout = setTimeout(() => {
       if (!this._guestPlayers || this._guestPlayers.length === 0) {
         LOG('guest conn timeout (15s sin respuesta) → peer-unavailable');
+        this.leave();
         this._emitError('peer-unavailable');
       }
     }, 15000);
@@ -524,6 +541,7 @@ export class Network {
     this._connTimeout = setTimeout(() => {
       if (!this._guestPlayers || this._guestPlayers.length === 0) {
         LOG('guest conn timeout (15s sin respuesta) → peer-unavailable');
+        this.leave();
         this._emitError('peer-unavailable');
       }
     }, 15000);
@@ -621,9 +639,11 @@ export class Network {
 
   _wireConn(conn, isGuestSide) {
     conn.on('open', () => {
-      LOG('P2P DataChannel abierto con éxito:', conn.peer, '-> Polling HTTP detenido (0% uso de PHP)');
+      LOG('P2P DataChannel abierto con éxito:', conn.peer);
       this._p2pConnected = true;
-      this._stopPolling();
+      if (isGuestSide || (this.conns.size >= this.guestNames.size && this.guestNames.size > 0)) {
+        this._stopPolling();
+      }
       if (isGuestSide) {
         conn.send(JSON.stringify({ type: 'join', name: this._localName }));
       }
@@ -680,7 +700,12 @@ export class Network {
     toDelete.forEach((id) => this.guestNames.delete(id));
 
     const players = this.players;
-    const config = { rounds: this.rounds, limit: this.limit };
+    const config = {
+      rounds: this.rounds,
+      limit: this.limit,
+      gameMode: this.gameMode || 'normal',
+      temporalSeconds: this.temporalSeconds || CONFIG.DEFAULT_TEMPORAL_SECONDS,
+    };
     LOG('_syncPlayers', { count: players.length });
     this.broadcast({ type: 'players', players, config });
     this.updatePublicCount(players.length);

@@ -13,12 +13,13 @@
 //   'toast'       {message, kind}
 // ============================================================================
 
-import { CONFIG, damageMultiplier } from './config.js';
+import { CONFIG, damageMultiplier, getNoGuessPenalty } from './config.js';
 import {
   haversineKm,
   scoreForDistance,
   computeDamage,
   pickIndices,
+  pickSeparatedIndices,
   clamp,
 } from './utils.js';
 
@@ -37,8 +38,14 @@ export class Game {
     this.role = 'solo'; // 'solo' | 'host' | 'guest'
     this.state = 'idle';
 
+    this.gameMode = 'normal'; // 'normal' | 'static' | 'temporal'
+    this.temporalSeconds = CONFIG.DEFAULT_TEMPORAL_SECONDS || 3;
+
     this.rounds = CONFIG.SOLO_ROUNDS;
     this.soloTotalSeconds = CONFIG.SOLO_MODES[CONFIG.SOLO_ROUNDS].totalSeconds;
+    this.soloRemainingSeconds = 0;
+    this.soloRoundStartTime = 0;
+    this.soloTotalPlayedMs = 0;
     this.soloStartTime = 0;
     this.soloTimedOut = false;
     this.currentRound = 0;
@@ -66,6 +73,15 @@ export class Game {
     this._resultTimer = null;
     this._hurry = null;
     this.hurryEnd = 0;
+    this._temporalTimer = null;
+    this._panoReadyPeers = new Set();
+    this._syncTimeout = null;
+
+    this._guestReady = true;       // se pone a false durante guestOnStart hasta que esté listo
+    this._pendingRoundStart = null; // encola mensajes si llegan antes de que el guest esté listo
+    this._pendingHurryStart = null;
+    this._pendingRoundResult = null;
+    this._pendingGameOver = null;
   }
 
   /* ------------------------------------------------------------------ */
@@ -101,23 +117,31 @@ export class Game {
   /* ------------------------------------------------------------------ */
   /* Inicio de partidas                                                  */
   /* ------------------------------------------------------------------ */
-  startSolo(rounds = CONFIG.SOLO_ROUNDS) {
+  startSolo(rounds = CONFIG.SOLO_ROUNDS, gameMode = 'normal', temporalSeconds = CONFIG.DEFAULT_TEMPORAL_SECONDS) {
     const mode = CONFIG.SOLO_MODES[rounds] || CONFIG.SOLO_MODES[CONFIG.SOLO_ROUNDS];
     this._reset();
     this.mode = 'solo';
     this.role = 'solo';
+    this.gameMode = gameMode || 'normal';
+    this.temporalSeconds = Number(temporalSeconds) || CONFIG.DEFAULT_TEMPORAL_SECONDS;
     this.rounds = mode.rounds;
     this.soloTotalSeconds = mode.totalSeconds;
+    this.soloRemainingSeconds = mode.totalSeconds;
     this.soloStartTime = 0;
-    this.locations = pickIndices(this.coordenadas.length, this.rounds);
+    this.soloRoundStartTime = 0;
+    this.soloTotalPlayedMs = 0;
+    // Selección aleatoria garantizando al menos 161m entre panorámicas consecutivas
+    this.locations = pickSeparatedIndices(this.coordenadas, this.rounds, 0.161);
     this._beginRound(1);
   }
 
   /** Host: inicia la partida y envía la semilla/orden a los invitados. */
-  hostStart() {
+  hostStart(gameMode = 'normal', temporalSeconds = CONFIG.DEFAULT_TEMPORAL_SECONDS) {
     this._reset();
     this.mode = 'multi';
     this.role = 'host';
+    this.gameMode = gameMode || 'normal';
+    this.temporalSeconds = Number(temporalSeconds) || CONFIG.DEFAULT_TEMPORAL_SECONDS;
     this.rounds = this.net.rounds || CONFIG.DUEL_ROUNDS;
 
     this.players = this.net.players.map((p) => ({
@@ -136,7 +160,8 @@ export class Game {
     }
 
     const seed = (Math.random() * 0xffffffff) >>> 0;
-    this.locations = pickIndices(this.coordenadas.length, this.rounds);
+    // Selección aleatoria garantizando al menos 161m entre panorámicas consecutivas
+    this.locations = pickSeparatedIndices(this.coordenadas, this.rounds, 0.161);
 
     this.net.broadcast({
       type: 'start',
@@ -144,6 +169,8 @@ export class Game {
       rounds: this.rounds,
       locations: this.locations,
       mode: 'multi',
+      gameMode: this.gameMode,
+      temporalSeconds: this.temporalSeconds,
       players: this.players.map((p) => ({ id: p.id, name: p.name })),
     });
 
@@ -162,6 +189,8 @@ export class Game {
     this._reset();
     this.mode = 'multi';
     this.role = 'guest';
+    this.gameMode = data.gameMode || 'normal';
+    this.temporalSeconds = Number(data.temporalSeconds) || CONFIG.DEFAULT_TEMPORAL_SECONDS;
     this.rounds = data.rounds || CONFIG.DUEL_ROUNDS;
     this.locations = data.locations || [];
     this.players = (data.players || []).map((p) => ({
@@ -172,7 +201,49 @@ export class Game {
       guess: null,
       guessed: false,
     }));
+    const myClean = (this.meName || '').trim().toLowerCase();
+    const mePlayer = this.players.find((p) => (p.name || '').trim().toLowerCase() === myClean);
+    if (mePlayer && mePlayer.id) {
+      this.net.myId = mePlayer.id;
+    }
     this.emit('toast', { message: '¡Comienza la partida!', kind: 'info' });
+    this._guestReady = false;
+    this._pendingRoundStart = null;
+    this._pendingHurryStart = null;
+    this._pendingRoundResult = null;
+    this._pendingGameOver = null;
+  }
+
+  /** Guest: marca que los datos y visores están listos; procesa mensajes pendientes en orden. */
+  guestSetReady() {
+    this._guestReady = true;
+    if (this._pendingGameOver) {
+      const data = this._pendingGameOver;
+      this._pendingRoundStart = null;
+      this._pendingHurryStart = null;
+      this._pendingRoundResult = null;
+      this._pendingGameOver = null;
+      this._onGameOver(data);
+      return;
+    }
+    if (this._pendingRoundResult) {
+      const data = this._pendingRoundResult;
+      this._pendingRoundStart = null;
+      this._pendingHurryStart = null;
+      this._pendingRoundResult = null;
+      this._onRoundResult(data);
+      return;
+    }
+    if (this._pendingRoundStart) {
+      const data = this._pendingRoundStart;
+      this._pendingRoundStart = null;
+      this.handleNetworkMessage(data, null);
+      if (this._pendingHurryStart) {
+        const hurry = this._pendingHurryStart;
+        this._pendingHurryStart = null;
+        this._onHurryStart(hurry);
+      }
+    }
   }
 
   /* ------------------------------------------------------------------ */
@@ -180,6 +251,12 @@ export class Game {
   /* ------------------------------------------------------------------ */
   _reset() {
     this._clearTimers();
+    this._clearTemporal();
+    if (this._syncTimeout) {
+      clearTimeout(this._syncTimeout);
+      this._syncTimeout = null;
+    }
+    this._panoReadyPeers = new Set();
     this.currentRound = 0;
     this.locations = [];
     this.myGuess = null;
@@ -193,7 +270,19 @@ export class Game {
     this.currentCoord = null;
     this.soloTimedOut = false;
     this.soloStartTime = 0;
+    this.soloRemainingSeconds = 0;
+    this.soloRoundStartTime = 0;
+    this.soloTotalPlayedMs = 0;
     this.state = 'idle';
+    this._guestReady = true;
+    this._pendingRoundStart = null;
+    this._pendingHurryStart = null;
+    this._pendingRoundResult = null;
+    this._pendingGameOver = null;
+    if (this.pano) {
+      this.pano.setBlind(false);
+      this.pano.setStatic(false);
+    }
   }
 
   _beginRound(round) {
@@ -202,6 +291,7 @@ export class Game {
     this._resolved = false;
     this._roundActive = false;
     this.myGuess = null;
+    this._clearTemporal();
 
     this.players.forEach((p) => {
       p.guess = null;
@@ -216,33 +306,61 @@ export class Game {
       this.roundHeading = Math.floor(Math.random() * 360);
     }
 
-    this.pano.setPano(coord.pano_id, this.roundHeading, 0);
+    // Configurar modo estático según la regla
+    this.pano.setStatic(this.gameMode === 'static');
     this.map.reset();
+
+    // Asignar el color real de la chincheta según el jugador (Req 7)
+    if (this.mode === 'solo') {
+      this.map.setMyColor(CONFIG.PLAYER_COLORS[0]);
+    } else {
+      const myIndex = this.players.findIndex((p) => p.id === this.net.myId);
+      const assignedColor = CONFIG.PLAYER_COLORS[myIndex >= 0 ? myIndex % CONFIG.PLAYER_COLORS.length : 0];
+      this.map.setMyColor(assignedColor);
+    }
+
     this.map.setInteractive(true);
-    this._roundActive = true;
 
     this.emit('waiting', { waiting: false });
     this.emit('confirm', { enabled: false });
+    this.emit('temporalBlind', { active: false });
+    this.emit('temporalTimer', { seconds: null });
     this._emitHud();
 
     if (this.mode === 'solo') {
-      // En solitario el reloj global no arranca hasta que el panorama esté
-      // visible, para no quemar tiempo en una pantalla de carga.
+      // En solitario: cortina de carga activa hasta decodificar la imagen
+      this.pano.setBlind(true, 'Cargando ubicación…', 'Preparando la imagen 360°', true);
+      this.pano.setPano(coord.pano_id, this.roundHeading, 0);
+
       this.pano.waitForReady()
         .catch(() => {})
-        .then(() => this._startSoloRoundTimer(round));
+        .then(() => {
+          if (this.state !== 'playing' || this.currentRound !== round) return;
+          this.pano.setBlind(false);
+          this._startSoloRoundTimer(round);
+          if (this.gameMode === 'temporal') {
+            this._startTemporalCountdown(this.temporalSeconds);
+          }
+        });
       return;
     }
 
-    const prepSecs = CONFIG.PREPARE_DURATION || 3;
+    // Multijugador: Barrera de sincronización anti-trampas
+    this.pano.setBlind(true, 'Sincronizando jugadores…', 'Cargando la panorámica en segundo plano', true);
+    this.pano.setPano(coord.pano_id, this.roundHeading, 0);
 
     if (this.role === 'host') {
+      this._panoReadyPeers = new Set();
+      if (this._syncTimeout) clearTimeout(this._syncTimeout);
+
+      // Notificar a los invitados para que preparen y carguen la misma vista
       this.net.broadcast({
         type: 'roundStart',
         round,
         locationIndex: idx,
         heading: this.roundHeading,
-        prepareSeconds: prepSecs,
+        gameMode: this.gameMode,
+        temporalSeconds: this.temporalSeconds,
         players: this.players.map((p) => ({
           id: p.id,
           name: p.name,
@@ -250,23 +368,66 @@ export class Game {
           score: p.score || 0,
         })),
       });
-      this._startPrepare(prepSecs, round);
-    } else {
-      this._startPrepare(prepSecs, round);
+
+      // El anfitrión también espera a que su propio visor decodifique
+      this.pano.waitForReady()
+        .catch(() => {})
+        .then(() => {
+          this._panoReadyPeers.add(this.net.myId);
+          this._checkAllPanoReady(round);
+        });
+
+      // Timeout de seguridad de 6s en caso de que algún jugador tenga lag severo
+      this._syncTimeout = setTimeout(() => {
+        this._triggerSyncStart(round);
+      }, 6000);
     }
   }
 
-  /** Arranca la fase de adivinar en solitario (una vez cargada la imagen). */
+  /** Host: comprueba si todos los jugadores reportaron imagen lista para dar la salida al unísono. */
+  _checkAllPanoReady(round) {
+    if (this.role !== 'host' || this._resolved || this.currentRound !== round) return;
+    const targetCount = this.players.length;
+    if (this._panoReadyPeers.size >= targetCount) {
+      if (this._syncTimeout) {
+        clearTimeout(this._syncTimeout);
+        this._syncTimeout = null;
+      }
+      this._triggerSyncStart(round);
+    }
+  }
+
+  /** Host: emite la señal de salida sincronizada a todos los jugadores. */
+  _triggerSyncStart(round) {
+    if (this.role !== 'host' || this._resolved || this.currentRound !== round) return;
+    if (this._syncTimeout) {
+      clearTimeout(this._syncTimeout);
+      this._syncTimeout = null;
+    }
+    const prepSecs = CONFIG.PREPARE_DURATION || 3;
+    this.net.broadcast({
+      type: 'syncStart',
+      round,
+      prepareSeconds: prepSecs,
+    });
+    this._onSyncStart({ round, prepareSeconds: prepSecs });
+  }
+
+  _onSyncStart(data) {
+    if (this.currentRound !== data.round) return;
+    const prepSecs = data.prepareSeconds || 3;
+    this.pano.setBlind(true, '¡Prepárate!', `La imagen se mostrará en ${prepSecs} segundos`, false);
+    this._startPrepare(prepSecs, this.currentRound);
+  }
+
+  /** Arranca la fase de adivinar en solitario. */
   _startSoloRoundTimer(round) {
     if (this.state !== 'playing' || this.currentRound !== round) return;
-    // El reloj global de la partida solo se fija en la primera ronda.
-    // En rondas posteriores ya viene corriendo y no debe reiniciarse.
-    if (!this.soloStartTime) this.soloStartTime = Date.now();
     this._activateRound(round);
   }
 
   /**
-   * Fase "prepárate": cuenta atrás fija de 3 segundos (sin depender del reloj del SO).
+   * Fase "prepárate": cuenta atrás fija de 3 segundos sincronizada.
    */
   _startPrepare(durationSeconds, round) {
     this._clearPrepare();
@@ -277,11 +438,44 @@ export class Game {
       left--;
       if (left > 0) {
         this.emit('prepare', { seconds: left });
+        this.pano.setBlind(true, '¡Prepárate!', `La imagen se mostrará en ${left} segundos`, false);
       } else {
         this._clearPrepare();
+        // Destapar la imagen al mismo milisegundo para todos
+        this.pano.setBlind(false);
         this._activateRound(round);
+        if (this.gameMode === 'temporal') {
+          this._startTemporalCountdown(this.temporalSeconds);
+        }
       }
     }, 1000);
+  }
+
+  /** Temporizador de cuenta atrás para el modo temporal. */
+  _startTemporalCountdown(seconds) {
+    this._clearTemporal();
+    let left = seconds;
+    this.emit('temporalTimer', { seconds: left });
+    this._temporalTimer = setInterval(() => {
+      left--;
+      if (left > 0) {
+        this.emit('temporalTimer', { seconds: left });
+      } else {
+        this._clearTemporal();
+        this.emit('temporalTimer', { seconds: 0 });
+        // Ocultar imagen y expandir automáticamente el minimapa
+        this.pano.setBlind(true, '⏱️ Imagen oculta', 'Coloca tu chincheta en el mapa');
+        this.emit('temporalBlind', { active: true });
+      }
+    }, 1000);
+  }
+
+  _clearTemporal() {
+    if (this._temporalTimer) {
+      clearInterval(this._temporalTimer);
+      this._temporalTimer = null;
+    }
+    this.emit('temporalTimer', { seconds: null });
   }
 
   /** Activa el temporizador de adivinar y habilita el minimapa. */
@@ -290,24 +484,25 @@ export class Game {
     this.map.setInteractive(true);
     this.emit('prepare', { seconds: null });
 
-    const now = Date.now();
     if (this.mode === 'solo') {
-      this.roundEnd = this.soloStartTime + this.soloTotalSeconds * 1000;
-    } else {
-      // Multijugador: sin límite de tiempo por ronda.
-      this.roundEnd = 0;
+      this.soloRoundStartTime = Date.now();
+      this.roundEnd = Date.now() + this.soloRemainingSeconds * 1000;
+      this.emit('timer', {
+        seconds: Math.max(0, Math.ceil(this.soloRemainingSeconds)),
+        danger: this.soloRemainingSeconds <= 5,
+      });
+      this._startSoloTimers();
+      return;
     }
-    this.emit('timer', {
-      seconds: this.mode === 'solo' ? Math.max(0, Math.ceil((this.roundEnd - now) / 1000)) : null,
-      danger: false,
-    });
+
+    // Multijugador: sin límite rígido previo a que alguien adivine
+    this.roundEnd = 0;
+    this.emit('timer', { seconds: null, danger: false });
 
     if (this.role === 'host') {
       this._startHostTimers();
     } else if (this.role === 'guest') {
       this._startGuestTimers();
-    } else {
-      this._startSoloTimers();
     }
   }
 
@@ -340,11 +535,23 @@ export class Game {
     if (this.state === 'result' || this._over) return;
     const guess = this.myGuess || null;
     this._clearTimers();
+    this._clearTemporal();
+    this.pano.setBlind(false);
+    this.pano.setStatic(false);
+    this.emit('temporalBlind', { active: false });
+
+    // Descontar únicamente el tiempo jugado en la ronda activa (pausa el reloj durante los resultados)
+    const elapsedSec = this.soloRoundStartTime ? (Date.now() - this.soloRoundStartTime) / 1000 : 0;
+    this.soloRemainingSeconds = Math.max(0, this.soloRemainingSeconds - elapsedSec);
+    this.soloTotalPlayedMs += Math.round(elapsedSec * 1000);
+    this.emit('timer', { seconds: Math.ceil(this.soloRemainingSeconds), danger: false });
+
     const { distance, score } = this._score(guess);
     this.scores.me += score;
 
     const result = {
       mode: 'solo',
+      gameMode: this.gameMode,
       round: this.currentRound,
       total: this.rounds,
       real: { lat: this.currentCoord.lat, lng: this.currentCoord.lng },
@@ -369,12 +576,16 @@ export class Game {
   }
 
   _submitGuess(guess) {
-    let me = this.players.find((p) => p.id === this.net.myId || p.name === this.meName);
-    if (!me && this.role === 'host') {
-      me = this.players.find((p) => p.isHost || p.id === this.net.roomId);
+    const myClean = (this.meName || '').trim().toLowerCase();
+    let me = this.players.find((p) =>
+      (this.net.myId && p.id === this.net.myId) ||
+      (myClean && (p.name || '').trim().toLowerCase() === myClean)
+    );
+    if (!me && this.role === 'guest') {
+      me = this.players.find((p, idx) => idx > 0 && p.id !== this.net.roomId);
     }
-    if (!me && this.players.length === 2 && this.role === 'guest') {
-      me = this.players.find((p) => p.id !== this.net.roomId && !p.isHost);
+    if (!me && this.role === 'host') {
+      me = this.players.find((p) => p.isHost || p.id === this.net.roomId) || this.players[0];
     }
     if (!me) me = this.players[0];
 
@@ -389,16 +600,20 @@ export class Game {
       this.net.send({
         type: 'guess',
         round: this.currentRound,
-        lat: guess ? guess.lat : null,
-        lng: guess ? guess.lng : null,
+        lat: guess ? Number(guess.lat) : null,
+        lng: guess ? Number(guess.lng) : null,
         name: this.meName,
-        senderId: this.net.myId,
+        senderId: me ? me.id : this.net.myId,
       });
     } else if (this.role === 'host') {
-      if (this._allGuessed()) {
+      if (this._allGuessed() && !this._resolved) {
         this._clearHurry();
+        if (this._graceTimer) {
+          clearTimeout(this._graceTimer);
+          this._graceTimer = null;
+        }
         this._resolveMultiRound();
-      } else {
+      } else if (!this._resolved) {
         // Arranca el contador de 15s para los que aún no envían, anunciando quién adivinó
         this._startHurry(me ? me.name : (this.meName || 'Un jugador'));
       }
@@ -411,13 +626,15 @@ export class Game {
     this._hurryActive = true;
     this.hurryGuesser = guesserName;
     const seconds = CONFIG.OPPONENT_COUNTDOWN || 15;
+    const penalty = getNoGuessPenalty(this.currentRound);
     this.net.broadcast({
       type: 'hurryStart',
       round: this.currentRound,
       seconds,
       guesserName,
+      penalty,
     });
-    this._runHurryCountdown(seconds, guesserName);
+    this._runHurryCountdown(seconds, guesserName, penalty);
   }
 
   _onHurryStart(data) {
@@ -425,29 +642,56 @@ export class Game {
     this._hurryActive = true;
     const seconds = data.seconds || CONFIG.OPPONENT_COUNTDOWN || 15;
     const guesserName = data.guesserName || '';
-    this._runHurryCountdown(seconds, guesserName);
+    const penalty = data.penalty || getNoGuessPenalty(this.currentRound);
+    this._runHurryCountdown(seconds, guesserName, penalty);
   }
 
-  _runHurryCountdown(totalSeconds, guesserName = '') {
+  _runHurryCountdown(totalSeconds, guesserName = '', penalty = 0) {
     this._clearHurryTimer();
+    const roundPenalty = penalty || getNoGuessPenalty(this.currentRound);
     let left = totalSeconds;
-    this.emit('countdown', { seconds: left, guesserName });
+    // Asigna el timestamp límite para el temporizador maestro de rescate del anfitrión (BUG-06)
+    this.hurryEnd = Date.now() + (totalSeconds + 3) * 1000;
+    this.emit('countdown', { seconds: left, guesserName, penalty: roundPenalty });
     this._hurry = setInterval(() => {
       left--;
       if (left >= 0) {
-        this.emit('countdown', { seconds: left, guesserName });
+        this.emit('countdown', { seconds: left, guesserName, penalty: roundPenalty });
       }
       if (left <= 0) {
-        this._clearHurry();
+        this._clearHurryTimer();
         this.emit('countdown', { seconds: null });
+
+        // Si el jugador colocó un marcador pero no llegó a confirmar, auto-enviamos su guess:
+        const myClean = (this.meName || '').trim().toLowerCase();
+        const me = this.players.find((p) =>
+          (this.net.myId && p.id === this.net.myId) ||
+          (myClean && (p.name || '').trim().toLowerCase() === myClean)
+        );
+        if (this.myGuess && (!me || !me.guessed)) {
+          this._multiConfirm();
+        }
+
         if (this.role === 'host' && !this._resolved) {
-          this.players.forEach((p) => {
-            if (!p.guessed) {
-              p.guessed = true;
-              p.guess = null;
+          // Si el anfitrión tenía marcador y no había confirmado, confirmarlo
+          if (this.myGuess && (!me || !me.guessed)) {
+            this._multiConfirm();
+          }
+          if (this._resolved) return; // Si _multiConfirm ya resolvió la ronda, no crear graceTimer zombie (BUG-17)
+
+          // Tolerancia de red de 2.5 segundos para recibir paquetes de invitados en tránsito
+          if (this._graceTimer) clearTimeout(this._graceTimer);
+          this._graceTimer = setTimeout(() => {
+            if (!this._resolved) {
+              this.players.forEach((p) => {
+                if (!p.guessed) {
+                  p.guessed = true;
+                  p.guess = null;
+                }
+              });
+              this._resolveMultiRound();
             }
-          });
-          this._resolveMultiRound();
+          }, 2500);
         }
       }
     }, 1000);
@@ -475,6 +719,10 @@ export class Game {
   removePlayer(peerId) {
     if (!peerId) return;
     this.players = this.players.filter((p) => p.id !== peerId);
+    if (this.players.length === 1 && !this._over) {
+      this._endGame('forfeit');
+      return;
+    }
     if (this.players.length > 0 && this.players.every((p) => p.guessed) && !this._resolved) {
       this._resolveMultiRound();
     }
@@ -516,6 +764,8 @@ export class Game {
       }
       if (remaining <= 0) {
         this._clearTimers();
+        this._clearTemporal();
+        this.soloRemainingSeconds = 0;
         this.soloTimedOut = true;
         this._endSoloGame();
       }
@@ -527,12 +777,19 @@ export class Game {
     if (this._tick) clearInterval(this._tick);
     if (this._resultTimer) clearTimeout(this._resultTimer);
     if (this._readyTimer) clearTimeout(this._readyTimer);
+    if (this._graceTimer) clearTimeout(this._graceTimer);
     this._clearPrepare();
     this._clearHurry();
+    this._clearTemporal();
+    if (this._syncTimeout) {
+      clearTimeout(this._syncTimeout);
+      this._syncTimeout = null;
+    }
     this._master = null;
     this._tick = null;
     this._resultTimer = null;
     this._readyTimer = null;
+    this._graceTimer = null;
     this.hurryEnd = 0;
   }
 
@@ -552,12 +809,23 @@ export class Game {
         }
         break;
       case 'roundStart': {
+        // Si el guest aún no terminó de cargar datos/visores, encolar para después.
+        if (this.role === 'guest' && !this._guestReady) {
+          this._pendingRoundStart = data;
+          break;
+        }
         this.currentRound = data.round;
         this.state = 'playing';
         this.roundHeading = data.heading || 0;
+        this.gameMode = data.gameMode || 'normal';
+        this.temporalSeconds = Number(data.temporalSeconds) || CONFIG.DEFAULT_TEMPORAL_SECONDS;
         this._resolved = false;
         this._roundActive = false;
         this.myGuess = null;
+        this._clearTemporal();
+
+        // Configurar modo estático según regla
+        this.pano.setStatic(this.gameMode === 'static');
 
         if (data.players && Array.isArray(data.players)) {
           this.players = data.players.map((dp) => ({
@@ -578,16 +846,45 @@ export class Game {
 
         const coord = this.coordenadas[data.locationIndex];
         this.currentCoord = coord;
-        this.pano.setPano(coord.pano_id, this.roundHeading, 0);
         this.map.reset();
+        const myIndex = this.players.findIndex((p) => p.id === this.net.myId);
+        const assignedColor = CONFIG.PLAYER_COLORS[myIndex >= 0 ? myIndex % CONFIG.PLAYER_COLORS.length : 0];
+        this.map.setMyColor(assignedColor);
         this.map.setInteractive(true);
-        this._roundActive = true;
         this.emit('waiting', { waiting: false });
         this.emit('confirm', { enabled: false });
+        this.emit('temporalBlind', { active: false });
+        this.emit('temporalTimer', { seconds: null });
         this._emitHud();
 
-        const prepSecs = data.prepareSeconds || CONFIG.PREPARE_DURATION || 3;
-        this._startPrepare(prepSecs, this.currentRound);
+        // Barrera anti-trampas: cortina activa mientras se carga el panorama
+        this.pano.setBlind(true, 'Sincronizando jugadores…', 'Cargando la panorámica en segundo plano', true);
+        this.pano.setPano(coord.pano_id, this.roundHeading, 0);
+
+        this.pano.waitForReady()
+          .catch(() => {})
+          .then(() => {
+            if (this.state !== 'playing' || this.currentRound !== data.round) return;
+            this.pano.setBlind(true, 'Esperando a los demás jugadores…', 'La ronda iniciará en sincronía');
+            this.net.send({
+              type: 'panoReady',
+              round: this.currentRound,
+              senderId: this.net.myId,
+            });
+          });
+        break;
+      }
+      case 'panoReady': {
+        if (this.role !== 'host') break;
+        const pId = data.senderId || fromPeerId;
+        if (pId) {
+          this._panoReadyPeers.add(pId);
+          this._checkAllPanoReady(data.round || this.currentRound);
+        }
+        break;
+      }
+      case 'syncStart': {
+        this._onSyncStart(data);
         break;
       }
       case 'tick':
@@ -597,23 +894,33 @@ export class Game {
         break;
       case 'guess': {
         if (this.role !== 'host') break;
-        let p = this.players.find((x) =>
-          x.id === fromPeerId ||
-          (data.senderId && x.id === data.senderId) ||
-          (data.name && x.name === data.name) ||
-          (data.senderName && x.name === data.senderName)
-        );
+        const senderName = (data.name || data.senderName || '').trim().toLowerCase();
+        let p = this.players.find((x) => {
+          const xName = (x.name || '').trim().toLowerCase();
+          if (fromPeerId && x.id === fromPeerId) return true;
+          if (data.senderId && x.id === data.senderId) return true;
+          if (senderName && xName && xName === senderName) return true;
+          return false;
+        });
         if (!p && this.players.length === 2) {
-          p = this.players.find((x) => x.id !== this.net.myId && !x.isHost);
+          p = this.players.find((x) => {
+            const xName = (x.name || '').trim().toLowerCase();
+            const myClean = (this.meName || '').trim().toLowerCase();
+            return x.id !== this.net.myId && xName !== myClean;
+          });
         }
-        if (p && !p.guessed) {
+        if (p && (!p.guessed || p.guess == null)) {
           p.guessed = true;
-          p.guess = (data.lat != null && data.lng != null)
-            ? { lat: data.lat, lng: data.lng }
+          p.guess = (data.lat != null && data.lng != null && !isNaN(Number(data.lat)) && !isNaN(Number(data.lng)))
+            ? { lat: Number(data.lat), lng: Number(data.lng) }
             : null;
         }
         if (this._allGuessed() && !this._resolved) {
           this._clearHurry();
+          if (this._graceTimer) {
+            clearTimeout(this._graceTimer);
+            this._graceTimer = null;
+          }
           this._resolveMultiRound();
         } else if (!this._resolved && !this._hurryActive) {
           // El primer jugador en adivinar dispara el contador de 15s para los demás con su nombre
@@ -622,12 +929,29 @@ export class Game {
         break;
       }
       case 'hurryStart':
+        if (this.role === 'guest' && !this._guestReady) {
+          this._pendingHurryStart = data;
+          break;
+        }
         this._onHurryStart(data);
         break;
       case 'roundResult':
+        if (this.role === 'guest' && !this._guestReady) {
+          this._pendingRoundStart = null;
+          this._pendingHurryStart = null;
+          this._pendingRoundResult = data;
+          break;
+        }
         this._onRoundResult(data);
         break;
       case 'gameOver':
+        if (this.role === 'guest' && !this._guestReady) {
+          this._pendingRoundStart = null;
+          this._pendingHurryStart = null;
+          this._pendingRoundResult = null;
+          this._pendingGameOver = data;
+          break;
+        }
         this._onGameOver(data);
         break;
     }
@@ -648,12 +972,14 @@ export class Game {
   /* Resolución de ronda (multijugador, host autoritativo)               */
   /* ------------------------------------------------------------------ */
   _resolveMultiRound() {
+    if (this._resolved) return;
     this._resolved = true;
     this._clearTimers();
     this.state = 'result';
 
     const real = { lat: this.currentCoord.lat, lng: this.currentCoord.lng };
     const roundMult = damageMultiplier(this.currentRound);
+    const penalty = getNoGuessPenalty(this.currentRound);
 
     // Actualizamos directamente en this.players para que el daño y los puntos persistan
     const results = this.players.map((p) => {
@@ -662,12 +988,15 @@ export class Game {
 
       let damage = 0;
       if (p.guess == null) {
-        // Si no adivinó: penalización moderada (por defecto 1200 HP) en vez de 5000 puntos
-        damage = Math.round((CONFIG.NO_GUESS_PENALTY || 1200) * roundMult);
+        // Al no adivinar: 100 la 1ª ronda, 150 la 2ª, 200 la 3ª, etc. (+50 por ronda)
+        damage = penalty;
       } else if (info.score < CONFIG.BASE_SCORE) {
-        damage = Math.round((CONFIG.BASE_SCORE - info.score) * roundMult * 0.45);
-        damage = Math.min(damage, Math.round((CONFIG.MAX_ROUND_DAMAGE || 1800) * roundMult));
+        // Si adivinó, penalización proporcional a la desviación sin exceder la penalización por no adivinar
+        const scoreDeficit = (CONFIG.BASE_SCORE - info.score) / CONFIG.BASE_SCORE;
+        damage = Math.round(scoreDeficit * penalty);
       }
+      // Aplica el multiplicador de daño según la ronda (BUG-04)
+      damage = Math.round(damage * roundMult);
       p.hp = clamp(p.hp - damage, 0, CONFIG.MAX_HP);
       return {
         id: p.id,
@@ -687,6 +1016,7 @@ export class Game {
       real,
       players: results,
       multiplier: roundMult,
+      penalty,
     };
 
     this.net.broadcast({ type: 'roundResult', ...neutral });
@@ -737,6 +1067,7 @@ export class Game {
       myTotalScore: me.totalScore,
       myHp: me.hp,
       multiplier: neutral.multiplier,
+      penalty: neutral.penalty || getNoGuessPenalty(neutral.round),
       wonRound: me.score >= CONFIG.BASE_SCORE,
     };
   }
@@ -747,6 +1078,12 @@ export class Game {
   _scheduleAdvance() {
     this._resultTimer = setTimeout(() => {
       if (this._over) return;
+
+      // Si el rival se desconectó y quedó solo 1 jugador en multijugador, victoria por abandono (BUG-05)
+      if (this.players.length < 2) {
+        this._endGame('forfeit');
+        return;
+      }
 
       // El KO solo termina la partida en 1v1 (2 jugadores).
       // Con 3+ jugadores se sigue hasta agotar las rondas.
@@ -826,9 +1163,11 @@ export class Game {
     const me = this.players.find((p) => p.id === this.net.myId) || null;
     this.emit('hud', {
       mode: this.mode,
+      gameMode: this.gameMode,
       round: this.currentRound,
       total: this.rounds,
       multiplier: damageMultiplier(this.currentRound),
+      penalty: getNoGuessPenalty(this.currentRound),
       me: {
         name: this.meName || 'Tú',
         hp: me ? me.hp : CONFIG.MAX_HP,
@@ -853,11 +1192,19 @@ export class Game {
   _endSoloGame() {
     this._over = true;
     this.state = 'gameover';
+    this._clearTimers();
+    this._clearTemporal();
+    this.pano.setBlind(false);
+    this.pano.setStatic(false);
+    this.emit('temporalBlind', { active: false });
+
+    // El tiempo final de partida excluye las pausas de la pantalla de resultados (Req 2)
     const elapsed = this.soloTimedOut
       ? this.soloTotalSeconds * 1000
-      : Date.now() - this.soloStartTime;
+      : Math.min(this.soloTotalSeconds * 1000, this.soloTotalPlayedMs);
     this.emit('gameover', {
       mode: 'solo',
+      gameMode: this.gameMode,
       total: this.rounds,
       won: null,
       myTotalScore: this.scores.me,
@@ -872,6 +1219,11 @@ export class Game {
   /** Cancela cualquier partida en curso (salida de sala, etc.). */
   abort() {
     this._clearTimers();
+    this._clearTemporal();
+    if (this.pano) {
+      this.pano.setBlind(false);
+      this.pano.setStatic(false);
+    }
     this.state = 'idle';
     this._over = false;
   }

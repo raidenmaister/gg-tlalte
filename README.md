@@ -1,33 +1,34 @@
-# GG-TLALTE
+# GG-TLALTE · GeoGuessr P2P (BETA v1.0.0)
 
-Juego de adivinar ubicaciones con panorámicas 360° de Google Maps Street View, inspirado en GeoGuessr y ambientado en Tlaltenango de Sánchez Román, Zacatecas. Incluye modo solitario con leaderboard y partidas multijugador en duelo 1v1 y hasta 12 jugadores.
+Juego de adivinar ubicaciones con panorámicas 360° de Google Maps Street View, inspirado en GeoGuessr y ambientado en Tlaltenango de Sánchez Román, Zacatecas. Incluye modo solitario con leaderboard por modos y partidas multijugador en duelo 1v1 y hasta 25 jugadores simultáneos.
 
 ## Características
 
-- **Modo solitario**: elige 5, 7 o 10 rondas, con tiempo global para toda la partida.
-  - 5 rondas → 1:45
-  - 7 rondas → 2:00
-  - 10 rondas → 2:30
-- **Leaderboard de solitario** separado en categorías de 5, 7 y 10 rondas.
-- **Puntuación calibrada a escala local**:
-  - Fórmula exponencial adaptada a distancias urbanas (~1.2 km de constante de decaimiento).
-  - Aciertos a menos de 25 m = 5,000 pts (puntuación perfecta).
-  - Diferencias claras y justas de puntos y daño en distancias de calles y colonias.
-- **Nombres de usuario únicos** (no repetidos, insensibles a mayúsculas/minúsculas).
-- **Partidas multijugador P2P híbridas** (WebRTC vía PeerJS con fallback HTTP ultraligero):
-  - **Prioridad P2P absoluta**: Al establecer conexión directa WebRTC entre jugadores, el sondeo al servidor PHP se detiene completamente (0% consumo de CPU/hits en hosting gratuito como InfinityFree).
-  - Salas privadas con código de 4 caracteres.
-  - Salas públicas con listado y heartbeat inteligente.
-  - Sistema de prisa sincronizado (reloj de 15 segundos cuando el primer jugador confirma su guess).
-  - **Reglas de Duelo GeoGuessr**: El jugador con mejor puntuación en la ronda inflige daño a los rivales según la diferencia multiplicada por el factor de ronda.
-  - Resultados sobre minimapa a pantalla completa: chincheta real y de cada jugador, con nombres y conectadas por líneas geodésicas.
-  - Barras de vida animadas con reflejo de daño recibido en tiempo real.
-- **Efectos visuales y audio**:
-  - Fondo orbital con la Tierra en arte ASCII renderizada en Canvas 2D de alto rendimiento.
-  - Visor Street View con bloqueo de navegación y control de punto de vista.
-  - Audio sintetizado por Web Audio API para aciertos, temporizador y victorias/derrotas.
+- **3 Modos de Juego (disponibles en Solitario y Multijugador)**:
+  - **Normal**: Exploración completa en 360° con giro y zoom interactivo.
+  - **Estático**: Visión fija, sin posibilidad de girar ni mover la cámara (desafío puro de reconocimiento visual).
+  - **Temporal**: La panorámica se muestra únicamente durante un tiempo configurable (1s, 2s, 3s, 5s o 10s); luego una cortina ciega la oculta e indica *"Coloca tu chincheta en el mapa"*, abriendo el minimapa para conjeturar.
+- **Distribución de Ubicaciones Inteligente**:
+  - Algoritmo de dispersión que garantiza que cada nueva ronda esté a más de **161 metros** de distancia de la anterior.
+- **Modo Solitario con Cronómetro Pausado**:
+  - El tiempo de partida se detiene de forma justa mientras examinas los resultados sobre el mapa y solo se reanuda al pulsar *"Siguiente ronda"*.
+  - Opciones de 5, 7 y 10 rondas (1:45, 2:00 y 2:30 de tiempo total).
+- **Leaderboard Global por Categorías y Modos**:
+  - Filtros interactivos por **Modo** (Normal, Estático, Temporal) y por **Rondas** (5, 7, 10).
+  - Puntuación basada en precisión geográfica con bonificación por rapidez.
+- **Multijugador Masivo y Duelos (hasta 25 jugadores)**:
+  - **Chinchetas de color real**: En la sala de espera (Lobby) cada jugador cuenta con un icono de chincheta con el color exacto asignado que utilizará al colocar su marcador en el mapa y en la revelación de resultados.
+  - **25 Colores Únicos y Contrastantes** con HUD adaptativo en cuadrícula para salas concurridas.
+  - **Barrera de sincronización anti-trampas**: Todos los jugadores ven la imagen exactamente al mismo milisegundo mediante saludo `panoReady` y `syncStart`, evitando ventajas de carga y eliminando la pantalla azul.
+  - **Reglas de Duelo GeoGuessr**: Sistema de daño dinámico con multiplicador progresivo según rondas y reloj de prisa de 15 segundos cuando el primer jugador confirma su suposición.
+  - Conexión híbrida WebRTC / PeerJS de prioridad P2P absoluta con fallback HTTP relay.
+- **Fondo Cósmico ASCII en Canvas 2D**:
+  - Simulación orbital de la Tierra en 3D en arte ASCII con terminador día/noche.
+  - Cielo estrellado con caracteres ASCII titilantes a ritmo suave y pausado.
+  - Persistencia continua del fondo entre todas las pantallas de menús.
+  - Indicador sutil **BETA v1.0.0** en los menús.
 - **Backend PHP ligero**:
-  - Persiste usuarios, salas y leaderboard en archivos JSON (sin necesidad de MySQL).
+  - Persiste usuarios, salas y leaderboard estructurado en archivos JSON locales sin dependencias de base de datos MySQL.
 
 ## Estructura
 

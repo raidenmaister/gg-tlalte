@@ -1071,12 +1071,13 @@ function wire() {
       if (tempConf) tempConf.classList.toggle('hidden', currentSoloMode !== 'temporal');
     });
   });
-  const soloTempSecsEl = $('#soloTemporalSeconds');
-  if (soloTempSecsEl) {
-    soloTempSecsEl.addEventListener('change', (e) => {
-      currentSoloTemporalSecs = Number(e.target.value) || 3;
+  document.querySelectorAll('#soloTempPills .pill-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#soloTempPills .pill-btn').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentSoloTemporalSecs = Number(btn.dataset.sec) || 3;
     });
-  }
+  });
 
   // --- Selección de rondas (solitario) ---
   let selectedSoloRounds = 5;
@@ -1136,12 +1137,13 @@ function wire() {
       if (tempConf) tempConf.classList.toggle('hidden', currentMultiMode !== 'temporal');
     });
   });
-  const multiTempSecsEl = $('#multiTemporalSeconds');
-  if (multiTempSecsEl) {
-    multiTempSecsEl.addEventListener('change', (e) => {
-      currentMultiTemporalSecs = Number(e.target.value) || 3;
+  document.querySelectorAll('#multiTempPills .pill-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#multiTempPills .pill-btn').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentMultiTemporalSecs = Number(btn.dataset.sec) || 3;
     });
-  }
+  });
 
   // --- Visibilidad de sala (pública / privada) ---
   let isRoomPublic = true;
@@ -1157,6 +1159,42 @@ function wire() {
           : 'Solo personas con el código de acceso pueden unirse.';
       }
     });
+  });
+
+  // --- Rondas para crear sala ---
+  document.querySelectorAll('#createRoundsSelector .round-tab').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#createRoundsSelector .round-tab').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      const val = Number(btn.dataset.rounds) || 5;
+      const inp = $('#roomRounds');
+      if (inp) inp.value = val;
+    });
+  });
+
+  // --- Tamaño máximo de sala (stepper y presets) ---
+  let currentRoomLimit = 8;
+  const updateRoomLimitDisplay = (val) => {
+    currentRoomLimit = Math.max(2, Math.min(CONFIG.ROOM_MAX_PLAYERS || 25, val));
+    const inp = $('#roomLimit');
+    if (inp) inp.value = currentRoomLimit;
+    const disp = $('#roomLimitDisplay');
+    if (disp) disp.textContent = `${currentRoomLimit} jugadores`;
+    document.querySelectorAll('#roomLimitPresets .preset-pill').forEach((pill) => {
+      pill.classList.toggle('active', Number(pill.dataset.val) === currentRoomLimit);
+    });
+  };
+
+  const limitMinusBtn = $('#roomLimitMinus');
+  if (limitMinusBtn) {
+    limitMinusBtn.addEventListener('click', () => updateRoomLimitDisplay(currentRoomLimit - 1));
+  }
+  const limitPlusBtn = $('#roomLimitPlus');
+  if (limitPlusBtn) {
+    limitPlusBtn.addEventListener('click', () => updateRoomLimitDisplay(currentRoomLimit + 1));
+  }
+  document.querySelectorAll('#roomLimitPresets .preset-pill').forEach((pill) => {
+    pill.addEventListener('click', () => updateRoomLimitDisplay(Number(pill.dataset.val)));
   });
 
   // --- Botón Crear sala ---

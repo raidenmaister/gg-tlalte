@@ -9,7 +9,7 @@
 
     <!-- Leaflet (minimapa) -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-    <link rel="stylesheet" href="style.css?v=2.4">
+    <link rel="stylesheet" href="style.css?v=2.5">
 </head>
 <body>
 
@@ -77,14 +77,14 @@
                 <p class="mode-desc" id="soloModeDesc">Mueve la vista 360° y haz zoom libremente.</p>
 
                 <div id="soloTemporalConfig" class="temporal-config hidden">
-                    <label class="config-label" for="soloTemporalSeconds">Tiempo visible de la imagen</label>
-                    <select id="soloTemporalSeconds" class="config-select">
-                        <option value="1">1 segundo</option>
-                        <option value="2">2 segundos</option>
-                        <option value="3" selected>3 segundos</option>
-                        <option value="5">5 segundos</option>
-                        <option value="10">10 segundos</option>
-                    </select>
+                    <label class="config-label">Tiempo visible de la imagen</label>
+                    <div class="pill-row" id="soloTempPills">
+                        <button type="button" class="pill-btn" data-sec="1">1s</button>
+                        <button type="button" class="pill-btn" data-sec="2">2s</button>
+                        <button type="button" class="pill-btn active" data-sec="3">3s</button>
+                        <button type="button" class="pill-btn" data-sec="5">5s</button>
+                        <button type="button" class="pill-btn" data-sec="10">10s</button>
+                    </div>
                 </div>
             </div>
 
@@ -158,47 +158,49 @@
                 <p class="mode-desc" id="multiModeDesc">Mueve la vista 360° y haz zoom libremente.</p>
 
                 <div id="multiTemporalConfig" class="temporal-config hidden">
-                    <label class="config-label" for="multiTemporalSeconds">Tiempo visible de la imagen</label>
-                    <select id="multiTemporalSeconds" class="config-select">
-                        <option value="1">1 segundo</option>
-                        <option value="2">2 segundos</option>
-                        <option value="3" selected>3 segundos</option>
-                        <option value="5">5 segundos</option>
-                        <option value="10">10 segundos</option>
-                    </select>
+                    <label class="config-label">Tiempo visible de la imagen</label>
+                    <div class="pill-row" id="multiTempPills">
+                        <button type="button" class="pill-btn" data-sec="1">1s</button>
+                        <button type="button" class="pill-btn" data-sec="2">2s</button>
+                        <button type="button" class="pill-btn active" data-sec="3">3s</button>
+                        <button type="button" class="pill-btn" data-sec="5">5s</button>
+                        <button type="button" class="pill-btn" data-sec="10">10s</button>
+                    </div>
                 </div>
             </div>
 
             <div class="room-config-grid">
                 <div class="config-group">
-                    <label class="config-label" for="roomRounds">Rondas</label>
-                    <select id="roomRounds" class="config-select">
-                        <option value="5" selected>5 rondas</option>
-                        <option value="7">7 rondas</option>
-                        <option value="10">10 rondas</option>
-                    </select>
+                    <label class="config-label">Rondas</label>
+                    <div class="rounds-select-row" id="createRoundsSelector">
+                        <button type="button" class="round-tab active" data-rounds="5">
+                            <span class="round-tab-title">5</span>
+                        </button>
+                        <button type="button" class="round-tab" data-rounds="7">
+                            <span class="round-tab-title">7</span>
+                        </button>
+                        <button type="button" class="round-tab" data-rounds="10">
+                            <span class="round-tab-title">10</span>
+                        </button>
+                    </div>
+                    <input type="hidden" id="roomRounds" value="5">
                 </div>
 
                 <div class="config-group">
-                    <label class="config-label" for="roomLimit">Tamaño máximo de sala</label>
-                    <select id="roomLimit" class="config-select">
-                        <option value="2">2 jugadores</option>
-                        <option value="3">3 jugadores</option>
-                        <option value="4">4 jugadores</option>
-                        <option value="5">5 jugadores</option>
-                        <option value="6">6 jugadores</option>
-                        <option value="7">7 jugadores</option>
-                        <option value="8" selected>8 jugadores</option>
-                        <option value="9">9 jugadores</option>
-                        <option value="10">10 jugadores</option>
-                        <option value="11">11 jugadores</option>
-                        <option value="12">12 jugadores</option>
-                        <option value="15">15 jugadores</option>
-                        <option value="18">18 jugadores</option>
-                        <option value="20">20 jugadores</option>
-                        <option value="22">22 jugadores</option>
-                        <option value="25">25 jugadores</option>
-                    </select>
+                    <label class="config-label">Tamaño máximo de sala</label>
+                    <div class="stepper-wrap">
+                        <button type="button" class="btn-step" id="roomLimitMinus" aria-label="Menos jugadores">−</button>
+                        <div class="stepper-value" id="roomLimitDisplay">8 jugadores</div>
+                        <button type="button" class="btn-step" id="roomLimitPlus" aria-label="Más jugadores">+</button>
+                    </div>
+                    <div class="limit-presets" id="roomLimitPresets">
+                        <button type="button" class="preset-pill" data-val="2">2</button>
+                        <button type="button" class="preset-pill" data-val="4">4</button>
+                        <button type="button" class="preset-pill active" data-val="8">8</button>
+                        <button type="button" class="preset-pill" data-val="12">12</button>
+                        <button type="button" class="preset-pill" data-val="25">25</button>
+                    </div>
+                    <input type="hidden" id="roomLimit" value="8">
                 </div>
             </div>
 

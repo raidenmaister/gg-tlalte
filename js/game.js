@@ -13,7 +13,7 @@
 //   'toast'       {message, kind}
 // ============================================================================
 
-import { CONFIG, damageMultiplier, getNoGuessPenalty } from './config.js';
+import { CONFIG, damageMultiplier, getNoGuessPenalty } from './config.js?v=1.5.0';
 import {
   haversineKm,
   scoreForDistance,
@@ -21,7 +21,7 @@ import {
   pickIndices,
   pickSeparatedIndices,
   clamp,
-} from './utils.js';
+} from './utils.js?v=1.5.0';
 
 export class Game {
   constructor({ pano, map, net, audio }) {
@@ -76,12 +76,15 @@ export class Game {
     this._temporalTimer = null;
     this._panoReadyPeers = new Set();
     this._syncTimeout = null;
+    this._syncStartedRound = null;
+    this._roundSyncStarted = null;
 
     this._guestReady = true;       // se pone a false durante guestOnStart hasta que esté listo
     this._pendingRoundStart = null; // encola mensajes si llegan antes de que el guest esté listo
     this._pendingHurryStart = null;
     this._pendingRoundResult = null;
     this._pendingGameOver = null;
+    this._forfeitTimer = null;
   }
 
   /* ------------------------------------------------------------------ */
@@ -298,6 +301,8 @@ export class Game {
     this.state = 'playing';
     this._resolved = false;
     this._roundActive = false;
+    this._syncStartedRound = null;
+    this._roundSyncStarted = null;
     this.myGuess = null;
     this._clearTemporal();
 
@@ -313,6 +318,10 @@ export class Game {
     if (this.role !== 'guest') {
       this.roundHeading = Math.floor(Math.random() * 360);
     }
+
+    // Cortina de carga activa ANTES de emitir HUD para que al colapsar el minimapa no se filtre la imagen
+    this.pano.setBlind(true, 'Ronda ' + round, 'Cargando ubicación en alta definición…', true);
+    this.pano.setPano(coord.pano_id, this.roundHeading, 0);
 
     // Configurar modo estático/bloqueo de arrastre (modos estático y temporal)
     this.pano.setStatic(this.gameMode === 'static' || this.gameMode === 'temporal');
@@ -336,10 +345,6 @@ export class Game {
     this._emitHud();
 
     if (this.mode === 'solo') {
-      // En solitario: cortina de carga activa hasta decodificar y rasterizar las teselas en alta definición
-      this.pano.setBlind(true, 'Ronda ' + round, 'Cargando ubicación en alta definición…', true);
-      this.pano.setPano(coord.pano_id, this.roundHeading, 0);
-
       this.pano.waitForReady(2500)
         .catch(() => {})
         .then(() => {
@@ -353,10 +358,6 @@ export class Game {
         });
       return;
     }
-
-    // Multijugador: Cortina de preparación ágil
-    this.pano.setBlind(true, 'Ronda ' + round, 'Cargando ubicación en alta definición…', true);
-    this.pano.setPano(coord.pano_id, this.roundHeading, 0);
 
     if (this.role === 'host') {
       this._panoReadyPeers = new Set();
@@ -396,6 +397,7 @@ export class Game {
   /** Host: comprueba si todos los jugadores reportaron imagen lista para dar la salida al unísono. */
   _checkAllPanoReady(round) {
     if (this.role !== 'host' || this._resolved || this.currentRound !== round) return;
+    if (this._syncStartedRound === round) return;
     const targetCount = this.players.length;
     if (this._panoReadyPeers.size >= targetCount) {
       if (this._syncTimeout) {
@@ -409,6 +411,8 @@ export class Game {
   /** Host: emite la señal de salida sincronizada a todos los jugadores. */
   _triggerSyncStart(round) {
     if (this.role !== 'host' || this._resolved || this.currentRound !== round) return;
+    if (this._syncStartedRound === round) return;
+    this._syncStartedRound = round;
     if (this._syncTimeout) {
       clearTimeout(this._syncTimeout);
       this._syncTimeout = null;
@@ -423,9 +427,10 @@ export class Game {
   }
 
   _onSyncStart(data) {
-    if (data.round != null) {
-      this.currentRound = data.round;
-    }
+    const round = data.round != null ? data.round : this.currentRound;
+    if (this._roundSyncStarted === round) return;
+    this._roundSyncStarted = round;
+    this.currentRound = round;
     this.pano.refresh();
     const prepSecs = data.prepareSeconds || 3;
     this.pano.setBlind(true, '¡Prepárate!', `La imagen se mostrará en ${prepSecs} segundos`, false);
@@ -462,6 +467,14 @@ export class Game {
         }
       }
     }, 1000);
+  }
+
+  _clearPrepare() {
+    if (this._prepare) {
+      clearInterval(this._prepare);
+      this._prepare = null;
+    }
+    this.emit('prepare', { seconds: null });
   }
 
   /** Temporizador de cuenta atrás para el modo temporal. */
@@ -728,17 +741,80 @@ export class Game {
     return this.players.length > 0 && this.players.every((p) => p.guessed);
   }
 
-  /** Elimina a un jugador desconectado durante la partida. */
+  /** Marca a un jugador desconectado durante la partida con tiempo de gracia para reconectar. */
   removePlayer(peerId) {
     if (!peerId) return;
-    this.players = this.players.filter((p) => p.id !== peerId);
-    if (this.players.length === 1 && !this._over) {
-      this._endGame('forfeit');
+    const player = this.players.find((p) => p.id === peerId);
+    if (player) {
+      player.disconnected = true;
+    }
+
+    // Si todos los rivales están desconectados, iniciar un temporizador de abandono (15s)
+    const activeOpponents = this.players.filter((p) => p.id !== this.net.myId && !p.disconnected);
+    if (activeOpponents.length === 0 && !this._over) {
+      if (!this._forfeitTimer) {
+        this.emit('toast', { message: 'Rival desconectado. Esperando reconexión (15s)…', kind: 'warning' });
+        this._forfeitTimer = setTimeout(() => {
+          const stillActive = this.players.filter((p) => p.id !== this.net.myId && !p.disconnected);
+          if (stillActive.length === 0 && !this._over) {
+            this._endGame('forfeit');
+          }
+          this._forfeitTimer = null;
+        }, 15000);
+      }
       return;
     }
-    if (this.players.length > 0 && this.players.every((p) => p.guessed) && !this._resolved) {
+
+    // Si aún quedan jugadores y todos los que están conectados ya adivinaron:
+    const connectedPlayers = this.players.filter((p) => !p.disconnected);
+    if (connectedPlayers.length > 0 && connectedPlayers.every((p) => p.guessed) && !this._resolved) {
       this._resolveMultiRound();
     }
+  }
+
+  /** Host: sincroniza a un invitado que se reconectó durante una partida en curso. */
+  syncGuestReconnect(peerId) {
+    if (!this._hostStarted || !this.locations || !this.locations.length) return;
+    const guestName = (this.net.guestNames.get(peerId) || '').trim().toLowerCase();
+    const existing = this.players.find((p) => (p.name || '').trim().toLowerCase() === guestName);
+    if (existing) {
+      existing.id = peerId;
+      existing.disconnected = false;
+    }
+    // Si había un temporizador de forfeit por rival desconectado, cancelarlo
+    if (this._forfeitTimer) {
+      clearTimeout(this._forfeitTimer);
+      this._forfeitTimer = null;
+      this.emit('toast', { message: `${existing ? existing.name : 'Un jugador'} se ha reconectado.`, kind: 'info' });
+    }
+
+    // 1. Enviar el paquete 'start' al invitado para que inicialice su juego
+    this.net.sendTo(peerId, {
+      type: 'start',
+      rounds: this.rounds,
+      locations: this.locations,
+      mode: 'multi',
+      gameMode: this.gameMode,
+      temporalSeconds: this.temporalSeconds,
+      players: this.players.map((p) => ({ id: p.id, name: p.name, hp: p.hp, score: p.score })),
+    });
+
+    // 2. Enviar inmediatamente el roundStart de la ronda actual
+    setTimeout(() => {
+      if (!this.currentCoord) return;
+      this.net.sendTo(peerId, {
+        type: 'roundStart',
+        round: this.currentRound,
+        total: this.rounds,
+        coord: this.currentCoord,
+        heading: this.roundHeading || 0,
+        gameMode: this.gameMode,
+        temporalSeconds: this.temporalSeconds,
+        duration: CONFIG.ROUND_DURATION,
+        syncTime: Date.now() + 400,
+        players: this.players.map((p) => ({ id: p.id, name: p.name, hp: p.hp, score: p.score })),
+      });
+    }, 600);
   }
 
   /* ------------------------------------------------------------------ */
@@ -791,6 +867,10 @@ export class Game {
     if (this._resultTimer) clearTimeout(this._resultTimer);
     if (this._readyTimer) clearTimeout(this._readyTimer);
     if (this._graceTimer) clearTimeout(this._graceTimer);
+    if (this._forfeitTimer) {
+      clearTimeout(this._forfeitTimer);
+      this._forfeitTimer = null;
+    }
     this._clearPrepare();
     this._clearHurry();
     this._clearTemporal();
@@ -834,6 +914,8 @@ export class Game {
         this.temporalSeconds = Number(data.temporalSeconds) || CONFIG.DEFAULT_TEMPORAL_SECONDS;
         this._resolved = false;
         this._roundActive = false;
+        this._syncStartedRound = null;
+        this._roundSyncStarted = null;
         this.myGuess = null;
         this._clearTemporal();
 
@@ -859,6 +941,11 @@ export class Game {
 
         const coord = this.coordenadas[data.locationIndex];
         this.currentCoord = coord;
+
+        // Cortina de carga activa ANTES de emitir HUD para evitar destello de StreetView al colapsar el minimapa
+        this.pano.setBlind(true, 'Ronda ' + data.round, 'Cargando ubicación en alta definición…', true);
+        this.pano.setPano(coord.pano_id, this.roundHeading, 0);
+
         this.pano.setStatic(this.gameMode === 'static' || this.gameMode === 'temporal');
         this.map.reset();
         const myIndex = this.players.findIndex((p) => p.id === this.net.myId);
@@ -870,10 +957,6 @@ export class Game {
         this.emit('temporalBlind', { active: false });
         this.emit('temporalTimer', { seconds: null });
         this._emitHud();
-
-        // Cortina de carga activa mientras se prepara el panorama
-        this.pano.setBlind(true, 'Ronda ' + data.round, 'Cargando ubicación en alta definición…', true);
-        this.pano.setPano(coord.pano_id, this.roundHeading, 0);
 
         this.pano.waitForReady(2500)
           .catch(() => {})
@@ -1243,11 +1326,15 @@ export class Game {
     this._pendingHurryStart = null;
     this._pendingRoundResult = null;
     this._pendingGameOver = null;
+    this._syncStartedRound = null;
+    this._roundSyncStarted = null;
     if (this.pano) {
       this.pano.setBlind(false);
       this.pano.setStatic(false);
     }
     this.state = 'idle';
     this._over = false;
+    this.mode = 'solo';
+    this.role = 'solo';
   }
 }

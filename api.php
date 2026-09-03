@@ -93,7 +93,7 @@ function userExists($users, $name) {
     return false;
 }
 
-$staleSeconds = 30;
+$staleSeconds = 600; // 10 minutos de gracia para no purgar salas activas
 
 $rooms = cleanupRooms(loadRooms($roomsFile), $staleSeconds);
 $users = loadJson($usersFile, []);
@@ -106,6 +106,12 @@ switch ($action) {
         $name = trim($_POST['name'] ?? 'Anónimo');
         $limit = intval($_POST['limit'] ?? 0);
         $isPublic = isset($_POST['isPublic']) ? intval($_POST['isPublic']) : 1;
+        $rounds = intval($_POST['rounds'] ?? 5);
+        $gameMode = trim($_POST['gameMode'] ?? 'normal');
+        if (!in_array($gameMode, ['normal', 'static', 'temporal'], true)) {
+            $gameMode = 'normal';
+        }
+        $temporalSeconds = intval($_POST['temporalSeconds'] ?? 3);
         if ($id === '') {
             echo json_encode(['ok' => false, 'error' => 'id requerido']);
             exit;
@@ -114,6 +120,9 @@ switch ($action) {
             'name' => $name,
             'limit' => $limit,
             'count' => 1,
+            'rounds' => $rounds,
+            'gameMode' => $gameMode,
+            'temporalSeconds' => $temporalSeconds,
             'updated' => time(),
             'isPublic' => $isPublic,
             'messages' => [],
@@ -154,6 +163,9 @@ switch ($action) {
                 'name' => $room['name'],
                 'limit' => intval($room['limit']),
                 'count' => intval($room['count']),
+                'rounds' => intval($room['rounds'] ?? 5),
+                'gameMode' => strval($room['gameMode'] ?? 'normal'),
+                'temporalSeconds' => intval($room['temporalSeconds'] ?? 3),
             ];
         }
         echo json_encode(['ok' => true, 'rooms' => $out]);

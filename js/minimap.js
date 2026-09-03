@@ -2,8 +2,8 @@
 // minimap.js — Minimapa interactivo Leaflet para adivinar y revelar.
 // ============================================================================
 
-import { CONFIG } from './config.js';
-import { greatCirclePoints } from './utils.js';
+import { CONFIG } from './config.js?v=1.5.0';
+import { greatCirclePoints } from './utils.js?v=1.5.0';
 
 const MARKER = {
   real: { color: '#16a34a', size: 34, label: 'Ubicación real' },
@@ -88,6 +88,9 @@ export class Minimap {
     this.pick = null;          // {lat, lng}
     this.interactive = true;   // por defecto interactivo durante el juego
     this.myColor = null;       // Color asignado al jugador en la partida
+    this.streetLayer = null;
+    this.satelliteLayer = null;
+    this.currentLayerType = 'streets';
   }
 
   setMyColor(color) {
@@ -99,26 +102,54 @@ export class Minimap {
       throw new Error('Leaflet no está disponible. Revisa la carga del CDN.');
     }
     const el = document.getElementById(this.containerId);
+    // Bounding box de Tlaltenango y alrededores para evitar que el mapa se aleje o se pierda
+    const TLALTE_BOUNDS = L.latLngBounds(
+      [21.65, -103.45], // Sur-Oeste
+      [21.90, -103.15]  // Nor-Este
+    );
+
     this.map = L.map(el, {
       center: CONFIG.MAP_DEFAULT_CENTER,
       zoom: CONFIG.MAP_DEFAULT_ZOOM,
       zoomControl: true,
       attributionControl: true,
-      worldCopyJump: true,
-      minZoom: 11,
+      worldCopyJump: false,
+      minZoom: 12,
       maxZoom: 19,
+      maxBounds: TLALTE_BOUNDS,
+      maxBoundsViscosity: 0.85,
     });
 
-    L.tileLayer(CONFIG.TILE_URL, {
+    this.streetLayer = L.tileLayer(CONFIG.TILE_URL, {
       attribution: CONFIG.TILE_ATTRIBUTION,
       maxZoom: 19,
       subdomains: 'abc',
-    }).addTo(this.map);
+    });
+
+    this.satelliteLayer = L.tileLayer(CONFIG.SATELLITE_TILE_URL, {
+      attribution: CONFIG.SATELLITE_ATTRIBUTION,
+      maxZoom: 20,
+      subdomains: CONFIG.SATELLITE_SUBDOMAINS,
+    });
+
+    let savedLayer = 'streets';
+    try {
+      savedLayer = localStorage.getItem('gg_map_layer') || 'streets';
+    } catch (e) {}
+    this.currentLayerType = savedLayer === 'satellite' ? 'satellite' : 'streets';
+
+    if (this.currentLayerType === 'satellite') {
+      this.satelliteLayer.addTo(this.map);
+    } else {
+      this.streetLayer.addTo(this.map);
+    }
 
     this.revealLayer = L.layerGroup().addTo(this.map);
 
     this.map.on('click', (e) => {
       if (this.interactive === false) return;
+      const wrap = this.map.getContainer().closest('.minimap-wrap');
+      if (wrap && wrap.classList.contains('fullscreen')) return;
       const { lat, lng } = e.latlng;
       this.setPick(lat, lng);
       if (this.callbacks.onPick) this.callbacks.onPick(lat, lng);
@@ -130,14 +161,51 @@ export class Minimap {
 
   /** Activa/desactiva la recogida de clics (modo adivinar). */
   setInteractive(active) {
-    this.interactive = active !== false;
+    const wrap = this.map && this.map.getContainer() ? this.map.getContainer().closest('.minimap-wrap') : null;
+    const isFullscreen = wrap && wrap.classList.contains('fullscreen');
+    this.interactive = active !== false && !isFullscreen;
     if (this.map && this.map.getContainer()) {
-      this.map.getContainer().style.cursor = this.interactive ? 'crosshair' : '';
+      this.map.getContainer().style.cursor = this.interactive ? 'crosshair' : 'grab';
     }
+  }
+
+  /** Conmuta entre capa estándar (OpenStreetMap) y capa satelital (Google Hybrid). */
+  toggleLayer() {
+    if (!this.map || !this.streetLayer || !this.satelliteLayer) return this.currentLayerType;
+    if (this.currentLayerType === 'streets') {
+      this.map.removeLayer(this.streetLayer);
+      this.satelliteLayer.addTo(this.map);
+      this.currentLayerType = 'satellite';
+    } else {
+      this.map.removeLayer(this.satelliteLayer);
+      this.streetLayer.addTo(this.map);
+      this.currentLayerType = 'streets';
+    }
+    try {
+      localStorage.setItem('gg_map_layer', this.currentLayerType);
+    } catch (e) {}
+
+    // Asegurar que la capa de chinchetas y líneas geodésicas quede visible encima
+    if (this.revealLayer && this.map.hasLayer(this.revealLayer)) {
+      this.revealLayer.bringToFront();
+    }
+
+    return this.currentLayerType;
+  }
+
+  /** Recentra la vista del mapa en el centro urbano de Tlaltenango. */
+  recenter() {
+    if (!this.map) return;
+    this.map.setView(CONFIG.MAP_DEFAULT_CENTER, CONFIG.MAP_DEFAULT_ZOOM, {
+      animate: true,
+    });
   }
 
   /** Coloca (o mueve) el marcador del jugador con su color real. */
   setPick(lat, lng) {
+    if (this.interactive === false) return;
+    const wrap = this.map && this.map.getContainer() ? this.map.getContainer().closest('.minimap-wrap') : null;
+    if (wrap && wrap.classList.contains('fullscreen')) return;
     this.pick = { lat, lng };
     const pinColor = this.myColor || MARKER.mine.color;
     if (!this.pickMarker) {
@@ -303,10 +371,17 @@ export class Minimap {
   /** Pone el minimapa a pantalla completa (modo revelado). */
   setFullscreen(active) {
     if (!this.map) return;
-    // #minimap -> .minimap-panel -> .minimap-wrap
-    const wrap = this.map.getContainer().parentElement.parentElement;
+    const wrap = this.map.getContainer().closest('.minimap-wrap');
     if (wrap) wrap.classList.toggle('fullscreen', active);
     if (active) {
+      this.setInteractive(false);
+      this.interactive = false;
+      if (this.map.dragging) this.map.dragging.enable();
+      if (this.map.touchZoom) this.map.touchZoom.enable();
+      if (this.map.doubleClickZoom) this.map.doubleClickZoom.enable();
+      if (this.map.scrollWheelZoom) this.map.scrollWheelZoom.enable();
+      if (this.map.boxZoom) this.map.boxZoom.enable();
+      if (this.map.keyboard) this.map.keyboard.enable();
       requestAnimationFrame(() => this.refreshSize());
     }
   }

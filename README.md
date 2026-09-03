@@ -1,4 +1,4 @@
-# GG-TLALTE · GeoGuessr P2P (BETA v1.0.0)
+# GG-TLALTE · GeoGuessr P2P (BETA v1.5.0)
 
 Juego de adivinar ubicaciones con panorámicas 360° de Google Maps Street View, inspirado en GeoGuessr y ambientado en Tlaltenango de Sánchez Román, Zacatecas. Incluye modo solitario con leaderboard por modos y partidas multijugador en duelo 1v1 y hasta 25 jugadores simultáneos.
 
@@ -8,6 +8,12 @@ Juego de adivinar ubicaciones con panorámicas 360° de Google Maps Street View,
   - **Normal**: Exploración completa en 360° con giro y zoom interactivo.
   - **Estático**: Visión fija, sin posibilidad de girar ni mover la cámara (desafío puro de reconocimiento visual).
   - **Temporal**: La panorámica se muestra únicamente durante un tiempo configurable (1s, 2s, 3s, 5s o 10s); luego una cortina ciega la oculta e indica *"Coloca tu chincheta en el mapa"*, abriendo el minimapa para conjeturar.
+- **Salas Públicas Detalladas**:
+  - El buscador de salas públicas muestra en tiempo real el anfitrión, capacidad actual/máxima, el modo de juego configurado (`Normal`, `Estático`, `Temporal`) y el número de partidas/rondas de la sala.
+- **Minimapa Interactivo con Capa Satelital**:
+  - Controles integrados para conmutar al instante entre mapa callejero y vista satelital híbrida HD, así como botón de recentrado rápido en Tlaltenango.
+- **Sistema Anti-Caché Absoluto**:
+  - Configuración `.htaccess` y meta tags HTTP `no-cache`, versionado estricto de módulos ES (`?v=1.5.0`) y comprobación de actualización en caliente para evitar que los jugadores queden atrapados en versiones desactualizadas sin requerir Shift+F5.
 - **Distribución de Ubicaciones Inteligente**:
   - Algoritmo de dispersión que garantiza que cada nueva ronda esté a más de **161 metros** de distancia de la anterior.
 - **Modo Solitario con Cronómetro Pausado**:
@@ -23,10 +29,10 @@ Juego de adivinar ubicaciones con panorámicas 360° de Google Maps Street View,
   - **Reglas de Duelo GeoGuessr**: Sistema de daño dinámico con multiplicador progresivo según rondas y reloj de prisa de 15 segundos cuando el primer jugador confirma su suposición.
   - Conexión híbrida WebRTC / PeerJS de prioridad P2P absoluta con fallback HTTP relay.
 - **Fondo Cósmico ASCII en Canvas 2D**:
-  - Simulación orbital de la Tierra en 3D en arte ASCII con terminador día/noche.
+  - Simulación orbital de la Tierra en 3D en arte ASCII con continentes reales y terminador día/noche.
   - Cielo estrellado con caracteres ASCII titilantes a ritmo suave y pausado.
   - Persistencia continua del fondo entre todas las pantallas de menús.
-  - Indicador sutil **BETA v1.0.0** en los menús.
+  - Indicador sutil **BETA v1.5.0** en los menús.
 - **Backend PHP ligero**:
   - Persiste usuarios, salas y leaderboard estructurado en archivos JSON locales sin dependencias de base de datos MySQL.
 

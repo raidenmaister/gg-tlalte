@@ -4,7 +4,7 @@
 
 export const CONFIG = {
   // Versión oficial de la aplicación visible en menús
-  VERSION: 'BETA v1.4.2',
+  VERSION: 'BETA v1.5.0',
 
   // Fallback opcional de API Key (cliente). La key real se define en
   // js/keys.js (window.GG_GOOGLE_MAPS_API_KEY), que se mantiene local y NO se
@@ -111,6 +111,9 @@ export const CONFIG = {
   TILE_URL: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
   TILE_ATTRIBUTION:
     '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  SATELLITE_TILE_URL: 'https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+  SATELLITE_SUBDOMAINS: ['mt0', 'mt1', 'mt2', 'mt3'],
+  SATELLITE_ATTRIBUTION: '&copy; Google Maps',
   MAP_DEFAULT_CENTER: [21.7809, -103.3055],
   MAP_DEFAULT_ZOOM: 13,
 };

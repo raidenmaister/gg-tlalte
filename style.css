@@ -941,12 +941,11 @@ input {
     content: '';
 }
 
-/* Compás centrado matemáticamente en el medio exacto de la pantalla */
+/* Compás en esquina inferior izquierda (libre de HUD superior y nombres de jugadores) */
 .hud-compass {
     position: absolute;
-    left: 50%;
-    transform: translateX(-50%);
-    top: 16px;
+    left: 20px;
+    bottom: 20px;
     pointer-events: none;
     z-index: 55;
     margin-top: 0;
@@ -1538,6 +1537,7 @@ input {
     bottom: 0;
     z-index: 70;
     margin: 0;
+    pointer-events: auto;
 }
 
 .minimap-wrap.fullscreen .minimap-panel {
@@ -1546,10 +1546,66 @@ input {
     border-radius: 0;
     border: none;
     opacity: 1;
+    pointer-events: auto;
+}
+
+.minimap-wrap.fullscreen #minimap {
+    width: 100%;
+    height: 100%;
+    pointer-events: auto;
 }
 
 .minimap-wrap.fullscreen .btn-confirm {
     display: none;
+}
+
+/* Controles flotantes sobre el minimapa (recentrar + satelital) */
+.minimap-controls {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 500;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: auto;
+}
+
+.btn-map-control {
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    background: rgba(12, 16, 32, 0.88);
+    border: 1px solid var(--border-strong);
+    color: #fff;
+    font-size: 1.2rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    transition: transform 0.15s, background 0.15s, border-color 0.15s;
+    pointer-events: auto;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.btn-map-control:hover {
+    transform: scale(1.08);
+    background: rgba(233, 69, 96, 0.9);
+    border-color: var(--accent);
+}
+
+.btn-map-control:active {
+    transform: scale(0.92);
+}
+
+.btn-map-control.active {
+    background: var(--accent);
+    border-color: #fff;
+    box-shadow: 0 0 12px var(--accent-glow);
 }
 
 /* Overlay de resultado flotante (botón siguiente) */
@@ -1733,6 +1789,20 @@ input {
     backdrop-filter: blur(4px);
     -webkit-backdrop-filter: blur(4px);
     animation: fadeIn 0.25s ease both;
+}
+
+#gameOverPanel {
+    z-index: 120;
+    pointer-events: auto;
+}
+
+#gameOverPanel .panel {
+    pointer-events: auto;
+}
+
+#gameOverBtn {
+    cursor: pointer;
+    pointer-events: auto;
 }
 
 .panel {
@@ -2069,7 +2139,7 @@ select, option {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 10px;
+    gap: 12px;
     background: rgba(0, 0, 0, 0.28);
     border: 1px solid var(--border);
     border-radius: 10px;
@@ -2079,22 +2149,52 @@ select, option {
 .public-room-info {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 6px;
     min-width: 0;
+    text-align: left;
 }
 
 .public-room-name {
     color: var(--text);
     font-size: 0.95rem;
-    font-weight: 600;
+    font-weight: 700;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
 .public-room-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
     color: var(--muted);
     font-size: 0.78rem;
+}
+
+.public-room-tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 7px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 0.75rem;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.public-room-tag-mode {
+    background: rgba(59, 130, 246, 0.1);
+    border-color: rgba(59, 130, 246, 0.25);
+    color: #93c5fd;
+}
+
+.public-room-tag-rounds {
+    background: rgba(233, 69, 96, 0.1);
+    border-color: rgba(233, 69, 96, 0.25);
+    color: var(--accent-2);
 }
 
 .join-public-btn {
@@ -2312,9 +2412,10 @@ select, option {
 
     .hud-compass {
         position: absolute;
-        left: 50%;
-        top: 12px;
-        transform: translateX(-50%);
+        left: 14px;
+        bottom: 14px;
+        top: auto;
+        transform: none;
     }
 
     .hud-left {

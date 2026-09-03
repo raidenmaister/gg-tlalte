@@ -4,12 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="theme-color" content="#0a0a14">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>GG-TLALTE · GeoGuessr P2P</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230a0a14'/%3E%3Ctext x='32' y='45' font-family='Arial, sans-serif' font-size='38' font-weight='bold' fill='%23e94560' text-anchor='middle'%3EG%3C/text%3E%3C/svg%3E">
 
     <!-- Leaflet (minimapa) -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-    <link rel="stylesheet" href="style.css?v=3.0">
+    <link rel="stylesheet" href="style.css?v=1.5.0">
 </head>
 <body>
 
@@ -17,7 +20,7 @@
     <div id="ascii-earth" class="hidden"></div>
 
     <!-- Badge de versión (menús) -->
-    <div id="versionBadge" class="version-badge">BETA v1.4.2</div>
+    <div id="versionBadge" class="version-badge">BETA v1.5.0</div>
 
     <!-- ====================== PANTALLA: NOMBRE ====================== -->
     <div id="screen-name" class="screen">
@@ -286,18 +289,19 @@
                 <div class="hud-timer" id="hudTimer">60</div>
             </div>
 
-            <div class="hud-compass" id="hudCompass">
-                <div class="compass-ring">
-                    <span class="compass-arrow" id="compassArrow">N</span>
-                </div>
-            </div>
-
             <div class="hud-right">
                 <div class="hud-score" id="hudScore">
                     <span class="hud-score-label">PUNTOS</span>
                     <span class="hud-score-value" id="hudScoreValue">0</span>
                 </div>
                 <div class="hud-hp hidden" id="hudHp"></div>
+            </div>
+        </div>
+
+        <!-- Brújula en esquina inferior izquierda (no tapa nombres de jugadores) -->
+        <div class="hud-compass" id="hudCompass">
+            <div class="compass-ring">
+                <span class="compass-arrow" id="compassArrow">N</span>
             </div>
         </div>
 
@@ -325,6 +329,10 @@
         <div class="minimap-wrap collapsed" id="minimapWrap">
             <button class="btn-confirm" id="confirmBtn" disabled>CONFIRMAR GUESS</button>
             <div class="minimap-panel" id="minimapPanel">
+                <div class="minimap-controls" id="minimapControls">
+                    <button class="btn-map-control btn-recenter-map" id="recenterMapBtn" title="Recentrar en Tlaltenango">🎯</button>
+                    <button class="btn-map-control btn-toggle-layer" id="toggleLayerBtn" title="Cambiar a vista satelital">🛰️</button>
+                </div>
                 <div id="minimap"></div>
             </div>
         </div>
@@ -356,6 +364,6 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
     <script src="js/keys.js"></script>
-    <script type="module" src="js/app.js?v=3.0"></script>
+    <script type="module" src="js/app.js?v=1.5.0"></script>
 </body>
 </html>

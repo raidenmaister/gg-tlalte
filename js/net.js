@@ -9,8 +9,8 @@
 //    exactamente igual y sin requerir servidores TURN adicionales ni VPS.
 // ============================================================================
 
-import { CONFIG } from './config.js';
-import { generateCode } from './utils.js';
+import { CONFIG } from './config.js?v=1.5.0';
+import { generateCode } from './utils.js?v=1.5.0';
 
 const API_URL = 'api.php';
 
@@ -249,12 +249,15 @@ export class Network {
   }
 
   _registerRoom(name, isPublic) {
-    LOG('_registerRoom', { id: this.roomId, name, limit: this.limit, isPublic });
+    LOG('_registerRoom', { id: this.roomId, name, limit: this.limit, isPublic, rounds: this.rounds, gameMode: this.gameMode });
     this._api('create', {
       id: this.roomId,
       name,
       limit: this.limit,
       isPublic: isPublic ? 1 : 0,
+      rounds: this.rounds || CONFIG.DUEL_ROUNDS,
+      gameMode: this.gameMode || 'normal',
+      temporalSeconds: this.temporalSeconds || CONFIG.DEFAULT_TEMPORAL_SECONDS,
     }).then((res) => {
       if ((!res || !res.ok) && isPublic && this.cb.onError) {
         this.cb.onError('public-register');
@@ -266,13 +269,11 @@ export class Network {
 
   _startHeartbeat() {
     this._clearHeartbeat();
-    // Las salas privadas NO gastan peticiones en PHP (100% P2P)
-    if (!this.isPublic) return;
     this._heartbeat = setInterval(() => {
-      if (!this.isPublic || this._closing) return;
-      const count = this.isHost ? Math.max(1, this.players.length) : this._publicCount;
+      if (this._closing || !this.roomId || !this.isHost) return;
+      const count = Math.max(1, this.players.length);
       this._api('update', { id: this.roomId, count }).catch(() => {});
-    }, 10000); // 10 segundos = solo 6 hits por minuto
+    }, 10000); // 10 segundos
   }
 
   _clearHeartbeat() {
@@ -310,7 +311,7 @@ export class Network {
             LOG('Error parseando mensaje', e);
           }
         }
-      } else if (res && !res.ok && !this.isHost && (res.error === 'sala no encontrada' || res.error === 'sala cerrada')) {
+      } else if (res && !res.ok && !this.isHost && !this._p2pConnected && (res.error === 'sala no encontrada' || res.error === 'sala cerrada')) {
         this._stopPolling();
         if (this.cb.onHostLeft) {
           this.cb.onHostLeft('El anfitrión abandonó la partida.');
@@ -489,6 +490,8 @@ export class Network {
     this.roomCode = saved.roomCode || '';
     this.roomId = saved.roomId || '';
     this.rounds = saved.rounds || CONFIG.DUEL_ROUNDS;
+    this.gameMode = saved.gameMode || 'normal';
+    this.temporalSeconds = saved.temporalSeconds || CONFIG.DEFAULT_TEMPORAL_SECONDS;
     this.limit = Math.min(
       CONFIG.ROOM_MAX_PLAYERS,
       Math.max(CONFIG.ROOM_MIN_PLAYERS, saved.limit || CONFIG.ROOM_MAX_PLAYERS)
@@ -655,9 +658,7 @@ export class Network {
     conn.on('open', () => {
       LOG('P2P DataChannel abierto con éxito:', conn.peer);
       this._p2pConnected = true;
-      if (isGuestSide || (this.conns.size >= this.guestNames.size && this.guestNames.size > 0)) {
-        this._stopPolling();
-      }
+      this._stopPolling();
       if (isGuestSide) {
         conn.send(JSON.stringify({ type: 'join', name: this._localName }));
       }
@@ -677,8 +678,13 @@ export class Network {
       if (isGuestSide) {
         this.conns.delete('__host__');
         this._p2pConnected = false;
-        if (this.cb.onGuestLeave) {
-          this.cb.onGuestLeave(null);
+        // Si no hay sala HTTP de respaldo, el cierre P2P significa que el host se fue
+        if (!this.roomId) {
+          if (this.cb.onHostLeft) {
+            this.cb.onHostLeft('El anfitrión abandonó la partida.');
+          } else if (this.cb.onGuestLeave) {
+            this.cb.onGuestLeave(null);
+          }
         }
       } else {
         const peerId = conn.peer;
@@ -754,6 +760,8 @@ export class Network {
     this._closing = true;
     this._clearHeartbeat();
     this._stopPolling();
+    this._stopHostPing();
+    this._stopGuestWatchdog();
     if (this._connTimeout) {
       clearTimeout(this._connTimeout);
       this._connTimeout = null;

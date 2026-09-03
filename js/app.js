@@ -2,14 +2,14 @@
 // app.js — Punto de entrada. Coordina UI, red, visor panorámico y juego.
 // ============================================================================
 
-import { $, formatKm, formatNumber, clamp, escapeHtml, detectPotatoMode } from './utils.js';
-import { CONFIG } from './config.js';
-import { audio } from './audio.js';
-import { PanoramaViewer } from './panorama.js';
-import { Minimap } from './minimap.js';
-import { Network } from './net.js';
-import { Game } from './game.js';
-import { AsciiEarthBackground } from './ascii-earth.js';
+import { $, formatKm, formatNumber, clamp, escapeHtml, detectPotatoMode } from './utils.js?v=1.5.0';
+import { CONFIG } from './config.js?v=1.5.0';
+import { audio } from './audio.js?v=1.5.0';
+import { PanoramaViewer } from './panorama.js?v=1.5.0';
+import { Minimap } from './minimap.js?v=1.5.0';
+import { Network } from './net.js?v=1.5.0';
+import { Game } from './game.js?v=1.5.0';
+import { AsciiEarthBackground } from './ascii-earth.js?v=1.5.0';
 
 const PLAYER_KEY = 'ggtlalte:playerName';
 const ROOM_KEY = 'ggtlalte:activeRoom';
@@ -419,15 +419,15 @@ function renderResult(result) {
   $('#gameOverPanel').classList.add('hidden');
 
   // Solo: mapa a pantalla completa + botón flotante de "siguiente".
-  // Multijugador: mapa a pantalla completa + tarjeta flotante inferior con puntuación y daño.
+  // Multijugador: mapa a pantalla completa sin panel bloqueante (visibilidad total de chinchetas y daño en barras HUD).
   if (result.mode === 'solo') {
     minimap.setFullscreen(true);
     $('#resultPanel').classList.add('result-overlay');
     $('#resultPanel').classList.remove('result-multi', 'hidden');
   } else {
     minimap.setFullscreen(true);
-    $('#resultPanel').classList.remove('result-overlay', 'hidden');
-    $('#resultPanel').classList.add('result-multi');
+    $('#resultPanel').classList.add('hidden');
+    $('#resultPanel').classList.remove('result-overlay', 'result-multi');
     const hudTop = $('.hud-top');
     if (hudTop) hudTop.classList.add('over-map');
   }
@@ -502,7 +502,9 @@ function renderResult(result) {
     note.textContent = 'Siguiente ronda en unos segundos…';
   }
 
-  $('#resultPanel').classList.remove('hidden');
+  if (result.mode === 'solo') {
+    $('#resultPanel').classList.remove('hidden');
+  }
 }
 
 async function handleGameOver(result) {
@@ -567,13 +569,16 @@ function resetGuessUI() {
   $('#hudTimer').classList.remove('prepare');
   $('#confirmBtn').disabled = true;
   if (pano) {
-    pano.setBlind(false);
     pano.setStatic(false);
   }
 }
 
 function resetGameUI() {
   resetGuessUI();
+  if (pano) {
+    pano.setBlind(false);
+    pano.setStatic(false);
+  }
   const hudTop = $('.hud-top');
   if (hudTop) hudTop.classList.remove('over-map');
   $('#resultPanel').classList.add('hidden');
@@ -678,7 +683,12 @@ function renderLobby() {
   $('#playersCount').textContent = `${displayPlayers.length} / ${limit}`;
 
   const roundsInfo = $('#roomRoundsInfo');
-  if (roundsInfo) roundsInfo.textContent = `${net.rounds || CONFIG.DUEL_ROUNDS} rondas`;
+  if (roundsInfo) {
+    let modeText = 'Modo Normal';
+    if (net.gameMode === 'static') modeText = 'Modo Estático';
+    else if (net.gameMode === 'temporal') modeText = `Modo Temporal (${net.temporalSeconds || 3}s)`;
+    roundsInfo.textContent = `${modeText} · ${net.rounds || CONFIG.DUEL_ROUNDS} rondas`;
+  }
 
   const startBtn = $('#startBtn');
   startBtn.classList.toggle('hidden', !isHost);
@@ -800,11 +810,35 @@ function renderPublicList(rooms) {
     name.className = 'public-room-name';
     name.textContent = room.name || 'Anónimo';
 
-    const meta = document.createElement('span');
+    const meta = document.createElement('div');
     meta.className = 'public-room-meta';
     const limit = Number(room.limit) || 2;
     const count = Number(room.count) || 0;
-    meta.textContent = `${count}/${limit} jugadores`;
+    const rounds = Number(room.rounds) || 5;
+
+    let modeLabel = '🎮 Normal';
+    if (room.gameMode === 'static') {
+      modeLabel = '🛑 Estático';
+    } else if (room.gameMode === 'temporal') {
+      const secs = Number(room.temporalSeconds) || 3;
+      modeLabel = `⏱️ Temporal (${secs}s)`;
+    }
+
+    const playersTag = document.createElement('span');
+    playersTag.className = 'public-room-tag';
+    playersTag.textContent = `${count}/${limit} jugadores`;
+
+    const modeTag = document.createElement('span');
+    modeTag.className = 'public-room-tag public-room-tag-mode';
+    modeTag.textContent = modeLabel;
+
+    const roundsTag = document.createElement('span');
+    roundsTag.className = 'public-room-tag public-room-tag-rounds';
+    roundsTag.textContent = `${rounds} partidas`;
+
+    meta.appendChild(playersTag);
+    meta.appendChild(modeTag);
+    meta.appendChild(roundsTag);
 
     info.appendChild(name);
     info.appendChild(meta);
@@ -863,7 +897,7 @@ function handleNetMessage(data, fromPeerId) {
     net.setGuestPlayers(players, data.config);
     // Asegura que el invitado entre al lobby en cuanto recibe la lista,
     // independientemente del orden en que llegue el estado 'guest'.
-    if (net.role === 'guest') showScreen('lobby');
+    if (net.role === 'guest' && game.state === 'idle') showScreen('lobby');
     renderLobby();
     return;
   }
@@ -893,7 +927,8 @@ async function guestPrepareStart() {
     showScreen('game');
     resetGameUI();
     await ensureViewers();
-    // Refrescar tamaño y visibilidad del StreetView
+    // Cortina activa para evitar cualquier destello de vista previa antes de que el host ordene comenzar
+    pano.setBlind(true, 'Sincronizando jugadores…', 'Esperando inicio de ronda…', true);
     pano.refresh();
     // Marcar al guest como listo de inmediato para procesar roundStart sin retrasos
     game.guestSetReady();
@@ -981,6 +1016,8 @@ function persistActiveRoom() {
     isPublic: net.isPublic,
     rounds: net.rounds,
     limit: net.limit,
+    gameMode: net.gameMode,
+    temporalSeconds: net.temporalSeconds,
   }));
 }
 
@@ -1010,11 +1047,20 @@ function joinRoom(code) {
 }
 
 function resetToMenu(message) {
-  game.abort();
+  try {
+    game.abort();
+  } catch (e) {
+    LOG('game.abort error:', e);
+  }
   if (message) showToast(message, 'error');
-  resetGameUI();
+  try {
+    resetGameUI();
+  } catch (e) {
+    LOG('resetGameUI error:', e);
+  }
   showScreen('menu');
-  $('#menuPlayerName').textContent = meName;
+  const nameEl = $('#menuPlayerName');
+  if (nameEl) nameEl.textContent = meName;
 }
 
 function leaveEverything() {
@@ -1308,7 +1354,7 @@ function wire() {
         setTimeout(() => {
           leaveEverything();
           resetToMenu('Has abandonado la partida');
-        }, 200);
+        }, 350);
         return;
       }
       leaveEverything();
@@ -1322,13 +1368,49 @@ function wire() {
     game.nextRound();
   });
   $('#gameOverBtn').addEventListener('click', () => {
-    if (game.mode === 'multi') leaveEverything();
+    audio.ensure();
+    audio.click();
+    if (game.mode === 'multi') {
+      if (net.role === 'host') {
+        const msg = { type: 'hostLeft', reason: 'El anfitrión finalizó la partida y volvió al menú.' };
+        try { net.broadcast(msg); } catch (e) {}
+        if (net.roomId) {
+          apiPost('send-msg', { id: net.roomId, from: 'host', to: 'all', payload: JSON.stringify(msg) }).catch(() => {});
+          apiPost('delete', { id: net.roomId }).catch(() => {});
+        }
+      }
+      leaveEverything();
+    }
     resetToMenu();
   });
 
   // --- Minimapa (colapsable) ---
   const wrap = $('#minimapWrap');
   const panel = $('#minimapPanel');
+  const recenterBtn = $('#recenterMapBtn');
+  if (recenterBtn) {
+    recenterBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      minimap.recenter();
+    });
+  }
+
+  const toggleLayerBtn = $('#toggleLayerBtn');
+  const updateToggleLayerBtn = () => {
+    if (!toggleLayerBtn) return;
+    const isSat = minimap.currentLayerType === 'satellite';
+    toggleLayerBtn.textContent = isSat ? '🗺️' : '🛰️';
+    toggleLayerBtn.title = isSat ? 'Cambiar a vista estándar (calles)' : 'Cambiar a vista satelital';
+    toggleLayerBtn.classList.toggle('active', isSat);
+  };
+  if (toggleLayerBtn) {
+    updateToggleLayerBtn();
+    toggleLayerBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      minimap.toggleLayer();
+      updateToggleLayerBtn();
+    });
+  }
 
   // Refresca Leaflet sin saturar la GPU en equipos modestos
   let _minimapResizeTimeout = null;
@@ -1354,12 +1436,13 @@ function wire() {
   });
 
   panel.addEventListener('mouseenter', () => {
+    if (wrap.classList.contains('fullscreen') || !gameInProgress() || game.state !== 'playing') return;
     wrap.classList.add('expanded');
     startMinimapRefresh();
     minimap.setInteractive(true);
   });
   panel.addEventListener('mouseleave', () => {
-    if (!minimapPinned) {
+    if (!minimapPinned && !wrap.classList.contains('fullscreen')) {
       wrap.classList.remove('expanded');
       startMinimapRefresh();
     }
@@ -1367,6 +1450,7 @@ function wire() {
 
   // Al hacer clic en el panel del mapa se fija (pinned) para que no se cierre accidentalmente.
   panel.addEventListener('click', () => {
+    if (wrap.classList.contains('fullscreen') || !gameInProgress() || game.state !== 'playing') return;
     expandMinimap(true);
   });
 
@@ -1433,6 +1517,9 @@ function wireNet() {
     renderLobby();
     audio.join();
     showToast(`${name} se unió a la sala`);
+    if (gameInProgress() && net.role === 'host') {
+      game.syncGuestReconnect(peerId);
+    }
   };
 
   net.cb.onPlayers = (list, config) => {
@@ -1449,13 +1536,8 @@ function wireNet() {
       renderLobby();
       if (gameInProgress()) {
         game.removePlayer(peerId);
-        if (players.length < CONFIG.ROOM_MIN_PLAYERS) {
-          leaveEverything();
-          resetToMenu('No quedan suficientes jugadores');
-          return;
-        }
       }
-      showToast('Un jugador abandonó la sala', 'error');
+      showToast('Un jugador se desconectó', 'warning');
     } else {
       // Guest perdió al host.
       handleHostDeparture('El anfitrión abandonó la partida.');
@@ -1520,6 +1602,7 @@ function boot() {
 
   // Colocar marcador en el minimapa.
   minimap.callbacks.onPick = (lat, lng) => {
+    if (!gameInProgress() || game.state !== 'playing') return;
     game.placePick(lat, lng);
     audio.place();
   };
@@ -1540,6 +1623,31 @@ function boot() {
     const joinEl = document.getElementById('screen-join');
     if (joinEl && !joinEl.classList.contains('hidden')) fetchPublicRooms();
   }, 3000);
+
+  // Limpieza de cualquier Service Worker antiguo para evitar que sirva archivos cacheados
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistrations().then((registrations) => {
+      for (const reg of registrations) reg.unregister();
+    }).catch(() => {});
+  }
+
+  // Comprobación de versión en caliente: si el servidor publica una nueva versión, recargar sin caché
+  async function checkVersionUpdate() {
+    try {
+      const res = await fetch('version.json?_t=' + Date.now(), { cache: 'no-store' });
+      if (res.ok) {
+        const vData = await res.json();
+        const curVer = (CONFIG.VERSION || '').replace(/^BETA\s+v/i, '').trim();
+        if (vData && vData.version && vData.version !== curVer && !gameInProgress()) {
+          LOG('Nueva versión detectada:', vData.version, 'actual:', curVer);
+          showToast('Actualizando a nueva versión…', 'info');
+          setTimeout(() => window.location.reload(true), 1200);
+        }
+      }
+    } catch (e) {}
+  }
+  setInterval(checkVersionUpdate, 30000);
+  checkVersionUpdate();
 
   const saved = localStorage.getItem(PLAYER_KEY);
   if (saved) {

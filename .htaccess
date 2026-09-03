@@ -1,0 +1,12 @@
+﻿# Desactivar cache del navegador para archivos estaticos del juego
+<IfModule mod_headers.c>
+    <FilesMatch "\.(html|htm|js|css|json)$">
+        Header set Cache-Control "no-cache, no-store, must-revalidate, max-age=0"
+        Header set Pragma "no-cache"
+        Header set Expires "0"
+    </FilesMatch>
+</IfModule>
+
+<IfModule mod_expires.c>
+    ExpiresActive Off
+</IfModule>

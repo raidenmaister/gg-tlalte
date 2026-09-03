@@ -2,14 +2,14 @@
 // app.js — Punto de entrada. Coordina UI, red, visor panorámico y juego.
 // ============================================================================
 
-import { $, formatKm, formatNumber, clamp, escapeHtml, detectPotatoMode } from './utils.js?v=1.5.1';
-import { CONFIG } from './config.js?v=1.5.1';
-import { audio } from './audio.js?v=1.5.1';
-import { PanoramaViewer } from './panorama.js?v=1.5.1';
-import { Minimap } from './minimap.js?v=1.5.1';
-import { Network } from './net.js?v=1.5.1';
-import { Game } from './game.js?v=1.5.1';
-import { AsciiEarthBackground } from './ascii-earth.js?v=1.5.1';
+import { $, formatKm, formatNumber, clamp, escapeHtml, detectPotatoMode } from './utils.js?v=1.5.2';
+import { CONFIG } from './config.js?v=1.5.2';
+import { audio } from './audio.js?v=1.5.2';
+import { PanoramaViewer } from './panorama.js?v=1.5.2';
+import { Minimap } from './minimap.js?v=1.5.2';
+import { Network } from './net.js?v=1.5.2';
+import { Game } from './game.js?v=1.5.2';
+import { AsciiEarthBackground } from './ascii-earth.js?v=1.5.2';
 
 const PLAYER_KEY = 'ggtlalte:playerName';
 const ROOM_KEY = 'ggtlalte:activeRoom';
@@ -54,12 +54,13 @@ function showScreen(id) {
 }
 
 let toastTimer = null;
-function showToast(message, kind = 'info') {
+function showToast(message, kind = 'info', duration = 2800) {
   const toast = $('#toast');
+  if (!toast) return;
   toast.textContent = message;
   toast.className = 'show ' + kind;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toast.classList.remove('show'), 2800);
+  toastTimer = setTimeout(() => toast.classList.remove('show'), duration);
 }
 
 function showError(message) {
@@ -1710,7 +1711,8 @@ function boot() {
     }).catch(() => {});
   }
 
-  // Comprobación de versión en caliente: si el servidor publica una nueva versión, recargar sin caché
+  // Comprobación de versión en caliente: si el servidor publica una nueva versión, alertar al usuario
+  let _updateToastShown = false;
   async function checkVersionUpdate() {
     try {
       const res = await fetch('version.json?_t=' + Date.now(), { cache: 'no-store' });
@@ -1719,13 +1721,23 @@ function boot() {
         const curVer = (CONFIG.VERSION || '').replace(/^BETA\s+v/i, '').trim();
         if (vData && vData.version && vData.version !== curVer && !gameInProgress()) {
           LOG('Nueva versión detectada:', vData.version, 'actual:', curVer);
-          showToast('Actualizando a nueva versión…', 'info');
-          setTimeout(() => window.location.reload(true), 1200);
+          if (!_updateToastShown) {
+            _updateToastShown = true;
+            showToast(`Nueva versión disponible (v${vData.version}). Presiona Shift + F5 para actualizar`, 'warning', 25000);
+            const badge = document.getElementById('versionBadge');
+            if (badge) {
+              badge.textContent = `BETA v${vData.version} (Shift+F5)`;
+              badge.style.background = '#f59e0b';
+              badge.style.color = '#000';
+              badge.style.fontWeight = 'bold';
+            }
+          }
         }
       }
     } catch (e) {}
   }
-  setInterval(checkVersionUpdate, 30000);
+  setInterval(checkVersionUpdate, 10000);
+  window.addEventListener('focus', () => checkVersionUpdate());
   checkVersionUpdate();
 
   const saved = localStorage.getItem(PLAYER_KEY);

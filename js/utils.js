@@ -2,7 +2,7 @@
 // utils.js — Utilidades puras: matemáticas geográficas, puntuación, RNG, DOM.
 // ============================================================================
 
-import { CONFIG, damageMultiplier } from './config.js?v=1.5.1';
+import { CONFIG, damageMultiplier } from './config.js?v=1.5.2';
 
 /** Selector corto para querySelector. */
 export function $(sel, root = document) {

@@ -82,7 +82,7 @@ const SEA_COLORS = [
   '#071a30', '#0d3a5c', '#11629b', '#1f86c9', '#35b6e8', '#7cd7ff',
 ];
 
-import { detectPotatoMode } from './utils.js?v=1.5.1';
+import { detectPotatoMode } from './utils.js?v=1.5.2';
 
 export class AsciiEarthBackground {
   constructor(containerId) {

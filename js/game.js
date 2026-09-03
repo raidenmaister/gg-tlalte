@@ -13,7 +13,7 @@
 //   'toast'       {message, kind}
 // ============================================================================
 
-import { CONFIG, damageMultiplier, getNoGuessPenalty } from './config.js?v=1.5.0';
+import { CONFIG, damageMultiplier, getNoGuessPenalty } from './config.js?v=1.5.1';
 import {
   haversineKm,
   scoreForDistance,
@@ -21,7 +21,7 @@ import {
   pickIndices,
   pickSeparatedIndices,
   clamp,
-} from './utils.js?v=1.5.0';
+} from './utils.js?v=1.5.1';
 
 export class Game {
   constructor({ pano, map, net, audio }) {

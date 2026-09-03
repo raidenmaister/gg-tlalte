@@ -2,14 +2,14 @@
 // app.js — Punto de entrada. Coordina UI, red, visor panorámico y juego.
 // ============================================================================
 
-import { $, formatKm, formatNumber, clamp, escapeHtml, detectPotatoMode } from './utils.js?v=1.5.0';
-import { CONFIG } from './config.js?v=1.5.0';
-import { audio } from './audio.js?v=1.5.0';
-import { PanoramaViewer } from './panorama.js?v=1.5.0';
-import { Minimap } from './minimap.js?v=1.5.0';
-import { Network } from './net.js?v=1.5.0';
-import { Game } from './game.js?v=1.5.0';
-import { AsciiEarthBackground } from './ascii-earth.js?v=1.5.0';
+import { $, formatKm, formatNumber, clamp, escapeHtml, detectPotatoMode } from './utils.js?v=1.5.1';
+import { CONFIG } from './config.js?v=1.5.1';
+import { audio } from './audio.js?v=1.5.1';
+import { PanoramaViewer } from './panorama.js?v=1.5.1';
+import { Minimap } from './minimap.js?v=1.5.1';
+import { Network } from './net.js?v=1.5.1';
+import { Game } from './game.js?v=1.5.1';
+import { AsciiEarthBackground } from './ascii-earth.js?v=1.5.1';
 
 const PLAYER_KEY = 'ggtlalte:playerName';
 const ROOM_KEY = 'ggtlalte:activeRoom';
@@ -840,6 +840,14 @@ function renderPublicList(rooms) {
     meta.appendChild(modeTag);
     meta.appendChild(roundsTag);
 
+    const inProgress = room.status === 'in_progress' || room.status === 'playing';
+    if (inProgress) {
+      const statusTag = document.createElement('span');
+      statusTag.className = 'public-room-tag public-room-tag-status in-progress';
+      statusTag.textContent = '⚔️ En juego';
+      meta.appendChild(statusTag);
+    }
+
     info.appendChild(name);
     info.appendChild(meta);
 
@@ -854,13 +862,21 @@ function renderPublicList(rooms) {
       } catch (e) {}
     }
     const full = limit > 0 && count >= limit && !isMyOldRoom;
-    btn.disabled = full;
-    btn.textContent = isMyOldRoom ? 'Reconectarse' : (full ? 'Llena' : 'Unirse');
+    btn.disabled = inProgress ? !isMyOldRoom : full;
+    btn.textContent = isMyOldRoom
+      ? 'Reconectarse'
+      : (inProgress ? 'En juego' : (full ? 'Llena' : 'Unirse'));
     if (isMyOldRoom) {
       btn.classList.add('btn-reconnect');
+    } else if (inProgress) {
+      btn.classList.add('btn-in-game');
     }
-    LOG('renderPublicList sala', { id: room.id, name: room.name, limit, count, full, isMyOldRoom });
+    LOG('renderPublicList sala', { id: room.id, name: room.name, limit, count, full, inProgress, isMyOldRoom });
     btn.addEventListener('click', () => {
+      if (inProgress && !isMyOldRoom) {
+        showToast('La sala ya está en juego. No puedes unirte a una partida en curso.', 'error');
+        return;
+      }
       LOG('click Unirse sala pública', { id: room.id, meName });
       game.meName = meName;
       audio.ensure();
@@ -973,6 +989,7 @@ async function hostStartGame() {
     return;
   }
   $('#startBtn').disabled = true;
+  net.updateRoomStatus('in_progress');
   try {
     setLoadingText('Preparando partida…');
     showScreen('loading');
@@ -984,6 +1001,7 @@ async function hostStartGame() {
     game.meName = meName;
     game.hostStart(currentMultiMode, currentMultiTemporalSecs);
   } catch (err) {
+    net.updateRoomStatus('waiting');
     showError('Error al cargar: ' + err.message);
     showScreen('lobby');
     renderLobby();
@@ -1021,19 +1039,44 @@ function persistActiveRoom() {
   }));
 }
 
-function leaveRoom() {
+async function leaveRoom() {
+  const leaveBtn = $('#leaveLobbyBtn');
+  if (leaveBtn) leaveBtn.disabled = true;
   if (net.role === 'host') {
-    try { net.broadcast({ type: 'hostLeft', reason: 'El anfitrión cerró la sala.' }); } catch (e) {}
-    if (net.roomId) apiPost('delete', { id: net.roomId }).catch(() => {});
+    const roomId = net.roomId;
+    const msg = { type: 'hostLeft', reason: 'El anfitrión cerró la sala.' };
+    try { net.broadcast(msg); } catch (e) {}
+    if (roomId) {
+      try {
+        await apiPost('send-msg', { id: roomId, from: net.myId || 'host', to: 'all', payload: JSON.stringify(msg) });
+      } catch (e) {}
+      try {
+        await apiPost('delete', { id: roomId });
+      } catch (e) {}
+    }
   }
   leaveEverything();
   resetToMenu('Saliste de la sala');
 }
 
-function deleteRoom() {
+async function deleteRoom() {
+  const deleteBtn = $('#deleteRoomBtn');
+  if (deleteBtn) {
+    deleteBtn.disabled = true;
+    deleteBtn.textContent = 'Eliminando…';
+  }
   if (net.role === 'host') {
-    try { net.broadcast({ type: 'hostLeft', reason: 'El anfitrión eliminó la sala.' }); } catch (e) {}
-    if (net.roomId) apiPost('delete', { id: net.roomId }).catch(() => {});
+    const roomId = net.roomId;
+    const msg = { type: 'hostLeft', reason: 'El anfitrión eliminó la sala.' };
+    try { net.broadcast(msg); } catch (e) {}
+    if (roomId) {
+      try {
+        await apiPost('send-msg', { id: roomId, from: net.myId || 'host', to: 'all', payload: JSON.stringify(msg) });
+      } catch (e) {}
+      try {
+        await apiPost('delete', { id: roomId });
+      } catch (e) {}
+    }
   }
   leaveEverything();
   resetToMenu('Sala eliminada');
@@ -1286,13 +1329,29 @@ function wire() {
   joinCodeInput.addEventListener('input', (e) => {
     e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
   });
-  const doJoin = () => {
+  const doJoin = async () => {
     const code = joinCodeInput.value.trim().toUpperCase();
     LOG('doJoin', { code });
     if (code.length !== CONFIG.CODE_LENGTH) {
       showToast('El código debe tener 4 caracteres', 'error');
       return;
     }
+
+    const roomId = CONFIG.PEER_PREFIX + code;
+    try {
+      const info = await apiPost('check-room', { id: roomId });
+      if (info && info.ok) {
+        if (info.status === 'in_progress' || info.status === 'playing') {
+          showToast('La sala ya está en juego. No puedes unirte a una partida en curso.', 'error');
+          return;
+        }
+        if (info.limit > 0 && info.count >= info.limit) {
+          showToast('La sala está llena.', 'error');
+          return;
+        }
+      }
+    } catch (e) {}
+
     players = [];
     showScreen('lobby');
     renderLobby();
@@ -1493,6 +1552,16 @@ function wireGame() {
 }
 
 function wireNet() {
+  net.cb.isGameInProgress = () => {
+    return gameInProgress() || (game && (game.state === 'playing' || game.state === 'result' || game._hostStarted));
+  };
+
+  net.cb.isExistingActivePlayer = (name) => {
+    if (!game || !game.players || !game.players.length) return false;
+    const lower = (name || '').trim().toLowerCase();
+    return game.players.some((p) => (p.name || '').trim().toLowerCase() === lower);
+  };
+
   net.cb.onStatus = (status) => {
     LOG('onStatus', status, { role: net.role, myId: net.myId, isPublic: net.isPublic });
     if (status === 'host') {
@@ -1540,7 +1609,7 @@ function wireNet() {
       showToast('Un jugador se desconectó', 'warning');
     } else {
       // Guest perdió al host.
-      handleHostDeparture('El anfitrión abandonó la partida.');
+      handleHostDeparture('El anfitrión abandonó o eliminó la sala.');
     }
   };
 
@@ -1561,6 +1630,8 @@ function wireNet() {
       resetToMenu('La sala ya no existe o finalizó');
     } else if (type === 'LLENA') {
       resetToMenu('La sala está llena');
+    } else if (type === 'EN_CURSO') {
+      resetToMenu('La sala ya está en juego. No puedes unirte a una partida en curso.');
     } else if (type === 'unavailable-id') {
       showToast('Regenerando código…');
     } else if (type === 'public-register') {

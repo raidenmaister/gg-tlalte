@@ -9,8 +9,8 @@
 //    exactamente igual y sin requerir servidores TURN adicionales ni VPS.
 // ============================================================================
 
-import { CONFIG } from './config.js?v=1.5.0';
-import { generateCode } from './utils.js?v=1.5.0';
+import { CONFIG } from './config.js?v=1.5.1';
+import { generateCode } from './utils.js?v=1.5.1';
 
 const API_URL = 'api.php';
 
@@ -267,12 +267,44 @@ export class Network {
     this._startPolling();
   }
 
+  updateRoomStatus(status) {
+    this.roomStatus = status;
+    if (status === 'in_progress' || status === 'playing') {
+      this._gameInProgress = true;
+    } else if (status === 'waiting') {
+      this._gameInProgress = false;
+    }
+    if (this.isHost && this.roomId) {
+      const count = Math.max(1, this.players.length);
+      this._api('update', { id: this.roomId, count, status }).catch(() => {});
+    }
+  }
+
+  isGameInProgress() {
+    if (typeof this.cb.isGameInProgress === 'function') {
+      try { return !!this.cb.isGameInProgress(); } catch (e) {}
+    }
+    return !!this._gameInProgress;
+  }
+
+  isExistingActivePlayer(name) {
+    if (typeof this.cb.isExistingActivePlayer === 'function') {
+      try { return !!this.cb.isExistingActivePlayer(name); } catch (e) {}
+    }
+    const lower = (name || '').trim().toLowerCase();
+    for (const [id, n] of this.guestNames.entries()) {
+      if ((n || '').trim().toLowerCase() === lower) return true;
+    }
+    return false;
+  }
+
   _startHeartbeat() {
     this._clearHeartbeat();
     this._heartbeat = setInterval(() => {
       if (this._closing || !this.roomId || !this.isHost) return;
       const count = Math.max(1, this.players.length);
-      this._api('update', { id: this.roomId, count }).catch(() => {});
+      const status = this.isGameInProgress() ? 'in_progress' : (this.roomStatus || 'waiting');
+      this._api('update', { id: this.roomId, count, status }).catch(() => {});
     }, 10000); // 10 segundos
   }
 
@@ -311,10 +343,10 @@ export class Network {
             LOG('Error parseando mensaje', e);
           }
         }
-      } else if (res && !res.ok && !this.isHost && !this._p2pConnected && (res.error === 'sala no encontrada' || res.error === 'sala cerrada')) {
+      } else if (res && !res.ok && !this.isHost && (res.error === 'sala no existe' || res.error === 'sala no encontrada' || res.error === 'sala cerrada')) {
         this._stopPolling();
         if (this.cb.onHostLeft) {
-          this.cb.onHostLeft('El anfitrión abandonó la partida.');
+          this.cb.onHostLeft('El anfitrión abandonó o eliminó la sala.');
         } else if (this.cb.onGuestLeave) {
           this.cb.onGuestLeave(null);
         }
@@ -358,6 +390,26 @@ export class Network {
       const name = (data.name || data.senderName || 'Anónimo').trim();
       if (this.role === 'host') {
         const lower = name.toLowerCase();
+
+        // 0. Si la partida está en transcurso, NO permitir que un jugador externo se meta
+        if (this.isGameInProgress()) {
+          const isExisting = this.isExistingActivePlayer(name);
+          if (!isExisting) {
+            LOG('Partida en curso: rechazando a jugador externo', { name, peerId });
+            this.sendTo(peerId, {
+              type: 'in_progress',
+              reason: 'La sala ya está en juego. No puedes unirte a una partida en curso.'
+            });
+            setTimeout(() => {
+              const rejectedConn = this.conns.get(peerId);
+              if (rejectedConn) {
+                try { rejectedConn.close(); } catch (e) {}
+                this.conns.delete(peerId);
+              }
+            }, 600);
+            return;
+          }
+        }
 
         // 1. Verificar si este nombre ya estaba previamente en la sala
         let existingPeerId = null;
@@ -411,6 +463,12 @@ export class Network {
         if (isNew && this.cb.onGuestJoin) this.cb.onGuestJoin(peerId, name);
         this._syncPlayers();
       }
+      return;
+    }
+
+    if (data.type === 'in_progress') {
+      this.leave();
+      this._emitError('EN_CURSO');
       return;
     }
 
@@ -579,6 +637,8 @@ export class Network {
     this._publicCount = 1;
     this.myId = null;
     this.roomId = '';
+    this._gameInProgress = false;
+    this.roomStatus = 'waiting';
     this._seenMids.clear();
     if (this.peer) {
       try { this.peer.destroy(); } catch (e) {}
@@ -678,13 +738,12 @@ export class Network {
       if (isGuestSide) {
         this.conns.delete('__host__');
         this._p2pConnected = false;
-        // Si no hay sala HTTP de respaldo, el cierre P2P significa que el host se fue
-        if (!this.roomId) {
-          if (this.cb.onHostLeft) {
-            this.cb.onHostLeft('El anfitrión abandonó la partida.');
-          } else if (this.cb.onGuestLeave) {
-            this.cb.onGuestLeave(null);
-          }
+        // Si el host cerró la conexión P2P y no estamos en proceso de cierre voluntario,
+        // el anfitrión abandonó o eliminó la sala.
+        if (this.cb.onHostLeft) {
+          this.cb.onHostLeft('El anfitrión abandonó o cerró la sala.');
+        } else if (this.cb.onGuestLeave) {
+          this.cb.onGuestLeave(null);
         }
       } else {
         const peerId = conn.peer;
@@ -693,9 +752,9 @@ export class Network {
         if (this.guestNames.has(peerId)) {
           this.guestNames.delete(peerId);
           this._syncPlayers();
-        }
-        if (this.cb.onGuestLeave) {
-          this.cb.onGuestLeave(peerId, pName);
+          if (this.cb.onGuestLeave) {
+            this.cb.onGuestLeave(peerId, pName);
+          }
         }
       }
       if (this.conns.size === 0) {

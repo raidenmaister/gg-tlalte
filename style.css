@@ -2223,6 +2223,20 @@ select, option {
     box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
 }
 
+.join-public-btn.btn-in-game {
+    background: rgba(245, 158, 11, 0.2) !important;
+    color: #fbbf24 !important;
+    border: 1px solid rgba(245, 158, 11, 0.4);
+    cursor: not-allowed;
+    filter: none !important;
+}
+
+.public-room-tag-status.in-progress {
+    background: rgba(245, 158, 11, 0.15);
+    border-color: rgba(245, 158, 11, 0.35);
+    color: #fbbf24;
+}
+
 .empty-hint {
     color: var(--muted);
     font-size: 0.85rem;

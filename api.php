@@ -26,71 +26,91 @@ if ($rawInput) {
 $action = isset($_GET['action']) ? $_GET['action'] : (isset($_POST['action']) ? $_POST['action'] : '');
 $staleSeconds = 15;
 
-function loadJson($file, $default = []) {
-    if (!file_exists($file)) return $default;
-    $raw = @file_get_contents($file);
-    $data = json_decode($raw, true);
-    return is_array($data) ? $data : $default;
-}
-
-function saveJson($file, $data) {
-    return @file_put_contents($file, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX) !== false;
-}
-
-function loadRooms($file) {
-    return loadJson($file, []);
-}
-
-function saveRooms($file, $rooms) {
-    return saveJson($file, $rooms);
-}
-
-function cleanupRooms($rooms, $staleSeconds) {
-    $now = time();
-    foreach ($rooms as $id => $room) {
-        if ($now - intval($room['updated'] ?? 0) > $staleSeconds) {
-            unset($rooms[$id]);
-        }
+if (!function_exists('loadJson')) {
+    function loadJson($file, $default = []) {
+        if (!file_exists($file)) return $default;
+        $raw = @file_get_contents($file);
+        $data = json_decode($raw, true);
+        return is_array($data) ? $data : $default;
     }
-    return $rooms;
+}
+
+if (!function_exists('saveJson')) {
+    function saveJson($file, $data) {
+        return @file_put_contents($file, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX) !== false;
+    }
+}
+
+if (!function_exists('loadRooms')) {
+    function loadRooms($file) {
+        return loadJson($file, []);
+    }
+}
+
+if (!function_exists('saveRooms')) {
+    function saveRooms($file, $rooms) {
+        return saveJson($file, $rooms);
+    }
+}
+
+if (!function_exists('cleanupRooms')) {
+    function cleanupRooms($rooms, $staleSeconds) {
+        $now = time();
+        foreach ($rooms as $id => $room) {
+            if ($now - intval($room['updated'] ?? 0) > $staleSeconds) {
+                unset($rooms[$id]);
+            }
+        }
+        return $rooms;
+    }
 }
 
 /** Puntuación del leaderboard: prima la precisión y ajusta por velocidad. */
-function leaderScore($rounds, $points, $timeMs, $timeMaxSec) {
-    $maxPoints = max(1, $rounds * 5000);
-    $points = max(0, min(intval($points), $maxPoints));
-    $timeMaxMs = max(1, intval($timeMaxSec) * 1000);
-    $timeRatio = min(1, max(0, intval($timeMs) / $timeMaxMs));
-    // Factor velocidad entre 0.5 (límite de tiempo) y 1.0 (instantáneo).
-    $speedFactor = 1 - 0.5 * $timeRatio;
-    return round($points * $speedFactor * 10);
-}
-
-function soloTimeMax($rounds) {
-    $map = [5 => 105, 7 => 120, 10 => 150];
-    return isset($map[$rounds]) ? $map[$rounds] : 105;
-}
-
-function normalizeName($name) {
-    $name = trim((string)$name);
-    $name = preg_replace('/\s+/u', ' ', $name);
-    return function_exists('mb_substr') ? mb_substr($name, 0, 20) : substr($name, 0, 20);
-}
-
-function sameName($a, $b) {
-    if (function_exists('mb_strtolower')) {
-        return mb_strtolower($a) === mb_strtolower($b);
+if (!function_exists('leaderScore')) {
+    function leaderScore($rounds, $points, $timeMs, $timeMaxSec) {
+        $maxPoints = max(1, $rounds * 5000);
+        $points = max(0, min(intval($points), $maxPoints));
+        $timeMaxMs = max(1, intval($timeMaxSec) * 1000);
+        $timeRatio = min(1, max(0, intval($timeMs) / $timeMaxMs));
+        // Factor velocidad entre 0.5 (límite de tiempo) y 1.0 (instantáneo).
+        $speedFactor = 1 - 0.5 * $timeRatio;
+        return round($points * $speedFactor * 10);
     }
-    return strcasecmp($a, $b) === 0;
 }
 
-function userExists($users, $name) {
-    $name = normalizeName($name);
-    if ($name === '') return true; // nombre vacío no se permite
-    foreach ($users as $existing) {
-        if (sameName($existing, $name)) return true;
+if (!function_exists('soloTimeMax')) {
+    function soloTimeMax($rounds) {
+        $map = [5 => 105, 7 => 120, 10 => 150];
+        return isset($map[$rounds]) ? $map[$rounds] : 105;
     }
-    return false;
+}
+
+if (!function_exists('normalizeName')) {
+    function normalizeName($name) {
+        $name = trim((string)$name);
+        $name = preg_replace('/\s+/u', ' ', $name);
+        return function_exists('mb_substr') ? mb_substr($name, 0, 20) : substr($name, 0, 20);
+    }
+}
+
+if (!function_exists('sameName')) {
+    function sameName($a, $b) {
+        if (function_exists('mb_strtolower')) {
+            return mb_strtolower($a) === mb_strtolower($b);
+        }
+        return strcasecmp($a, $b) === 0;
+    }
+}
+
+if (!function_exists('userExists')) {
+    function userExists($users, $name) {
+        $name = normalizeName($name);
+        if ($name === '') return true; // nombre vacío no se permite
+        foreach ($users as $existing) {
+            if (sameName($existing, $name)) return true;
+        }
+        return false;
+    }
 }
 
 $staleSeconds = 600; // 10 minutos de gracia para no purgar salas activas
@@ -123,6 +143,7 @@ switch ($action) {
             'rounds' => $rounds,
             'gameMode' => $gameMode,
             'temporalSeconds' => $temporalSeconds,
+            'status' => 'waiting',
             'updated' => time(),
             'isPublic' => $isPublic,
             'messages' => [],
@@ -137,9 +158,15 @@ switch ($action) {
     }
     case 'update': {
         $id = trim($_POST['id'] ?? '');
-        $count = intval($_POST['count'] ?? 0);
+        $count = isset($_POST['count']) ? intval($_POST['count']) : 0;
+        $status = trim($_POST['status'] ?? '');
         if (isset($rooms[$id])) {
-            $rooms[$id]['count'] = max(1, $count);
+            if ($count > 0) {
+                $rooms[$id]['count'] = max(1, $count);
+            }
+            if ($status !== '') {
+                $rooms[$id]['status'] = $status;
+            }
             $rooms[$id]['updated'] = time();
             saveRooms($roomsFile, $rooms);
         }
@@ -151,6 +178,25 @@ switch ($action) {
         unset($rooms[$id]);
         saveRooms($roomsFile, $rooms);
         echo json_encode(['ok' => true]);
+        break;
+    }
+    case 'check-room': {
+        $id = trim($_GET['id'] ?? $_POST['id'] ?? '');
+        if ($id === '' || !isset($rooms[$id])) {
+            echo json_encode(['ok' => false, 'error' => 'sala no existe']);
+            exit;
+        }
+        $room = $rooms[$id];
+        echo json_encode([
+            'ok' => true,
+            'id' => $id,
+            'name' => strval($room['name'] ?? ''),
+            'limit' => intval($room['limit'] ?? 0),
+            'count' => intval($room['count'] ?? 0),
+            'status' => strval($room['status'] ?? 'waiting'),
+            'gameMode' => strval($room['gameMode'] ?? 'normal'),
+            'rounds' => intval($room['rounds'] ?? 5),
+        ]);
         break;
     }
     case 'list': {
@@ -166,6 +212,7 @@ switch ($action) {
                 'rounds' => intval($room['rounds'] ?? 5),
                 'gameMode' => strval($room['gameMode'] ?? 'normal'),
                 'temporalSeconds' => intval($room['temporalSeconds'] ?? 3),
+                'status' => strval($room['status'] ?? 'waiting'),
             ];
         }
         echo json_encode(['ok' => true, 'rooms' => $out]);
@@ -183,12 +230,17 @@ switch ($action) {
             exit;
         }
 
-        // Si la sala no existe en rooms.json (por ejemplo privada), inicializarla
+        // Si la sala no existe en rooms.json, no re-crearla si es mensaje de cierre
         if (!isset($rooms[$id])) {
+            if (strpos($payload, '"hostLeft"') !== false) {
+                echo json_encode(['ok' => true]);
+                exit;
+            }
             $rooms[$id] = [
                 'name' => 'Sala ' . substr($id, -4),
                 'limit' => 12,
                 'count' => 1,
+                'status' => 'waiting',
                 'updated' => time(),
                 'isPublic' => 0,
                 'messages' => [],

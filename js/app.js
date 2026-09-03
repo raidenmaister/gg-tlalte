@@ -2,7 +2,7 @@
 // app.js — Punto de entrada. Coordina UI, red, visor panorámico y juego.
 // ============================================================================
 
-import { $, formatKm, formatNumber, clamp, escapeHtml } from './utils.js';
+import { $, formatKm, formatNumber, clamp, escapeHtml, detectPotatoMode } from './utils.js';
 import { CONFIG } from './config.js';
 import { audio } from './audio.js';
 import { PanoramaViewer } from './panorama.js';
@@ -1507,6 +1507,10 @@ function wireNet() {
 
 /* --------------------------- Inicio ------------------------------------- */
 function boot() {
+  detectPotatoMode();
+  const versionBadge = $('#versionBadge');
+  if (versionBadge) versionBadge.textContent = CONFIG.VERSION || 'BETA v1.4.2';
+
   wire();
   wireGame();
   wireNet();

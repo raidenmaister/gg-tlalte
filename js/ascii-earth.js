@@ -14,46 +14,60 @@
 //   - Límite de ~30 FPS con delta-time en requestAnimationFrame.
 // ============================================================================
 
-// Continentes del hemisferio occidental (Norteamérica, Centroamérica y el
-// norte de Sudamérica). Cada fila es una latitud y cada rango [inicio, fin]
-// son columnas de longitud (0..63) con tierra firme.
-const LAND_W = 64;
-const LAND_H = 32;
+// Continentes reales del planeta Tierra (proyección cilíndrica equidistante exacta, 96x48)
+// Cada fila corresponde a una latitud (-90° a +90°) con rangos [colInicio, colFin] reales.
+const LAND_W = 96;
+const LAND_H = 48;
 
-// Rango [startCol, endCol] inclusivo por fila. Fila 0 = polo norte.
 const LAND_RANGES = [
-  [],                                       // 0  ~87°N
-  [],                                       // 1  ~81°N
-  [[22, 28]],                               // 2  ~76°N  Groenlandia
-  [[7, 19], [21, 28]],                      // 3  ~70°N  Groenlandia + ártico
-  [[2, 20], [21, 27]],                      // 4  ~64°N  Alaska/Canadá/Groenlandia
-  [[2, 19], [21, 26]],                      // 5  ~59°N
-  [[3, 18]],                                // 6  ~53°N  Canadá
-  [[3, 17]],                                // 7  ~48°N  Canadá/EE.UU.
-  [[3, 16]],                                // 8  ~42°N  EE.UU.
-  [[4, 15]],                                // 9  ~37°N  EE.UU.
-  [[5, 15]],                                // 10 ~31°N  EE.UU./México
-  [[6, 17]],                                // 11 ~25°N  México/Florida
-  [[7, 15], [16, 17]],                      // 12 ~20°N  México/Cuba
-  [[15, 18]],                               // 13 ~14°N  Centroamérica
-  [[16, 18]],                               // 14 ~8°N   Panamá
-  [[17, 20]],                               // 15 ~3°N   Colombia/Venezuela
-  [[17, 22]],                               // 16 ~-3°N  Ecuador/Brasil
-  [[17, 24]],                               // 17 ~-8°N  Brasil
-  [[18, 25]],                               // 18 ~-14°N Brasil
-  [[18, 25]],                               // 19 ~-20°N Brasil/Bolivia
-  [[19, 25]],                               // 20 ~-25°N Brasil/Argentina
-  [[19, 24]],                               // 21 ~-31°N Argentina/Chile
-  [[19, 23]],                               // 22 ~-37°N Argentina
-  [[19, 22]],                               // 23 ~-42°N Argentina
-  [[19, 22]],                               // 24 ~-48°N Patagonia
-  [[19, 21]],                               // 25 ~-53°N Patagonia
-  [[19, 21]],                               // 26 ~-59°N extremo sur
-  [],                                       // 27 ~-64°N
-  [],                                       // 28 ~-70°N
-  [],                                       // 29 ~-76°N
-  [],                                       // 30 ~-81°N
-  [],                                       // 31 ~-87°N
+  [], // 0 (88°N)
+  [], // 1 (84°N)
+  [[22, 28], [30, 43], [60, 61], [73, 73]], // 2 (81°N) Groenlandia, archipiélago ártico, Siberia
+  [[16, 16], [22, 22], [24, 26], [29, 42], [52, 52], [75, 76]], // 3 (77°N)
+  [[15, 17], [19, 19], [21, 25], [27, 27], [33, 41], [62, 62], [69, 79], [81, 81]], // 4 (73°N)
+  [[4, 10], [12, 15], [17, 21], [23, 23], [25, 25], [28, 29], [34, 40], [53, 56], [64, 64], [66, 66], [68, 95]], // 5 (69°N) Alaska, Canadá norte, Escandinavia, Rusia
+  [[0, 1], [3, 24], [28, 29], [34, 37], [42, 43], [51, 53], [55, 56], [59, 95]], // 6 (66°N)
+  [[4, 22], [27, 28], [35, 36], [49, 52], [54, 90], [92, 94]], // 7 (62°N)
+  [[6, 6], [12, 22], [27, 30], [51, 51], [55, 85], [90, 90]], // 8 (58°N) Canadá, Reino Unido, Báltico, Rusia
+  [[13, 25], [27, 32], [47, 47], [50, 50], [52, 84], [90, 90]], // 9 (54°N)
+  [[14, 31], [47, 84]], // 10 (51°N) EE.UU. norte, Europa central, Asia central
+  [[15, 30], [47, 84]], // 11 (47°N)
+  [[15, 28], [46, 48], [51, 51], [53, 54], [59, 60], [62, 83], [85, 86]], // 12 (43°N) EE.UU., Mediterráneo, Japón norte
+  [[15, 27], [45, 47], [50, 50], [52, 53], [55, 60], [62, 81], [85, 85]], // 13 (39°N) España, Italia, Turquía, China
+  [[16, 27], [46, 46], [48, 50], [58, 79], [82, 82], [84, 84]], // 14 (36°N)
+  [[17, 25], [45, 51], [53, 54], [57, 79]], // 15 (32°N) Norte de África, Medio Oriente, China
+  [[18, 21], [26, 26], [45, 60], [62, 79]], // 16 (28°N) México, Florida, Sahara, India norte
+  [[19, 21], [44, 56], [58, 62], [66, 79]], // 17 (24°N) México, Golfo, India
+  [[20, 21], [24, 24], [27, 27], [44, 57], [59, 63], [67, 70], [73, 75]], // 18 (21°N) Cuba, Sudeste Asiático
+  [[21, 23], [44, 57], [59, 61], [68, 69], [73, 76], [80, 80]], // 19 (17°N) Centroamérica, Filipinas
+  [[25, 25], [44, 58], [68, 68], [74, 76]], // 20 (13°N)
+  [[28, 31], [44, 60], [68, 69], [79, 79], [81, 81]], // 21 (9°N) Colombia, Venezuela, África central
+  [[27, 33], [45, 47], [49, 60], [79, 79]], // 22 (6°N)
+  [[27, 34], [51, 59], [74, 75], [78, 78]], // 23 (2°N)
+  [[26, 35], [50, 58], [75, 75], [77, 78], [83, 83]], // 24 (2°S) Ecuador, Amazonas, Indonesia
+  [[26, 38], [51, 57], [85, 86]], // 25 (6°S) Brasil, Congo
+  [[27, 38], [51, 58], [87, 87]], // 26 (9°S)
+  [[28, 37], [51, 58], [83, 83]], // 27 (13°S) Perú, Bolivia, Angola
+  [[29, 37], [51, 57], [60, 60], [81, 84], [86, 86]], // 28 (17°S) Madagascar, Australia norte
+  [[29, 36], [52, 56], [60, 60], [79, 87]], // 29 (21°S)
+  [[29, 34], [52, 56], [60, 60], [78, 88]], // 30 (24°S) Australia
+  [[29, 34], [52, 56], [78, 88]], // 31 (28°S) Sudáfrica, Australia
+  [[29, 33], [53, 55], [79, 81], [83, 88]], // 32 (32°S) Chile, Argentina, Australia sur
+  [[29, 32], [85, 87], [94, 94]], // 33 (36°S) Nueva Zelanda
+  [[28, 30], [94, 94]], // 34 (39°S)
+  [[29, 30], [93, 93]], // 35 (43°S)
+  [[28, 29]], // 36 (47°S) Patagonia
+  [[28, 29]], // 37 (51°S)
+  [[29, 29]], // 38 (54°S) Tierra del Fuego
+  [], // 39 (58°S)
+  [], // 40 (62°S)
+  [], // 41 (66°S)
+  [[30, 30], [57, 57], [59, 66], [69, 89]], // 42 (69°S) Península Antártica y costa
+  [[20, 21], [24, 24], [29, 31], [44, 92]], // 43 (73°S) Antártida
+  [[8, 26], [40, 91]], // 44 (77°S) Antártida
+  [[9, 28], [31, 31], [34, 35], [40, 90]], // 45 (81°S) Antártida
+  [[0, 0], [2, 2], [8, 94]], // 46 (84°S) Antártida
+  [[0, 95]], // 47 (88°S) Polo Sur (continente antártico)
 ];
 
 // Rampas de densidad: índice 0 = más tenue, 5 = más denso/brillante.
@@ -68,12 +82,16 @@ const SEA_COLORS = [
   '#071a30', '#0d3a5c', '#11629b', '#1f86c9', '#35b6e8', '#7cd7ff',
 ];
 
+import { detectPotatoMode } from './utils.js';
+
 export class AsciiEarthBackground {
   constructor(containerId) {
     this.container = document.getElementById(containerId);
     if (!this.container) {
       throw new Error('Contenedor del fondo ASCII no encontrado: ' + containerId);
     }
+
+    this.isPotato = detectPotatoMode();
 
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'ascii-earth-canvas';
@@ -89,7 +107,8 @@ export class AsciiEarthBackground {
     this._raf = 0;
     this._last = 0;
     this._frameAccum = 0;
-    this._fps = 30;
+    // Si es PC patata, limita a 20 FPS para fluidez total sin saturar la CPU
+    this._fps = this.isPotato ? 20 : 30;
 
     this._onResize = () => this._resize();
     window.addEventListener('resize', this._onResize);
@@ -140,8 +159,11 @@ export class AsciiEarthBackground {
     this.canvas.width = w;
     this.canvas.height = h;
 
-    // Cuadrícula ASCII: celda entre 10 y 16 px según el tamaño de pantalla.
-    this.cell = Math.max(10, Math.min(16, Math.round(Math.min(w, h) / 56)));
+    // Cuadrícula ASCII: adaptada si el hardware es muy modesto para aligerar la CPU
+    const divisor = this.isPotato ? 44 : 56;
+    const minCell = this.isPotato ? 12 : 10;
+    const maxCell = this.isPotato ? 18 : 16;
+    this.cell = Math.max(minCell, Math.min(maxCell, Math.round(Math.min(w, h) / divisor)));
     this.cols = Math.ceil(w / this.cell);
     this.rows = Math.ceil(h / this.cell);
 
@@ -201,8 +223,9 @@ export class AsciiEarthBackground {
 
   // Genera estrellas ASCII parpadeantes en el espacio profundo
   _buildStars() {
-    // Densidad moderada y limpia
-    const count = Math.floor(this.cols * this.rows * 0.035);
+    // Densidad adaptada según hardware
+    const starDensity = this.isPotato ? 0.018 : 0.035;
+    const count = Math.floor(this.cols * this.rows * starDensity);
     const stars = [];
 
     // Colores sutiles y elegantes (blanco y luz estelar suave)

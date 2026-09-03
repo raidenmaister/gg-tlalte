@@ -2419,3 +2419,25 @@ select, option {
         transition-duration: 0.001ms !important;
     }
 }
+
+/* -------------------------------------------------------------------------- */
+/* Modo Hardware Modesto ("PC ultrapatata"): optimización fluida sin lag     */
+/* -------------------------------------------------------------------------- */
+body.is-potato * {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+
+body.is-potato .menu-card,
+body.is-potato .lobby-panel,
+body.is-potato .panel,
+body.is-potato .hp-row,
+body.is-potato .compass-ring,
+body.is-potato .btn-leave,
+body.is-potato .topbar,
+body.is-potato .countdown-banner,
+body.is-potato .waiting-banner,
+body.is-potato .prepare-banner {
+    background: rgba(14, 18, 36, 0.96) !important;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5) !important;
+}

@@ -206,3 +206,51 @@ export function generateCode(length = CONFIG.CODE_LENGTH) {
   }
   return code;
 }
+
+/**
+ * Detecta si el dispositivo del usuario tiene hardware de recursos limitados ("PC ultra patata")
+ * analizando núcleos de CPU, memoria de dispositivo y renderer WebGL.
+ * @returns {boolean}
+ */
+export function detectPotatoMode() {
+  let isPotato = false;
+  try {
+    const cores = navigator.hardwareConcurrency || 4;
+    const memory = navigator.deviceMemory || 4;
+    let isLowEndGpu = false;
+
+    const canvas = document.createElement('canvas');
+    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+    if (gl) {
+      const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+      if (dbg) {
+        const renderer = (gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) || '').toLowerCase();
+        if (
+          renderer.includes('intel') ||
+          renderer.includes('hd graphics') ||
+          renderer.includes('uhd graphics') ||
+          renderer.includes('swiftshader') ||
+          renderer.includes('basic render') ||
+          renderer.includes('llvmpipe') ||
+          renderer.includes('mesa') ||
+          renderer.includes('mali') ||
+          renderer.includes('adreno')
+        ) {
+          isLowEndGpu = true;
+        }
+      }
+    }
+
+    if (cores <= 4 || memory <= 4 || isLowEndGpu) {
+      isPotato = true;
+    }
+  } catch (e) {}
+
+  if (typeof document !== 'undefined' && document.body) {
+    if (isPotato) {
+      document.body.classList.add('is-potato');
+    }
+  }
+
+  return isPotato;
+}

@@ -9,8 +9,8 @@
 //    exactamente igual y sin requerir servidores TURN adicionales ni VPS.
 // ============================================================================
 
-import { CONFIG } from './config.js?v=1.5.2';
-import { generateCode } from './utils.js?v=1.5.2';
+import { CONFIG } from './config.js?v=1.5.3';
+import { generateCode } from './utils.js?v=1.5.3';
 
 const API_URL = 'api.php';
 
@@ -500,6 +500,14 @@ export class Network {
       return;
     }
 
+    if (data.type === 'guestLeave') {
+      if (this.role === 'host') {
+        const pName = data.name || this.guestNames.get(peerId);
+        this._handleGuestLeave(peerId, pName);
+      }
+      return;
+    }
+
     if (data.type === 'hostLeft') {
       this._closing = true;
       this.leave();
@@ -814,6 +822,12 @@ export class Network {
       if (this.roomId) {
         this._api('send-msg', { id: this.roomId, from: this.myId || 'host', to: 'all', payload: JSON.stringify(msg) });
         this._api('delete', { id: this.roomId });
+      }
+    } else if (!this.isHost && !this._closing) {
+      const msg = { type: 'guestLeave', peerId: this.myId, name: this.myName };
+      try { this.broadcast(msg); } catch (e) {}
+      if (this.roomId) {
+        this._api('send-msg', { id: this.roomId, from: this.myId || 'guest', to: 'host', payload: JSON.stringify(msg) });
       }
     }
     this._closing = true;

@@ -4,7 +4,7 @@
 
 export const CONFIG = {
   // Versión oficial de la aplicación visible en menús
-  VERSION: 'BETA v1.5.2',
+  VERSION: 'BETA v1.5.3',
 
   // Fallback opcional de API Key (cliente). La key real se define en
   // js/keys.js (window.GG_GOOGLE_MAPS_API_KEY), que se mantiene local y NO se

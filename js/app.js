@@ -2,14 +2,14 @@
 // app.js — Punto de entrada. Coordina UI, red, visor panorámico y juego.
 // ============================================================================
 
-import { $, formatKm, formatNumber, clamp, escapeHtml, detectPotatoMode } from './utils.js?v=1.5.2';
-import { CONFIG } from './config.js?v=1.5.2';
-import { audio } from './audio.js?v=1.5.2';
-import { PanoramaViewer } from './panorama.js?v=1.5.2';
-import { Minimap } from './minimap.js?v=1.5.2';
-import { Network } from './net.js?v=1.5.2';
-import { Game } from './game.js?v=1.5.2';
-import { AsciiEarthBackground } from './ascii-earth.js?v=1.5.2';
+import { $, formatKm, formatNumber, clamp, escapeHtml, detectPotatoMode } from './utils.js?v=1.5.3';
+import { CONFIG } from './config.js?v=1.5.3';
+import { audio } from './audio.js?v=1.5.3';
+import { PanoramaViewer } from './panorama.js?v=1.5.3';
+import { Minimap } from './minimap.js?v=1.5.3';
+import { Network } from './net.js?v=1.5.3';
+import { Game } from './game.js?v=1.5.3';
+import { AsciiEarthBackground } from './ascii-earth.js?v=1.5.3';
 
 const PLAYER_KEY = 'ggtlalte:playerName';
 const ROOM_KEY = 'ggtlalte:activeRoom';
@@ -701,8 +701,18 @@ function renderLobby() {
     startBtn.textContent = `Iniciar partida (${displayPlayers.length}/${limit})`;
   }
 
+  const leaveBtn = $('#leaveLobbyBtn');
+  if (leaveBtn) {
+    leaveBtn.disabled = false;
+    leaveBtn.textContent = 'Salir de la sala';
+  }
+
   const deleteBtn = $('#deleteRoomBtn');
-  if (deleteBtn) deleteBtn.classList.toggle('hidden', !isHost);
+  if (deleteBtn) {
+    deleteBtn.disabled = false;
+    deleteBtn.textContent = 'Eliminar sala';
+    deleteBtn.classList.toggle('hidden', !isHost);
+  }
 
   const note = $('#lobbyNote');
   if (isHost) {
@@ -1041,46 +1051,59 @@ function persistActiveRoom() {
 }
 
 async function leaveRoom() {
+  audio.ensure();
+  audio.click();
   const leaveBtn = $('#leaveLobbyBtn');
-  if (leaveBtn) leaveBtn.disabled = true;
-  if (net.role === 'host') {
-    const roomId = net.roomId;
-    const msg = { type: 'hostLeft', reason: 'El anfitrión cerró la sala.' };
-    try { net.broadcast(msg); } catch (e) {}
-    if (roomId) {
-      try {
-        await apiPost('send-msg', { id: roomId, from: net.myId || 'host', to: 'all', payload: JSON.stringify(msg) });
-      } catch (e) {}
-      try {
-        await apiPost('delete', { id: roomId });
-      } catch (e) {}
+  if (leaveBtn) {
+    leaveBtn.disabled = true;
+    leaveBtn.textContent = 'Saliendo…';
+  }
+  try {
+    if (net.role === 'host') {
+      const roomId = net.roomId;
+      const msg = { type: 'hostLeft', reason: 'El anfitrión cerró la sala.' };
+      try { net.broadcast(msg); } catch (e) {}
+      if (roomId) {
+        apiPost('send-msg', { id: roomId, from: net.myId || 'host', to: 'all', payload: JSON.stringify(msg) }).catch(() => {});
+        apiPost('delete', { id: roomId }).catch(() => {});
+      }
+    } else if (net.role === 'guest') {
+      const msg = { type: 'guestLeave', peerId: net.myId, name: meName };
+      try { net.broadcast(msg); } catch (e) {}
+      if (net.roomId) {
+        apiPost('send-msg', { id: net.roomId, from: net.myId || 'guest', to: 'host', payload: JSON.stringify(msg) }).catch(() => {});
+      }
     }
+  } catch (e) {
+    LOG('leaveRoom error:', e);
   }
   leaveEverything();
-  resetToMenu('Saliste de la sala');
+  resetToMenu('Saliste de la sala', 'info');
 }
 
 async function deleteRoom() {
+  audio.ensure();
+  audio.click();
   const deleteBtn = $('#deleteRoomBtn');
   if (deleteBtn) {
     deleteBtn.disabled = true;
     deleteBtn.textContent = 'Eliminando…';
   }
-  if (net.role === 'host') {
-    const roomId = net.roomId;
-    const msg = { type: 'hostLeft', reason: 'El anfitrión eliminó la sala.' };
-    try { net.broadcast(msg); } catch (e) {}
-    if (roomId) {
-      try {
-        await apiPost('send-msg', { id: roomId, from: net.myId || 'host', to: 'all', payload: JSON.stringify(msg) });
-      } catch (e) {}
-      try {
-        await apiPost('delete', { id: roomId });
-      } catch (e) {}
+  try {
+    if (net.role === 'host') {
+      const roomId = net.roomId;
+      const msg = { type: 'hostLeft', reason: 'El anfitrión eliminó la sala.' };
+      try { net.broadcast(msg); } catch (e) {}
+      if (roomId) {
+        apiPost('send-msg', { id: roomId, from: net.myId || 'host', to: 'all', payload: JSON.stringify(msg) }).catch(() => {});
+        apiPost('delete', { id: roomId }).catch(() => {});
+      }
     }
+  } catch (e) {
+    LOG('deleteRoom error:', e);
   }
   leaveEverything();
-  resetToMenu('Sala eliminada');
+  resetToMenu('Sala eliminada', 'info');
 }
 
 function joinRoom(code) {
@@ -1090,17 +1113,27 @@ function joinRoom(code) {
   net.joinRoom(code, meName);
 }
 
-function resetToMenu(message) {
+function resetToMenu(message, kind = 'error') {
   try {
     game.abort();
   } catch (e) {
     LOG('game.abort error:', e);
   }
-  if (message) showToast(message, 'error');
+  if (message) showToast(message, kind);
   try {
     resetGameUI();
   } catch (e) {
     LOG('resetGameUI error:', e);
+  }
+  const leaveBtn = $('#leaveLobbyBtn');
+  if (leaveBtn) {
+    leaveBtn.disabled = false;
+    leaveBtn.textContent = 'Salir de la sala';
+  }
+  const deleteBtn = $('#deleteRoomBtn');
+  if (deleteBtn) {
+    deleteBtn.disabled = false;
+    deleteBtn.textContent = 'Eliminar sala';
   }
   showScreen('menu');
   const nameEl = $('#menuPlayerName');
@@ -1711,15 +1744,23 @@ function boot() {
     }).catch(() => {});
   }
 
-  // Comprobación de versión en caliente: si el servidor publica una nueva versión, alertar al usuario
+  // Comprobación de versión en caliente: si el servidor publica una nueva versión, alertar al usuario ÚNICAMENTE en el menú
   let _updateToastShown = false;
   async function checkVersionUpdate() {
+    // Protección absoluta: si el jugador está jugando, en el lobby o en cualquier sala, NUNCA molestar ni actualizar
+    if (net.roomId || net.role || (game && game.mode === 'multi') || gameInProgress() || (game && game.state !== 'idle')) {
+      return;
+    }
+    const menuScreen = document.getElementById('screen-menu');
+    if (!menuScreen || menuScreen.classList.contains('hidden')) {
+      return;
+    }
     try {
       const res = await fetch('version.json?_t=' + Date.now(), { cache: 'no-store' });
       if (res.ok) {
         const vData = await res.json();
         const curVer = (CONFIG.VERSION || '').replace(/^BETA\s+v/i, '').trim();
-        if (vData && vData.version && vData.version !== curVer && !gameInProgress()) {
+        if (vData && vData.version && vData.version !== curVer) {
           LOG('Nueva versión detectada:', vData.version, 'actual:', curVer);
           if (!_updateToastShown) {
             _updateToastShown = true;
@@ -1736,7 +1777,7 @@ function boot() {
       }
     } catch (e) {}
   }
-  setInterval(checkVersionUpdate, 10000);
+  setInterval(checkVersionUpdate, 15000);
   window.addEventListener('focus', () => checkVersionUpdate());
   checkVersionUpdate();
 

@@ -20,6 +20,7 @@ encontar-pano-valido.cjs
 panorama.html
 package.json
 package-lock.json
+*.geojson
 
 # Logs y sistema
 *.log

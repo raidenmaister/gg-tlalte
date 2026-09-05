@@ -2,11 +2,11 @@
 // minimap.js — Minimapa interactivo Leaflet para adivinar y revelar.
 // ============================================================================
 
-import { CONFIG } from './config.js?v=1.5.3';
-import { greatCirclePoints } from './utils.js?v=1.5.3';
+import { CONFIG } from './config.js?v=1.7.7';
+import { greatCirclePoints } from './utils.js?v=1.7.7';
 
 const MARKER = {
-  real: { color: '#16a34a', size: 34, label: 'Ubicación real' },
+  real: { color: '#f59e0b', size: 42, label: '📍 Ubicación real' },
   mine: { color: '#2563eb', size: 32, label: 'Tu marcador' },
   opp:  { color: '#dc2626', size: 32, label: 'Marcador del rival' },
 };
@@ -36,10 +36,10 @@ function makePin({ lat, lng, color, size, label }) {
   return L.marker([lat, lng], { icon }).bindPopup(label);
 }
 
-/** Pin de la ubicación real con etiqueta visible para distinguirlo. */
+/** Pin de la ubicación real con etiqueta visible para distinguirlo, color dorado y mayor tamaño. */
 function makeRealPin({ lat, lng, color, size, label }) {
   const tipY = size * 1.2071;
-  const labelH = 22;
+  const labelH = 24;
   const icon = L.divIcon({
     className: 'gg-player-pin gg-real-pin',
     html: `<div class="gg-player-pin__label gg-real-pin__label">${escapeHtml(label)}</div>
@@ -47,7 +47,7 @@ function makeRealPin({ lat, lng, color, size, label }) {
     iconSize: [size, tipY + labelH],
     iconAnchor: [size / 2, tipY + labelH],
   });
-  return L.marker([lat, lng], { icon, interactive: false });
+  return L.marker([lat, lng], { icon, interactive: false, zIndexOffset: 1000 });
 }
 
 /** Pin de jugador con el nombre y puntos perdidos siempre visibles encima de la chincheta. */
@@ -144,7 +144,7 @@ export class Minimap {
       this.streetLayer.addTo(this.map);
     }
 
-    this.revealLayer = L.layerGroup().addTo(this.map);
+    this.revealLayer = L.featureGroup().addTo(this.map);
 
     this.map.on('click', (e) => {
       if (this.interactive === false) return;
@@ -187,7 +187,16 @@ export class Minimap {
 
     // Asegurar que la capa de chinchetas y líneas geodésicas quede visible encima
     if (this.revealLayer && this.map.hasLayer(this.revealLayer)) {
-      this.revealLayer.bringToFront();
+      if (typeof this.revealLayer.bringToFront === 'function') {
+        this.revealLayer.bringToFront();
+      } else if (typeof this.revealLayer.eachLayer === 'function') {
+        this.revealLayer.eachLayer((l) => {
+          if (l && typeof l.bringToFront === 'function') l.bringToFront();
+        });
+      }
+    }
+    if (this.pickMarker && typeof this.pickMarker.bringToFront === 'function') {
+      this.pickMarker.bringToFront();
     }
 
     return this.currentLayerType;

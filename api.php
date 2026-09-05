@@ -19,7 +19,7 @@ $rawInput = @file_get_contents('php://input');
 if ($rawInput) {
     $jsonData = @json_decode($rawInput, true);
     if (is_array($jsonData)) {
-        $_POST = array_merge($jsonData, $_POST);
+        $_POST = array_merge($_POST, $jsonData);
     }
 }
 
@@ -30,6 +30,10 @@ if (!function_exists('loadJson')) {
     function loadJson($file, $default = []) {
         if (!file_exists($file)) return $default;
         $raw = @file_get_contents($file);
+        if ($raw === false || trim($raw) === '') {
+            usleep(8000);
+            $raw = @file_get_contents($file);
+        }
         $data = json_decode($raw, true);
         return is_array($data) ? $data : $default;
     }
@@ -37,7 +41,15 @@ if (!function_exists('loadJson')) {
 
 if (!function_exists('saveJson')) {
     function saveJson($file, $data) {
-        return @file_put_contents($file, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX) !== false;
+        $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+        $temp = $file . '.' . uniqid('tmp_', true);
+        if (@file_put_contents($temp, $json, LOCK_EX) !== false) {
+            if (@rename($temp, $file)) {
+                return true;
+            }
+            @unlink($temp);
+        }
+        return @file_put_contents($file, $json, LOCK_EX) !== false;
     }
 }
 
@@ -57,7 +69,8 @@ if (!function_exists('cleanupRooms')) {
     function cleanupRooms($rooms, $staleSeconds) {
         $now = time();
         foreach ($rooms as $id => $room) {
-            if ($now - intval($room['updated'] ?? 0) > $staleSeconds) {
+            $threshold = ($room['status'] ?? '') === 'in_progress' ? 90 : max(45, $staleSeconds);
+            if ($now - intval($room['updated'] ?? 0) > $threshold) {
                 unset($rooms[$id]);
             }
         }
@@ -67,8 +80,9 @@ if (!function_exists('cleanupRooms')) {
 
 /** Puntuación del leaderboard: prima la precisión y ajusta por velocidad. */
 if (!function_exists('leaderScore')) {
-    function leaderScore($rounds, $points, $timeMs, $timeMaxSec) {
-        $maxPoints = max(1, $rounds * 5000);
+    function leaderScore($rounds, $points, $timeMs, $timeMaxSec, $mode = 'normal') {
+        $maxPerRound = in_array($mode, ['tunnel', 'static_tunnel', 'blur', 'static_blur'], true) ? 6500 : 5000;
+        $maxPoints = max(1, $rounds * $maxPerRound);
         $points = max(0, min(intval($points), $maxPoints));
         $timeMaxMs = max(1, intval($timeMaxSec) * 1000);
         $timeRatio = min(1, max(0, intval($timeMs) / $timeMaxMs));
@@ -79,9 +93,13 @@ if (!function_exists('leaderScore')) {
 }
 
 if (!function_exists('soloTimeMax')) {
-    function soloTimeMax($rounds) {
-        $map = [5 => 105, 7 => 120, 10 => 150];
-        return isset($map[$rounds]) ? $map[$rounds] : 105;
+    function soloTimeMax($rounds, $gameMode = 'normal') {
+        $map = [5 => 105, 7 => 120, 10 => 150, 15 => 210];
+        $base = isset($map[$rounds]) ? $map[$rounds] : 105;
+        if (in_array($gameMode, ['tunnel', 'static_tunnel', 'blur', 'static_blur'], true)) {
+            $base += 60;
+        }
+        return $base;
     }
 }
 
@@ -128,10 +146,12 @@ switch ($action) {
         $isPublic = isset($_POST['isPublic']) ? intval($_POST['isPublic']) : 1;
         $rounds = intval($_POST['rounds'] ?? 5);
         $gameMode = trim($_POST['gameMode'] ?? 'normal');
-        if (!in_array($gameMode, ['normal', 'static', 'temporal'], true)) {
+        if (!in_array($gameMode, ['normal', 'static', 'temporal', 'tunnel', 'static_tunnel', 'blur', 'static_blur'], true)) {
             $gameMode = 'normal';
         }
         $temporalSeconds = intval($_POST['temporalSeconds'] ?? 3);
+        $tunnelSeconds = intval($_POST['tunnelSeconds'] ?? 3);
+        $blurSeconds = intval($_POST['blurSeconds'] ?? 3);
         if ($id === '') {
             echo json_encode(['ok' => false, 'error' => 'id requerido']);
             exit;
@@ -143,6 +163,8 @@ switch ($action) {
             'rounds' => $rounds,
             'gameMode' => $gameMode,
             'temporalSeconds' => $temporalSeconds,
+            'tunnelSeconds' => $tunnelSeconds,
+            'blurSeconds' => $blurSeconds,
             'status' => 'waiting',
             'updated' => time(),
             'isPublic' => $isPublic,
@@ -196,6 +218,9 @@ switch ($action) {
             'status' => strval($room['status'] ?? 'waiting'),
             'gameMode' => strval($room['gameMode'] ?? 'normal'),
             'rounds' => intval($room['rounds'] ?? 5),
+            'temporalSeconds' => intval($room['temporalSeconds'] ?? 3),
+            'tunnelSeconds' => intval($room['tunnelSeconds'] ?? 3),
+            'blurSeconds' => intval($room['blurSeconds'] ?? 3),
         ]);
         break;
     }
@@ -212,6 +237,8 @@ switch ($action) {
                 'rounds' => intval($room['rounds'] ?? 5),
                 'gameMode' => strval($room['gameMode'] ?? 'normal'),
                 'temporalSeconds' => intval($room['temporalSeconds'] ?? 3),
+                'tunnelSeconds' => intval($room['tunnelSeconds'] ?? 3),
+                'blurSeconds' => intval($room['blurSeconds'] ?? 3),
                 'status' => strval($room['status'] ?? 'waiting'),
             ];
         }
@@ -290,9 +317,12 @@ switch ($action) {
             exit;
         }
 
-        // Mantener viva la sala
-        $rooms[$id]['updated'] = time();
-        saveRooms($roomsFile, $rooms);
+        // Mantener viva la sala sin sobrecargar escrituras en disco en cada lectura frecuente
+        $now = time();
+        if (($now - intval($rooms[$id]['updated'] ?? 0)) >= 10) {
+            $rooms[$id]['updated'] = $now;
+            saveRooms($roomsFile, $rooms);
+        }
 
         $msgs = isset($rooms[$id]['messages']) && is_array($rooms[$id]['messages'])
             ? $rooms[$id]['messages']
@@ -350,9 +380,8 @@ switch ($action) {
         $rounds = intval($_POST['rounds'] ?? 0);
         $points = intval($_POST['points'] ?? 0);
         $timeMs = intval($_POST['timeMs'] ?? 0);
-        $timeMax = soloTimeMax($rounds);
 
-        if (!in_array($rounds, [5, 7, 10], true)) {
+        if (!in_array($rounds, [5, 7, 10, 15], true)) {
             echo json_encode(['ok' => false, 'error' => 'rondas no válidas']);
             exit;
         }
@@ -362,16 +391,17 @@ switch ($action) {
         }
 
         $gameMode = trim($_POST['gameMode'] ?? 'normal');
-        if (!in_array($gameMode, ['normal', 'static', 'temporal'], true)) {
+        if (!in_array($gameMode, ['normal', 'static', 'temporal', 'tunnel', 'static_tunnel', 'blur', 'static_blur'], true)) {
             $gameMode = 'normal';
         }
+        $timeMax = soloTimeMax($rounds, $gameMode);
 
         $key = $gameMode . '_' . $rounds;
         if (!isset($leaderboard[$key]) || !is_array($leaderboard[$key])) {
             $leaderboard[$key] = [];
         }
 
-        $newScore = leaderScore($rounds, $points, $timeMs, $timeMax);
+        $newScore = leaderScore($rounds, $points, $timeMs, $timeMax, $gameMode);
         $entry = [
             'name' => $name,
             'points' => $points,
@@ -413,9 +443,9 @@ switch ($action) {
     }
     case 'leaderboard': {
         $rounds = intval($_GET['rounds'] ?? $_POST['rounds'] ?? 5);
-        if (!in_array($rounds, [5, 7, 10], true)) $rounds = 5;
+        if (!in_array($rounds, [5, 7, 10, 15], true)) $rounds = 5;
         $gameMode = trim($_GET['mode'] ?? $_POST['mode'] ?? 'normal');
-        if (!in_array($gameMode, ['normal', 'static', 'temporal'], true)) {
+        if (!in_array($gameMode, ['normal', 'static', 'temporal', 'tunnel', 'static_tunnel', 'blur', 'static_blur'], true)) {
             $gameMode = 'normal';
         }
         $key = $gameMode . '_' . $rounds;
@@ -431,12 +461,12 @@ switch ($action) {
         }
 
         // Calibrar/normalizar puntuaciones según el tiempo límite oficial actual de la categoría
-        $timeMax = soloTimeMax($rounds);
+        $timeMax = soloTimeMax($rounds, $gameMode);
         $dirty = false;
         foreach ($entries as $i => &$entry) {
             $pts = intval($entry['points'] ?? 0);
             $tMs = intval($entry['timeMs'] ?? 0);
-            $expectedScore = leaderScore($rounds, $pts, $tMs, $timeMax);
+            $expectedScore = leaderScore($rounds, $pts, $tMs, $timeMax, $gameMode);
             if (!isset($entry['timeMax']) || intval($entry['timeMax']) !== $timeMax || intval($entry['score'] ?? 0) !== $expectedScore) {
                 $entry['timeMax'] = $timeMax;
                 $entry['score'] = $expectedScore;

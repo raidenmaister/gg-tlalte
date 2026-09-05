@@ -7,6 +7,12 @@ class AudioManager {
     this.ctx = null;
     this.enabled = true;
     this.master = null;
+    this.bgmGain = null;
+    this.bgmPlaying = false;
+    this.bgmTimer = null;
+    this.bgmNodes = [];
+    this._bgmChordIndex = 0;
+    this.userInteracted = false;
   }
 
   /** Crea/resume el AudioContext (debe llamarse tras un gesto del usuario). */
@@ -30,7 +36,117 @@ class AudioManager {
       // Silencia también lo que ya está sonando, no solo los tonos futuros.
       this.master.gain.value = this.enabled ? 0.22 : 0;
     }
+    if (!this.enabled) {
+      this.stopMenuMusic();
+    } else {
+      this.startMenuMusic();
+    }
     return this.enabled;
+  }
+
+  /* ---------------------- Música de fondo (BGM) sintetizada ---------------------- */
+  startMenuMusic() {
+    if (!this.enabled) return;
+    this.ensure();
+    if (!this.ctx) return;
+    if (this.bgmPlaying) return;
+    this.bgmPlaying = true;
+
+    if (!this.bgmGain) {
+      this.bgmGain = this.ctx.createGain();
+      this.bgmGain.gain.setValueAtTime(0.0001, this.ctx.currentTime);
+      this.bgmGain.connect(this.master);
+    }
+    const now = this.ctx.currentTime;
+    this.bgmGain.gain.cancelScheduledValues(now);
+    this.bgmGain.gain.linearRampToValueAtTime(0.35, now + 1.5);
+    this._playBgmLoop();
+  }
+
+  stopMenuMusic() {
+    if (!this.bgmPlaying) return;
+    this.bgmPlaying = false;
+    if (this.bgmTimer) {
+      clearTimeout(this.bgmTimer);
+      this.bgmTimer = null;
+    }
+    if (this.bgmGain && this.ctx) {
+      const now = this.ctx.currentTime;
+      this.bgmGain.gain.cancelScheduledValues(now);
+      this.bgmGain.gain.linearRampToValueAtTime(0.0001, now + 0.8);
+    }
+    setTimeout(() => this._stopAllBgmNodes(), 900);
+  }
+
+  _stopAllBgmNodes() {
+    this.bgmNodes.forEach(({ osc, gain }) => {
+      try {
+        osc.stop();
+        osc.disconnect();
+        gain.disconnect();
+      } catch (e) {}
+    });
+    this.bgmNodes = [];
+  }
+
+  _playBgmLoop() {
+    if (!this.bgmPlaying || !this.enabled || !this.ctx) return;
+    // Secuencia de acordes ambient cálidos (Dm9 - Bbmaj7 - Fadd9 - Am7)
+    const chords = [
+      [73.42, 146.83, 220.0, 261.63, 329.63],   // Dm9
+      [58.27, 116.54, 174.61, 220.0, 293.66],   // Bbmaj7
+      [65.41, 130.81, 164.81, 196.0, 261.63],   // Fadd9
+      [55.00, 110.00, 164.81, 196.0, 246.94],   // Am7
+    ];
+    const freqs = chords[this._bgmChordIndex % chords.length];
+    this._bgmChordIndex++;
+
+    const now = this.ctx.currentTime;
+    const duration = 4.2;
+
+    // Filtro pasa-bajos cálido para sonido synth pad espacial
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(650, now);
+    filter.Q.setValueAtTime(1.2, now);
+    filter.connect(this.bgmGain);
+
+    freqs.forEach((freq, idx) => {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = idx === 0 ? 'sine' : 'triangle';
+      osc.detune.setValueAtTime((idx % 2 === 0 ? 5 : -5), now);
+      osc.frequency.setValueAtTime(freq, now);
+
+      const noteVolume = idx === 0 ? 0.35 : 0.18;
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.linearRampToValueAtTime(noteVolume, now + 1.2);
+      gain.gain.setValueAtTime(noteVolume * 0.85, now + duration - 1.2);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + duration + 0.8);
+
+      osc.connect(gain);
+      gain.connect(filter);
+      osc.start(now);
+      osc.stop(now + duration + 0.9);
+
+      this.bgmNodes.push({ osc, gain });
+    });
+
+    setTimeout(() => {
+      this.bgmNodes = this.bgmNodes.filter((n) => {
+        try {
+          return n.osc.playbackState !== 3;
+        } catch (e) {
+          return false;
+        }
+      });
+    }, (duration + 1) * 1000);
+
+    if (this.bgmPlaying) {
+      this.bgmTimer = setTimeout(() => {
+        this._playBgmLoop();
+      }, (duration - 0.4) * 1000);
+    }
   }
 
   /**

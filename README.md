@@ -1,60 +1,68 @@
-# GG-TLALTE · GeoGuessr P2P (BETA v1.5.0)
+# GG-TLALTE · GeoGuessr P2P (BETA v1.7.7)
 
-Juego de adivinar ubicaciones con panorámicas 360° de Google Maps Street View, inspirado en GeoGuessr y ambientado en Tlaltenango de Sánchez Román, Zacatecas. Incluye modo solitario con leaderboard por modos y partidas multijugador en duelo 1v1 y hasta 25 jugadores simultáneos.
+Juego de adivinar ubicaciones con panorámicas 360° de Google Maps Street View, inspirado en GeoGuessr y ambientado en Tlaltenango de Sánchez Román, Zacatecas. Incluye modo solitario con leaderboard global por modos y partidas multijugador en duelo 1v1 y hasta 25 jugadores simultáneos.
 
-## Características
+## Características Principales
 
-- **3 Modos de Juego (disponibles en Solitario y Multijugador)**:
-  - **Normal**: Exploración completa en 360° con giro y zoom interactivo.
-  - **Estático**: Visión fija, sin posibilidad de girar ni mover la cámara (desafío puro de reconocimiento visual).
-  - **Temporal**: La panorámica se muestra únicamente durante un tiempo configurable (1s, 2s, 3s, 5s o 10s); luego una cortina ciega la oculta e indica *"Coloca tu chincheta en el mapa"*, abriendo el minimapa para conjeturar.
-- **Salas Públicas Detalladas**:
-  - El buscador de salas públicas muestra en tiempo real el anfitrión, capacidad actual/máxima, el modo de juego configurado (`Normal`, `Estático`, `Temporal`) y el número de partidas/rondas de la sala.
+- **Modos y Variantes de Juego (Solitario y Multijugador)**:
+  - **Normal**: Exploración completa en 360° con tres variantes disponibles:
+    - *Estándar*: Giro libre y zoom interactivo.
+    - *Con Zoom*: Zoom ultra-telescópico progresivo que se aleja paso a paso a intervalos configurables (2s a 15s).
+    - *Borroso (Desenfoque Progresivo)*: La panorámica inicia con un fuerte desenfoque óptico 360° que disminuye nivel a nivel. Acelerado por hardware para un giro y arrastre de imagen totalmente fluido a 60 FPS sin sobrecargar la GPU.
+  - **Estático**: Visión fija hacia adelante sin rotación (desafío puro de observación):
+    - *Estándar*: Cámara fija bloqueada al frente.
+    - *Con Zoom*: Cámara fija hacia adelante combinada con zoom ultra-telescópico progresivo.
+    - *Borroso*: Cámara fija hacia adelante combinada con desenfoque progresivo.
+  - **Temporal**: La panorámica se muestra únicamente durante un tiempo configurable (1s a 10s); luego una cortina ciega la oculta para conjeturar de memoria.
+- **Chat Grupal en el Lobby P2P**:
+  - Chat interactivo integrado en el lobby de salas públicas y privadas antes de iniciar la partida.
+  - Mensajería en tiempo real impulsada por canales de datos WebRTC (PeerJS) de latencia ultra-baja y sin consumo de cuotas del servidor.
+  - Muestra nombre de usuario, hora local de envío e indicador animado de escritura (*"X está escribiendo..."* estilo WhatsApp/Discord).
+  - Anuncio automático de *"Iniciando partida..."* y autodestrucción total de la interfaz y los oyentes de eventos al iniciar la partida para maximizar el rendimiento.
+- **Separación Geográfica Global Estricta (≥ 161 metros)**:
+  - Algoritmo de dispersión geográfica acumulativa que garantiza que cada nueva ronda esté separada por al menos 161 metros de **todas** las ubicaciones previas de la partida, eliminando concentraciones repetidas en partidas de hasta 15 rondas.
+- **Tiempo Equitativo en Solitario**:
+  - Bonificación automática de **+1 minuto** de tiempo total en solitario para las variantes con Zoom y Borroso (tanto en Normal como en Estático) para compensar el tiempo de revelación visual.
+- **Prevención AFK y Rescate de Conjeturas**:
+  - Mecanismo de doble transporte (WebRTC directo + respaldo HTTP relay) para registrar suposiciones incluso con microcortes de red.
+  - El anfitrión rescata automáticamente cualquier chincheta que un jugador haya fijado en el mapa, evitando falsos positivos por inactividad (AFK) y pérdidas accidentales de puntos.
+- **Mecánica de Duelo con Recuperación de Vida y Racha ("Perfects")**:
+  - Las conjeturas a menos de 25 metros otorgan la insignia "¡PERFECTO!", bonificación de 5,000 puntos, racha acumulativa y regeneración de +2,000 HP en duelos multijugador.
+  - Multiplicadores de daño dinámicos por ronda (hasta x3.5 en rondas 10-14 y x4.0 en ronda 15) con reloj de prisa de 15 segundos al confirmar el primer jugador.
+- **Chincheta Dorada de Ubicación Real**:
+  - Al revelar resultados, la ubicación real luce un distintivo degradado dorado brillante con aro de pulso animado y prioridad visual (`z-index`) sobre los marcadores de los jugadores.
 - **Minimapa Interactivo con Capa Satelital**:
-  - Controles integrados para conmutar al instante entre mapa callejero y vista satelital híbrida HD, así como botón de recentrado rápido en Tlaltenango.
-- **Sistema Anti-Caché Absoluto**:
-  - Configuración `.htaccess` y meta tags HTTP `no-cache`, versionado estricto de módulos ES (`?v=1.5.0`) y comprobación de actualización en caliente para evitar que los jugadores queden atrapados en versiones desactualizadas sin requerir Shift+F5.
-- **Distribución de Ubicaciones Inteligente**:
-  - Algoritmo de dispersión que garantiza que cada nueva ronda esté a más de **161 metros** de distancia de la anterior.
-- **Modo Solitario con Cronómetro Pausado**:
-  - El tiempo de partida se detiene de forma justa mientras examinas los resultados sobre el mapa y solo se reanuda al pulsar *"Siguiente ronda"*.
-  - Opciones de 5, 7 y 10 rondas (1:45, 2:00 y 2:30 de tiempo total).
-- **Leaderboard Global por Categorías y Modos**:
-  - Filtros interactivos por **Modo** (Normal, Estático, Temporal) y por **Rondas** (5, 7, 10).
-  - Puntuación basada en precisión geográfica con bonificación por rapidez.
-- **Multijugador Masivo y Duelos (hasta 25 jugadores)**:
-  - **Chinchetas de color real**: En la sala de espera (Lobby) cada jugador cuenta con un icono de chincheta con el color exacto asignado que utilizará al colocar su marcador en el mapa y en la revelación de resultados.
-  - **25 Colores Únicos y Contrastantes** con HUD adaptativo en cuadrícula para salas concurridas.
-  - **Barrera de sincronización anti-trampas**: Todos los jugadores ven la imagen exactamente al mismo milisegundo mediante saludo `panoReady` y `syncStart`, evitando ventajas de carga y eliminando la pantalla azul.
-  - **Reglas de Duelo GeoGuessr**: Sistema de daño dinámico con multiplicador progresivo según rondas y reloj de prisa de 15 segundos cuando el primer jugador confirma su suposición.
-  - Conexión híbrida WebRTC / PeerJS de prioridad P2P absoluta con fallback HTTP relay.
+  - Controles integrados para alternar entre mapa de calles y satelital HD híbrido, con botón de recentrado rápido en Tlaltenango y reposicionamiento inteligente en pantalla de resultados.
 - **Fondo Cósmico ASCII en Canvas 2D**:
-  - Simulación orbital de la Tierra en 3D en arte ASCII con continentes reales y terminador día/noche.
-  - Cielo estrellado con caracteres ASCII titilantes a ritmo suave y pausado.
-  - Persistencia continua del fondo entre todas las pantallas de menús.
-  - Indicador sutil **BETA v1.5.0** en los menús.
-- **Backend PHP ligero**:
-  - Persiste usuarios, salas y leaderboard estructurado en archivos JSON locales sin dependencias de base de datos MySQL.
+  - Simulación orbital de la Tierra en 3D en arte ASCII con continentes reales, terminador día/noche y cielo estrellado titilante con persistencia fluida entre menús.
+- **Música y Audio Procedural**:
+  - Banda sonora ambiental sintetizada en tiempo real mediante la Web Audio API (sin archivos de audio pesados) y efectos de sonido interactivos para clics, temporizadores, daño y victorias.
+- **Leaderboard Global por Categorías y Modos**:
+  - Clasificación en tiempo real filtrable por modo de juego (Normal, Zoom, Borroso, Estático, Temporal) y número de rondas (5, 7, 10 y 15).
+- **Historial Completo de Versiones**:
+  - Modal interactivo accesible desde el menú principal con el registro detallado de novedades y correcciones desde la versión inicial v1.0.0 hasta la v1.7.7.
+- **Backend PHP Ultraligero y Eficiente**:
+  - Optimizado para hostings compartidos con límites estrictos de E/S: reducción del 95% de escrituras a disco durante partidas activas, persistencia local en JSON sin necesidad de MySQL.
 
 ## Estructura
 
 ```
 gg-tlalte/
-├── index.html           # Estructura de la aplicación
-├── style.css            # Estilos y diseño responsivo
-├── api.php              # Backend PHP (salas, usuarios, leaderboard, relay P2P)
-├── rooms.json           # Salas públicas activas
-├── coordenadas_validas.json # Banco de ubicaciones 360° validadas
+├── index.html               # Estructura HTML, modales, HUD y vistas
+├── style.css                # Estilos, diseño responsivo y efectos visuales
+├── api.php                  # Backend PHP (salas, leaderboard, relay P2P y optimización E/S)
+├── version.json             # Control de versiones del cliente
+├── coordenadas_validas.json # Banco de ubicaciones 360° validadas en Tlaltenango
 └── js/
-    ├── app.js           # Orquestador principal y eventos de UI
-    ├── ascii-earth.js   # Fondo animado de la Tierra en ASCII
-    ├── audio.js         # Efectos de sonido con Web Audio API
-    ├── config.js        # Constantes, servidores STUN/TURN y configuración
-    ├── game.js          # Máquina de estados del juego (solo y multi)
-    ├── minimap.js       # Minimapa interactivo con Leaflet
-    ├── net.js           # Capa de red híbrida WebRTC / PeerJS / HTTP relay
-    ├── panorama.js      # Visor Google Maps Street View
-    └── utils.js         # Cálculos geodésicos (Haversine) y fórmulas
+    ├── app.js               # Orquestador principal, eventos de UI, chat y menús
+    ├── ascii-earth.js       # Fondo animado de la Tierra en ASCII
+    ├── audio.js             # Efectos de sonido y sintetizador procedural (Web Audio API)
+    ├── config.js            # Constantes, servidores STUN/TURN y configuración
+    ├── game.js              # Máquina de estados del juego (solo y multi, duelos y rondas)
+    ├── minimap.js           # Minimapa interactivo con Leaflet y capas satelitales
+    ├── net.js               # Capa de red híbrida WebRTC / PeerJS / HTTP relay
+    ├── panorama.js          # Visor Street View, gestión de zoom y blur progresivo
+    └── utils.js             # Cálculos geodésicos (Haversine) y fórmulas de puntaje
 ```
 
 ## Uso local

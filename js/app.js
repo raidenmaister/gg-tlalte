@@ -2,14 +2,14 @@
 // app.js — Punto de entrada. Coordina UI, red, visor panorámico y juego.
 // ============================================================================
 
-import { $, formatKm, formatNumber, clamp, escapeHtml, detectPotatoMode } from './utils.js?v=1.5.3';
-import { CONFIG } from './config.js?v=1.5.3';
-import { audio } from './audio.js?v=1.5.3';
-import { PanoramaViewer } from './panorama.js?v=1.5.3';
-import { Minimap } from './minimap.js?v=1.5.3';
-import { Network } from './net.js?v=1.5.3';
-import { Game } from './game.js?v=1.5.3';
-import { AsciiEarthBackground } from './ascii-earth.js?v=1.5.3';
+import { $, formatKm, formatNumber, clamp, escapeHtml, detectPotatoMode } from './utils.js?v=1.7.7';
+import { CONFIG } from './config.js?v=1.7.7';
+import { audio } from './audio.js?v=1.7.7';
+import { PanoramaViewer } from './panorama.js?v=1.7.7';
+import { Minimap } from './minimap.js?v=1.7.7';
+import { Network } from './net.js?v=1.7.7';
+import { Game } from './game.js?v=1.7.7';
+import { AsciiEarthBackground } from './ascii-earth.js?v=1.7.7';
 
 const PLAYER_KEY = 'ggtlalte:playerName';
 const ROOM_KEY = 'ggtlalte:activeRoom';
@@ -42,14 +42,26 @@ function showScreen(id) {
   const isMenu = ['name', 'menu', 'solo', 'create', 'join', 'leaderboard', 'lobby'].includes(id);
   if (isMenu) {
     asciiEarth.start();
+    if (audio && audio.userInteracted) {
+      audio.startMenuMusic();
+    }
   } else {
     asciiEarth.stop();
+    if (audio) {
+      audio.stopMenuMusic();
+    }
   }
 
-  // El badge BETA v1.0.0 solo se muestra en los menús (Req 4)
+  // El badge de versión solo se muestra en los menús
   const badge = document.getElementById('versionBadge');
   if (badge) {
     badge.classList.toggle('hidden', !isMenu);
+  }
+
+  // Si salimos de los menús hacia el juego, cerrar modal de changelog si estaba abierto
+  if (!isMenu) {
+    const modal = document.getElementById('changelogModal');
+    if (modal) modal.classList.add('hidden');
   }
 }
 
@@ -298,8 +310,27 @@ function animateMultiHp(result) {
     if (!bar || !fill || !val) return;
 
     const damage = p.damage || 0;
+    const healed = p.healed || 0;
     const afterPct = clamp((p.hp / CONFIG.MAX_HP) * 100, 0, 100);
-    const beforeHp = clamp(p.hp + damage, 0, CONFIG.MAX_HP);
+
+    if (healed > 0) {
+      diff.className = 'hp-diff heal';
+      diff.textContent = `+${formatNumber(healed)} HP`;
+
+      const floatEl = document.createElement('div');
+      floatEl.className = 'hp-floating-damage heal';
+      floatEl.textContent = `+${formatNumber(healed)} HP`;
+      row.appendChild(floatEl);
+      setTimeout(() => floatEl.remove(), 2500);
+
+      fill.style.width = afterPct + '%';
+      if (ghost) ghost.style.width = afterPct + '%';
+      fill.className = 'hp-fill ' + hpColorClass(afterPct);
+      val.textContent = Math.round(p.hp);
+      return;
+    }
+
+    const beforeHp = clamp(p.hp + damage, 0, Math.max(CONFIG.MAX_HP, p.hp + damage));
     const beforePct = clamp((beforeHp / CONFIG.MAX_HP) * 100, 0, 100);
 
     if (damage <= 0) {
@@ -454,11 +485,21 @@ function renderResult(result) {
   if (result.mode === 'solo') {
     title.textContent = `Ronda ${result.round}/${result.total}`;
     title.className = 'panel-title panel-title-neutral';
-    stats.innerHTML = [
+    const rows = [
       statRow('Distancia', result.myDistanceKm != null ? formatKm(result.myDistanceKm) : '—'),
       statRow('Puntos', '+' + formatNumber(result.myScore)),
-      statRow('Total', formatNumber(result.myTotalScore)),
-    ].join('');
+    ];
+    if (result.isPerfect) {
+      const phaseStr = result.blurPhase != null
+        ? (result.blurPhase === 0 ? ' (Enfocado)' : ` (Fase ${result.blurPhase}/5)`)
+        : '';
+      rows.push(statRow('⭐ ¡PERFECT!', `≤ 25m${phaseStr}`));
+    }
+    if (result.perfectStreak >= 2) {
+      rows.push(`<div class="stat-row stat-streak"><span class="stat-label">🔥 Racha Perfects</span><span class="stat-value">x${result.perfectStreak}</span></div>`);
+    }
+    rows.push(statRow('Total', formatNumber(result.myTotalScore)));
+    stats.innerHTML = rows.join('');
     nextBtn.classList.remove('hidden');
     nextBtn.textContent = result.round >= result.total ? 'Ver resultados →' : 'Siguiente ronda →';
     note.classList.add('hidden');
@@ -477,16 +518,23 @@ function renderResult(result) {
 
     stats.innerHTML = result.players.map((p, i) => {
       const color = colors[i % colors.length];
-      const isPerfect = p.damage <= 0;
-      const damageBadge = p.damage > 0
-        ? `<span class="res-damage-badge hit">Pierde: -${formatNumber(p.damage)} pts</span>`
-        : `<span class="res-damage-badge safe">⭐ ¡A salvo! 0 pts</span>`;
+      let damageBadge = '';
+      if (p.healed && p.healed > 0) {
+        damageBadge = `<span class="res-damage-badge heal">💚 Cura: +${formatNumber(p.healed)} HP</span>`;
+      } else if (p.damage > 0) {
+        damageBadge = `<span class="res-damage-badge hit">Pierde: -${formatNumber(p.damage)} pts</span>`;
+      } else {
+        damageBadge = `<span class="res-damage-badge safe">⭐ ¡A salvo! 0 pts</span>`;
+      }
+      const streakBadge = (p.perfectStreak && p.perfectStreak >= 2)
+        ? `<span class="res-streak-badge">🔥 x${p.perfectStreak}</span>`
+        : '';
       return `
         <div class="res-multi-row">
           <div class="res-multi-info">
             <div class="res-multi-name" style="color:${color};">
               <span class="res-color-dot" style="background:${color};"></span>
-              ${escapeHtml(p.name)} ${isPerfect ? '⭐' : ''}
+              ${escapeHtml(p.name)} ${p.isPerfect ? '⭐' : ''} ${streakBadge}
             </div>
             <div class="res-multi-meta">
               ${p.guess ? `+${formatNumber(p.score)} pts · ${p.distance != null ? formatKm(p.distance) : ''}` : '<span class="res-no-guess">⚠️ No adivinó a tiempo</span>'}
@@ -567,6 +615,10 @@ function resetGuessUI() {
   $('#prepareBanner').classList.add('hidden');
   const tempBanner = $('#temporalBanner');
   if (tempBanner) tempBanner.classList.add('hidden');
+  const tunnelBanner = $('#tunnelBanner');
+  if (tunnelBanner) tunnelBanner.classList.add('hidden');
+  const blurBanner = $('#blurBanner');
+  if (blurBanner) blurBanner.classList.add('hidden');
   $('#hudTimer').classList.remove('prepare');
   $('#confirmBtn').disabled = true;
   if (pano) {
@@ -579,6 +631,8 @@ function resetGameUI() {
   if (pano) {
     pano.setBlind(false);
     pano.setStatic(false);
+    if (typeof pano.setTunnelMode === 'function') pano.setTunnelMode(false);
+    if (typeof pano.setBlurMode === 'function') pano.setBlurMode(false);
   }
   const hudTop = $('.hud-top');
   if (hudTop) hudTop.classList.remove('over-map');
@@ -683,11 +737,20 @@ function renderLobby() {
   const limit = net.limit || CONFIG.ROOM_MAX_PLAYERS;
   $('#playersCount').textContent = `${displayPlayers.length} / ${limit}`;
 
+  const chatBadge = $('#chatPlayersCountBadge');
+  if (chatBadge) {
+    chatBadge.textContent = `${displayPlayers.length} en línea`;
+  }
+
   const roundsInfo = $('#roomRoundsInfo');
   if (roundsInfo) {
     let modeText = 'Modo Normal';
     if (net.gameMode === 'static') modeText = 'Modo Estático';
     else if (net.gameMode === 'temporal') modeText = `Modo Temporal (${net.temporalSeconds || 3}s)`;
+    else if (net.gameMode === 'tunnel') modeText = `Zoom Progresivo (${net.tunnelSeconds || 3}s)`;
+    else if (net.gameMode === 'static_tunnel') modeText = `Estático con Zoom (${net.tunnelSeconds || 3}s)`;
+    else if (net.gameMode === 'blur') modeText = `Normal Borroso (${net.blurSeconds || 3}s)`;
+    else if (net.gameMode === 'static_blur') modeText = `Estático Borroso (${net.blurSeconds || 3}s)`;
     roundsInfo.textContent = `${modeText} · ${net.rounds || CONFIG.DUEL_ROUNDS} rondas`;
   }
 
@@ -725,6 +788,259 @@ function renderLobby() {
     }
   } else {
     note.textContent = 'Esperando a que el anfitrión inicie la partida…';
+  }
+}
+
+/* -------------------------- Chat Grupal del Lobby -------------------------- */
+const typingUsers = new Map(); // key -> { name, timeoutId }
+let myTypingTimeout = null;
+let isMyTyping = false;
+
+function formatLocalTime(ts) {
+  const d = ts ? new Date(ts) : new Date();
+  const hours = String(d.getHours()).padStart(2, '0');
+  const minutes = String(d.getMinutes()).padStart(2, '0');
+  return `${hours}:${minutes}`;
+}
+
+function appendLobbyChatMessage({ senderName, text, timestamp, isMe = false, isSystem = false }) {
+  const list = $('#chatMessagesList');
+  if (!list) return;
+
+  const msgDiv = document.createElement('div');
+  const roleClass = isSystem ? 'msg-system' : (isMe ? 'msg-me' : 'msg-other');
+  msgDiv.className = `chat-msg ${roleClass}`;
+
+  if (isSystem) {
+    const bodyDiv = document.createElement('div');
+    bodyDiv.className = 'msg-body';
+    bodyDiv.textContent = text;
+    msgDiv.appendChild(bodyDiv);
+  } else {
+    const metaDiv = document.createElement('div');
+    metaDiv.className = 'msg-header';
+
+    const senderSpan = document.createElement('span');
+    senderSpan.className = 'msg-author';
+    senderSpan.textContent = senderName;
+
+    const timeSpan = document.createElement('span');
+    timeSpan.className = 'msg-time';
+    timeSpan.textContent = formatLocalTime(timestamp);
+
+    metaDiv.appendChild(senderSpan);
+    metaDiv.appendChild(timeSpan);
+
+    const bodyDiv = document.createElement('div');
+    bodyDiv.className = 'msg-body';
+    bodyDiv.textContent = text;
+
+    msgDiv.appendChild(metaDiv);
+    msgDiv.appendChild(bodyDiv);
+  }
+
+  list.appendChild(msgDiv);
+
+  // Auto-scroll al final del contenedor de mensajes
+  const wrap = $('#chatMessagesWrap');
+  if (wrap) {
+    wrap.scrollTop = wrap.scrollHeight;
+  }
+}
+
+function sendLobbyChatMessage() {
+  const input = $('#chatInput');
+  if (!input) return;
+  const rawText = input.value.trim();
+  if (!rawText) return;
+
+  const text = rawText.slice(0, 200);
+  input.value = '';
+
+  // Cancelar indicador de escritura local
+  notifyMyTyping(false);
+
+  const timestamp = Date.now();
+  const senderName = meName || 'Anónimo';
+
+  appendLobbyChatMessage({
+    senderName,
+    text,
+    timestamp,
+    isMe: true,
+  });
+
+  const payload = {
+    type: 'lobbyChat',
+    senderName,
+    text,
+    timestamp,
+    senderId: net.myId || 'me',
+  };
+
+  if (net.role === 'host') {
+    net.broadcast(payload);
+  } else if (net.role === 'guest') {
+    net.send(payload);
+  }
+}
+
+function notifyMyTyping(isTyping) {
+  if (isMyTyping === isTyping) return;
+  isMyTyping = isTyping;
+
+  const payload = {
+    type: 'lobbyTyping',
+    senderName: meName || 'Anónimo',
+    isTyping,
+    senderId: net.myId || 'me',
+  };
+
+  if (net.role === 'host') {
+    net.broadcast(payload);
+  } else if (net.role === 'guest') {
+    net.send(payload);
+  }
+}
+
+function onChatInputChange() {
+  const input = $('#chatInput');
+  if (!input) return;
+
+  if (input.value.trim().length > 0) {
+    notifyMyTyping(true);
+    clearTimeout(myTypingTimeout);
+    myTypingTimeout = setTimeout(() => {
+      notifyMyTyping(false);
+    }, 2500);
+  } else {
+    clearTimeout(myTypingTimeout);
+    notifyMyTyping(false);
+  }
+}
+
+function handleLobbyChatMsg(data, fromPeerId) {
+  if (!data) return;
+
+  // Si somos host y el mensaje vino de un invitado, retransmitir a los demás invitados
+  if (net.role === 'host') {
+    net.broadcast(data, fromPeerId);
+  }
+
+  // Quitar al remitente del indicador de tipeo
+  const typingKey = fromPeerId || data.senderId || data.senderName;
+  if (typingKey && typingUsers.has(typingKey)) {
+    const existing = typingUsers.get(typingKey);
+    if (existing && existing.timeoutId) clearTimeout(existing.timeoutId);
+    typingUsers.delete(typingKey);
+    renderTypingIndicator();
+  }
+
+  // Ignorar ecos propios si llegaran a reflejarse
+  if (data.senderId === net.myId || (data.senderName === meName && !data.isSystem)) {
+    return;
+  }
+
+  appendLobbyChatMessage({
+    senderName: data.senderName || 'Anónimo',
+    text: data.text || '',
+    timestamp: data.timestamp || Date.now(),
+    isMe: false,
+    isSystem: !!data.isSystem,
+  });
+
+  // Notificación de sonido sutil si está habilitado
+  if (audio && audio.enabled && typeof audio.click === 'function') {
+    try { audio.click(); } catch (e) {}
+  }
+}
+
+function handleLobbyTypingMsg(data, fromPeerId) {
+  const key = fromPeerId || data.senderId || data.senderName;
+  if (!key || key === net.myId) return;
+
+  // Si somos host, retransmitir a los demás invitados
+  if (net.role === 'host') {
+    net.broadcast({
+      type: 'lobbyTyping',
+      senderName: data.senderName,
+      isTyping: data.isTyping,
+      senderId: key,
+    }, fromPeerId);
+  }
+
+  if (data.isTyping) {
+    const existing = typingUsers.get(key);
+    if (existing && existing.timeoutId) clearTimeout(existing.timeoutId);
+
+    const timeoutId = setTimeout(() => {
+      typingUsers.delete(key);
+      renderTypingIndicator();
+    }, 3200);
+
+    typingUsers.set(key, { name: data.senderName, timeoutId });
+  } else {
+    const existing = typingUsers.get(key);
+    if (existing && existing.timeoutId) clearTimeout(existing.timeoutId);
+    typingUsers.delete(key);
+  }
+
+  renderTypingIndicator();
+}
+
+function renderTypingIndicator() {
+  const indicator = $('#chatTypingIndicator');
+  const nameText = $('#typingNameText');
+  if (!indicator || !nameText) return;
+
+  const names = Array.from(typingUsers.values()).map(u => u.name);
+  if (names.length === 0) {
+    indicator.classList.add('hidden');
+  } else {
+    indicator.classList.remove('hidden');
+    if (names.length === 1) {
+      nameText.textContent = `${names[0]} está escribiendo…`;
+    } else if (names.length === 2) {
+      nameText.textContent = `${names[0]} y ${names[1]} están escribiendo…`;
+    } else {
+      nameText.textContent = 'Varios jugadores están escribiendo…';
+    }
+  }
+}
+
+function destroyLobbyChat() {
+  // Limpiar temporizador de mi propio tipeo
+  if (myTypingTimeout) {
+    clearTimeout(myTypingTimeout);
+    myTypingTimeout = null;
+  }
+  isMyTyping = false;
+
+  // Limpiar temporizadores de tipeo de otros usuarios
+  for (const [, user] of typingUsers.entries()) {
+    if (user && user.timeoutId) clearTimeout(user.timeoutId);
+  }
+  typingUsers.clear();
+
+  // Ocultar indicador
+  const indicator = $('#chatTypingIndicator');
+  if (indicator) indicator.classList.add('hidden');
+
+  // Limpiar input de texto y ocultar teclado móvil
+  const input = $('#chatInput');
+  if (input) {
+    input.value = '';
+    try { input.blur(); } catch (e) {}
+  }
+
+  // Destruir historial del chat y resetear a estado limpio
+  const list = $('#chatMessagesList');
+  if (list) {
+    list.innerHTML = `
+      <div class="chat-msg msg-system">
+        <div class="msg-body">¡Bienvenidos a la sala! Puedes chatear antes de iniciar.</div>
+      </div>
+    `;
   }
 }
 
@@ -828,7 +1144,19 @@ function renderPublicList(rooms) {
     const rounds = Number(room.rounds) || 5;
 
     let modeLabel = '🎮 Normal';
-    if (room.gameMode === 'static') {
+    if (room.gameMode === 'static_tunnel') {
+      const secs = Number(room.tunnelSeconds) || 3;
+      modeLabel = `🛑 Estático + 🔍 Zoom (${secs}s)`;
+    } else if (room.gameMode === 'tunnel') {
+      const secs = Number(room.tunnelSeconds) || 3;
+      modeLabel = `🎮 Normal + 🔍 Zoom (${secs}s)`;
+    } else if (room.gameMode === 'static_blur') {
+      const secs = Number(room.blurSeconds) || 3;
+      modeLabel = `🛑 Estático + 🌫️ Borroso (${secs}s)`;
+    } else if (room.gameMode === 'blur') {
+      const secs = Number(room.blurSeconds) || 3;
+      modeLabel = `🎮 Normal + 🌫️ Borroso (${secs}s)`;
+    } else if (room.gameMode === 'static') {
       modeLabel = '🛑 Estático';
     } else if (room.gameMode === 'temporal') {
       const secs = Number(room.temporalSeconds) || 3;
@@ -906,7 +1234,7 @@ function handleHostDeparture(reason) {
     // Si es 1vs1 y el anfitrión abandona la partida, el jugador restante gana por abandono
     game.abort();
     leaveEverything();
-    resetToMenu('¡Victoria por abandono! El anfitrión abandonó la partida.');
+    resetToMenu('¡Victoria por abandono! El anfitrión abandonó la partida.', 'info');
     return;
   }
   leaveEverything();
@@ -926,6 +1254,14 @@ function handleNetMessage(data, fromPeerId) {
     // independientemente del orden en que llegue el estado 'guest'.
     if (net.role === 'guest' && game.state === 'idle') showScreen('lobby');
     renderLobby();
+    return;
+  }
+  if (data.type === 'lobbyChat') {
+    handleLobbyChatMsg(data, fromPeerId);
+    return;
+  }
+  if (data.type === 'lobbyTyping') {
+    handleLobbyTypingMsg(data, fromPeerId);
     return;
   }
   if (data.type === 'start') {
@@ -953,6 +1289,7 @@ async function guestPrepareStart() {
     await ensureData();
     showScreen('game');
     resetGameUI();
+    destroyLobbyChat();
     await ensureViewers();
     // Cortina activa para evitar cualquier destello de vista previa antes de que el host ordene comenzar
     pano.setBlind(true, 'Sincronizando jugadores…', 'Esperando inicio de ronda…', true);
@@ -969,10 +1306,20 @@ async function guestPrepareStart() {
 let soloRounds = 5;
 let leaderboardRounds = 5;
 let leaderboardMode = 'normal';
+
 let currentSoloMode = 'normal';
+let soloNormalVariant = 'standard';
+let soloStaticVariant = 'standard';
 let currentSoloTemporalSecs = CONFIG.DEFAULT_TEMPORAL_SECONDS || 3;
+let currentSoloTunnelSecs = CONFIG.DEFAULT_TUNNEL_SECONDS || 3;
+let currentSoloBlurSecs = CONFIG.DEFAULT_BLUR_SECONDS || 3;
+
 let currentMultiMode = 'normal';
+let multiNormalVariant = 'standard';
+let multiStaticVariant = 'standard';
 let currentMultiTemporalSecs = CONFIG.DEFAULT_TEMPORAL_SECONDS || 3;
+let currentMultiTunnelSecs = CONFIG.DEFAULT_TUNNEL_SECONDS || 3;
+let currentMultiBlurSecs = CONFIG.DEFAULT_BLUR_SECONDS || 3;
 
 async function startSolo(rounds = soloRounds) {
   soloRounds = rounds;
@@ -986,7 +1333,18 @@ async function startSolo(rounds = soloRounds) {
     await ensureViewers();
     setTimeout(() => pano.refresh(), 60);
     game.meName = meName;
-    game.startSolo(rounds, currentSoloMode, currentSoloTemporalSecs);
+
+    const isZoom = (currentSoloMode === 'normal' && soloNormalVariant === 'zoom') ||
+                   (currentSoloMode === 'static' && soloStaticVariant === 'zoom');
+    const isBlur = (currentSoloMode === 'normal' && soloNormalVariant === 'blur') ||
+                   (currentSoloMode === 'static' && soloStaticVariant === 'blur');
+    let effectiveMode = currentSoloMode;
+    if (currentSoloMode === 'normal' && isZoom) effectiveMode = 'tunnel';
+    if (currentSoloMode === 'static' && isZoom) effectiveMode = 'static_tunnel';
+    if (currentSoloMode === 'normal' && isBlur) effectiveMode = 'blur';
+    if (currentSoloMode === 'static' && isBlur) effectiveMode = 'static_blur';
+
+    game.startSolo(rounds, effectiveMode, currentSoloTemporalSecs, currentSoloTunnelSecs, isZoom, currentSoloBlurSecs, isBlur);
   } catch (err) {
     showError('Error al cargar: ' + err.message);
     showScreen('menu');
@@ -1000,6 +1358,18 @@ async function hostStartGame() {
     return;
   }
   $('#startBtn').disabled = true;
+
+  // Notificar en el chat del lobby tanto localmente como a todos los invitados
+  const startChatMsg = {
+    type: 'lobbyChat',
+    senderName: 'Sistema',
+    text: '🚀 Iniciando partida…',
+    timestamp: Date.now(),
+    isSystem: true,
+  };
+  appendLobbyChatMessage(startChatMsg);
+  net.broadcast(startChatMsg);
+
   net.updateRoomStatus('in_progress');
   try {
     setLoadingText('Preparando partida…');
@@ -1007,10 +1377,22 @@ async function hostStartGame() {
     await ensureData();
     showScreen('game');
     resetGameUI();
+    destroyLobbyChat();
     await ensureViewers();
     setTimeout(() => pano.refresh(), 60);
     game.meName = meName;
-    game.hostStart(currentMultiMode, currentMultiTemporalSecs);
+
+    const isZoom = (currentMultiMode === 'normal' && multiNormalVariant === 'zoom') ||
+                   (currentMultiMode === 'static' && multiStaticVariant === 'zoom');
+    const isBlur = (currentMultiMode === 'normal' && multiNormalVariant === 'blur') ||
+                   (currentMultiMode === 'static' && multiStaticVariant === 'blur');
+    let effectiveMode = currentMultiMode;
+    if (currentMultiMode === 'normal' && isZoom) effectiveMode = 'tunnel';
+    if (currentMultiMode === 'static' && isZoom) effectiveMode = 'static_tunnel';
+    if (currentMultiMode === 'normal' && isBlur) effectiveMode = 'blur';
+    if (currentMultiMode === 'static' && isBlur) effectiveMode = 'static_blur';
+
+    game.hostStart(effectiveMode, currentMultiTemporalSecs, currentMultiTunnelSecs, isZoom, currentMultiBlurSecs, isBlur);
   } catch (err) {
     net.updateRoomStatus('waiting');
     showError('Error al cargar: ' + err.message);
@@ -1021,14 +1403,30 @@ async function hostStartGame() {
 
 function createRoom(isPublic = false) {
   audio.ensure();
+  destroyLobbyChat();
   const rounds = Number($('#roomRounds').value) || CONFIG.DUEL_ROUNDS;
   const limit = Number($('#roomLimit').value) || CONFIG.ROOM_MAX_PLAYERS;
-  LOG('createRoom', { isPublic, meName, rounds, limit, currentMultiMode, currentMultiTemporalSecs });
+
+  const isZoom = (currentMultiMode === 'normal' && multiNormalVariant === 'zoom') ||
+                 (currentMultiMode === 'static' && multiStaticVariant === 'zoom');
+  const isBlur = (currentMultiMode === 'normal' && multiNormalVariant === 'blur') ||
+                 (currentMultiMode === 'static' && multiStaticVariant === 'blur');
+  let effectiveMode = currentMultiMode;
+  if (currentMultiMode === 'normal' && isZoom) effectiveMode = 'tunnel';
+  if (currentMultiMode === 'static' && isZoom) effectiveMode = 'static_tunnel';
+  if (currentMultiMode === 'normal' && isBlur) effectiveMode = 'blur';
+  if (currentMultiMode === 'static' && isBlur) effectiveMode = 'static_blur';
+
+  LOG('createRoom', { isPublic, meName, rounds, limit, effectiveMode, isZoom, isBlur, currentMultiTemporalSecs, currentMultiTunnelSecs, currentMultiBlurSecs });
   net.createRoom(meName, isPublic, {
     rounds,
     limit,
-    gameMode: currentMultiMode,
+    gameMode: effectiveMode,
+    zoomMode: isZoom,
+    blurMode: isBlur,
     temporalSeconds: currentMultiTemporalSecs,
+    tunnelSeconds: currentMultiTunnelSecs,
+    blurSeconds: currentMultiBlurSecs,
   });
 }
 
@@ -1047,6 +1445,9 @@ function persistActiveRoom() {
     limit: net.limit,
     gameMode: net.gameMode,
     temporalSeconds: net.temporalSeconds,
+    tunnelSeconds: net.tunnelSeconds,
+    blurSeconds: net.blurSeconds,
+    blurMode: net.blurMode,
   }));
 }
 
@@ -1108,12 +1509,14 @@ async function deleteRoom() {
 
 function joinRoom(code) {
   LOG('joinRoom (app)', { code, meName });
+  destroyLobbyChat();
   game.meName = meName;
   audio.ensure();
   net.joinRoom(code, meName);
 }
 
 function resetToMenu(message, kind = 'error') {
+  destroyLobbyChat();
   try {
     game.abort();
   } catch (e) {
@@ -1141,6 +1544,7 @@ function resetToMenu(message, kind = 'error') {
 }
 
 function leaveEverything() {
+  destroyLobbyChat();
   localStorage.removeItem(ROOM_KEY);
   try {
     net.leave();
@@ -1175,8 +1579,10 @@ function wire() {
     meName = name;
     game.meName = name;
     localStorage.setItem(PLAYER_KEY, name);
+    audio.userInteracted = true;
     audio.ensure();
     audio.click();
+    audio.startMenuMusic();
     $('#menuPlayerName').textContent = meName;
     showScreen('menu');
   };
@@ -1189,6 +1595,7 @@ function wire() {
   $('#soloBtn').addEventListener('click', () => {
     audio.ensure();
     showScreen('solo');
+    updateSoloModeUI();
   });
   $('#createBtn').addEventListener('click', () => {
     audio.ensure();
@@ -1208,23 +1615,113 @@ function wire() {
   });
 
   // --- Modos de juego (solitario) ---
+  function updateSoloModeUI() {
+    const isNormalZoom = currentSoloMode === 'normal' && soloNormalVariant === 'zoom';
+    const isStaticZoom = currentSoloMode === 'static' && soloStaticVariant === 'zoom';
+    const hasZoom = isNormalZoom || isStaticZoom;
+
+    const isNormalBlur = currentSoloMode === 'normal' && soloNormalVariant === 'blur';
+    const isStaticBlur = currentSoloMode === 'static' && soloStaticVariant === 'blur';
+    const hasBlur = isNormalBlur || isStaticBlur;
+
+    const normalSub = $('#soloNormalSubmode');
+    if (normalSub) normalSub.classList.toggle('hidden', currentSoloMode !== 'normal');
+
+    const staticSub = $('#soloStaticSubmode');
+    if (staticSub) staticSub.classList.toggle('hidden', currentSoloMode !== 'static');
+
+    const tempConf = $('#soloTemporalConfig');
+    if (tempConf) tempConf.classList.toggle('hidden', currentSoloMode !== 'temporal');
+
+    const tunnelConf = $('#soloTunnelConfig');
+    if (tunnelConf) tunnelConf.classList.toggle('hidden', !hasZoom);
+
+    const blurConf = $('#soloBlurConfig');
+    if (blurConf) blurConf.classList.toggle('hidden', !hasBlur);
+
+    const descEl = $('#soloModeDesc');
+    if (descEl) {
+      if (currentSoloMode === 'normal') {
+        if (isNormalZoom) {
+          descEl.textContent = 'Modo Normal con Zoom: Mueve la vista 360°, pero la imagen inicia con zoom telescópico y se aleja paso a paso.';
+        } else if (isNormalBlur) {
+          descEl.textContent = 'Modo Normal Borroso: Mueve la vista 360° sin zoom. La imagen inicia 100% desenfocada y se aclara por etapas.';
+        } else {
+          descEl.textContent = 'Modo Normal estándar: Mueve la vista 360° y haz zoom libremente.';
+        }
+      } else if (currentSoloMode === 'static') {
+        if (isStaticZoom) {
+          descEl.textContent = 'Modo Estático con Zoom: Vista fija hacia adelante, e inicia con zoom telescópico que se aleja paso a paso.';
+        } else if (isStaticBlur) {
+          descEl.textContent = 'Modo Estático Borroso: Vista fija hacia adelante sin zoom. La imagen inicia 100% desenfocada y se aclara por etapas.';
+        } else {
+          descEl.textContent = 'Modo Estático estándar: Vista fija hacia adelante. ¡Sin rotar ni desplazarte!';
+        }
+      } else if (currentSoloMode === 'temporal') {
+        descEl.textContent = 'Modo Temporal: La imagen desaparece tras unos segundos. ¡Memoriza rápido!';
+      }
+    }
+
+    // Actualiza dinámicamente los tiempos en las pestañas (+1 min en Zoom y Borroso)
+    const times = (hasZoom || hasBlur)
+      ? { 5: '⏱️ 2:45', 7: '⏱️ 3:00', 10: '⏱️ 3:30', 15: '⏱️ 4:30' }
+      : { 5: '⏱️ 1:45', 7: '⏱️ 2:00', 10: '⏱️ 2:30', 15: '⏱️ 3:30' };
+
+    document.querySelectorAll('#soloRoundsSelector .round-tab').forEach((btn) => {
+      const r = Number(btn.dataset.rounds);
+      const sub = btn.querySelector('.round-tab-sub');
+      if (sub && times[r]) {
+        sub.textContent = times[r];
+      }
+    });
+  }
+
   document.querySelectorAll('#soloModeSelector .mode-tab').forEach((btn) => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('#soloModeSelector .mode-tab').forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
       currentSoloMode = btn.dataset.mode || 'normal';
-      const desc = CONFIG.GAME_MODES[currentSoloMode]?.desc || '';
-      const descEl = $('#soloModeDesc');
-      if (descEl) descEl.textContent = desc;
-      const tempConf = $('#soloTemporalConfig');
-      if (tempConf) tempConf.classList.toggle('hidden', currentSoloMode !== 'temporal');
+      updateSoloModeUI();
     });
   });
+
+  document.querySelectorAll('#soloNormalSubTabs .submode-tab').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#soloNormalSubTabs .submode-tab').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      soloNormalVariant = btn.dataset.variant || 'standard';
+      updateSoloModeUI();
+    });
+  });
+
+  document.querySelectorAll('#soloStaticSubTabs .submode-tab').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#soloStaticSubTabs .submode-tab').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      soloStaticVariant = btn.dataset.variant || 'standard';
+      updateSoloModeUI();
+    });
+  });
+
   document.querySelectorAll('#soloTempPills .pill-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('#soloTempPills .pill-btn').forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
       currentSoloTemporalSecs = Number(btn.dataset.sec) || 3;
+    });
+  });
+  document.querySelectorAll('#soloTunnelPills .pill-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#soloTunnelPills .pill-btn').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentSoloTunnelSecs = Number(btn.dataset.sec) || 3;
+    });
+  });
+  document.querySelectorAll('#soloBlurPills .pill-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#soloBlurPills .pill-btn').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentSoloBlurSecs = Number(btn.dataset.sec) || 3;
     });
   });
 
@@ -1274,24 +1771,138 @@ function wire() {
   $('#leaderboardBackBtn').addEventListener('click', () => showScreen('menu'));
 
   // --- Modos de juego (multijugador / crear sala) ---
+  function updateMultiModeUI() {
+    const isNormalZoom = currentMultiMode === 'normal' && multiNormalVariant === 'zoom';
+    const isStaticZoom = currentMultiMode === 'static' && multiStaticVariant === 'zoom';
+    const hasZoom = isNormalZoom || isStaticZoom;
+
+    const isNormalBlur = currentMultiMode === 'normal' && multiNormalVariant === 'blur';
+    const isStaticBlur = currentMultiMode === 'static' && multiStaticVariant === 'blur';
+    const hasBlur = isNormalBlur || isStaticBlur;
+
+    const normalSub = $('#multiNormalSubmode');
+    if (normalSub) normalSub.classList.toggle('hidden', currentMultiMode !== 'normal');
+
+    const staticSub = $('#multiStaticSubmode');
+    if (staticSub) staticSub.classList.toggle('hidden', currentMultiMode !== 'static');
+
+    const tempConf = $('#multiTemporalConfig');
+    if (tempConf) tempConf.classList.toggle('hidden', currentMultiMode !== 'temporal');
+
+    const tunnelConf = $('#multiTunnelConfig');
+    if (tunnelConf) tunnelConf.classList.toggle('hidden', !hasZoom);
+
+    const blurConf = $('#multiBlurConfig');
+    if (blurConf) blurConf.classList.toggle('hidden', !hasBlur);
+
+    const descEl = $('#multiModeDesc');
+    if (descEl) {
+      if (currentMultiMode === 'normal') {
+        if (isNormalZoom) {
+          descEl.textContent = 'Modo Normal con Zoom: Todos juegan con vista 360° y zoom sincronizado que se aleja al mismo tiempo.';
+        } else if (isNormalBlur) {
+          descEl.textContent = 'Modo Normal Borroso: Todos juegan con vista 360° y desenfoque progresivo sincronizado.';
+        } else {
+          descEl.textContent = 'Modo Normal estándar: Mueve la vista 360° y haz zoom libremente.';
+        }
+      } else if (currentMultiMode === 'static') {
+        if (isStaticZoom) {
+          descEl.textContent = 'Modo Estático con Zoom: Vista fija hacia adelante sin rotar, y zoom sincronizado para todos.';
+        } else if (isStaticBlur) {
+          descEl.textContent = 'Modo Estático Borroso: Vista fija hacia adelante sin zoom, y desenfoque progresivo sincronizado.';
+        } else {
+          descEl.textContent = 'Modo Estático estándar: Vista fija hacia adelante. ¡Sin rotar ni desplazarte!';
+        }
+      } else if (currentMultiMode === 'temporal') {
+        descEl.textContent = 'Modo Temporal: La imagen desaparece tras unos segundos. ¡Memoriza rápido!';
+      }
+    }
+  }
+
   document.querySelectorAll('#multiModeSelector .mode-tab').forEach((btn) => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('#multiModeSelector .mode-tab').forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
       currentMultiMode = btn.dataset.mode || 'normal';
-      const desc = CONFIG.GAME_MODES[currentMultiMode]?.desc || '';
-      const descEl = $('#multiModeDesc');
-      if (descEl) descEl.textContent = desc;
-      const tempConf = $('#multiTemporalConfig');
-      if (tempConf) tempConf.classList.toggle('hidden', currentMultiMode !== 'temporal');
+      updateMultiModeUI();
     });
   });
+
+  document.querySelectorAll('#multiNormalSubTabs .submode-tab').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#multiNormalSubTabs .submode-tab').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      multiNormalVariant = btn.dataset.variant || 'standard';
+      updateMultiModeUI();
+    });
+  });
+
+  document.querySelectorAll('#multiStaticSubTabs .submode-tab').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#multiStaticSubTabs .submode-tab').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      multiStaticVariant = btn.dataset.variant || 'standard';
+      updateMultiModeUI();
+    });
+  });
+
   document.querySelectorAll('#multiTempPills .pill-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('#multiTempPills .pill-btn').forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
       currentMultiTemporalSecs = Number(btn.dataset.sec) || 3;
     });
+  });
+  document.querySelectorAll('#multiTunnelPills .pill-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#multiTunnelPills .pill-btn').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentMultiTunnelSecs = Number(btn.dataset.sec) || 3;
+    });
+  });
+  document.querySelectorAll('#multiBlurPills .pill-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#multiBlurPills .pill-btn').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentMultiBlurSecs = Number(btn.dataset.sec) || 3;
+    });
+  });
+
+  // --- Historial de versiones (Changelog Modal) ---
+  const changelogModal = $('#changelogModal');
+  const openChangelog = () => {
+    if (changelogModal) {
+      changelogModal.classList.remove('hidden');
+      audio.ensure();
+      audio.click();
+    }
+  };
+  const closeChangelog = () => {
+    if (changelogModal) {
+      changelogModal.classList.add('hidden');
+      audio.ensure();
+      audio.click();
+    }
+  };
+
+  const changelogBtn = $('#changelogBtn');
+  if (changelogBtn) changelogBtn.addEventListener('click', openChangelog);
+
+  const changelogCloseBtn = $('#changelogCloseBtn');
+  if (changelogCloseBtn) changelogCloseBtn.addEventListener('click', closeChangelog);
+
+  const changelogCloseBtnBottom = $('#changelogCloseBtnBottom');
+  if (changelogCloseBtnBottom) changelogCloseBtnBottom.addEventListener('click', closeChangelog);
+
+  if (changelogModal) {
+    changelogModal.addEventListener('click', (e) => {
+      if (e.target === changelogModal) closeChangelog();
+    });
+  }
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && changelogModal && !changelogModal.classList.contains('hidden')) {
+      closeChangelog();
+    }
   });
 
   // --- Visibilidad de sala (pública / privada) ---
@@ -1356,9 +1967,17 @@ function wire() {
     soundBtn.textContent = audio.enabled ? '🔊' : '🔇';
   };
   soundBtn.addEventListener('click', () => {
+    audio.userInteracted = true;
     audio.ensure();
     audio.toggle();
     updateSoundBtn();
+    const isMenu = ['name', 'menu', 'solo', 'create', 'join', 'leaderboard', 'lobby'].some((s) => {
+      const el = document.getElementById('screen-' + s);
+      return el && !el.classList.contains('hidden');
+    });
+    if (audio.enabled && isMenu) {
+      audio.startMenuMusic();
+    }
   });
   updateSoundBtn();
 
@@ -1434,8 +2053,53 @@ function wire() {
     copy(code);
   });
 
+  // --- Chat del Lobby ---
+  const chatInput = $('#chatInput');
+  const chatSendBtn = $('#chatSendBtn');
+  if (chatSendBtn) {
+    chatSendBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      audio.ensure();
+      sendLobbyChatMessage();
+    });
+  }
+  if (chatInput) {
+    chatInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        audio.ensure();
+        sendLobbyChatMessage();
+      }
+    });
+    chatInput.addEventListener('input', onChatInputChange);
+  }
+
   // --- Juego ---
+  const recoverBtn = $('#panoRecoverBtn');
+  if (recoverBtn) {
+    recoverBtn.addEventListener('click', () => {
+      audio.ensure();
+      audio.click();
+      if (game) game.recoverPano();
+      showToast('🔄 Panorámica recargada', 'info', 1800);
+    });
+  }
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'r' || e.key === 'R') {
+      const activeTag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
+      if (activeTag === 'input' || activeTag === 'textarea') return;
+      if (gameInProgress() && game) {
+        game.recoverPano();
+        showToast('🔄 Panorámica recargada', 'info', 1800);
+      }
+    }
+  });
+
   $('#confirmBtn').addEventListener('click', () => {
+    if (!game.hasPick()) {
+      showToast('Coloca tu chincheta en el mapa antes de confirmar', 'error');
+      return;
+    }
     collapseMinimap();
     game.confirmGuess();
   });
@@ -1591,6 +2255,91 @@ function wireGame() {
       expandMinimap(true);
     }
   });
+  game.on('tunnelProgress', (data) => {
+    const banner = $('#tunnelBanner');
+    if (!banner) return;
+    if (!data || data.isFinished) {
+      banner.classList.add('hidden');
+      return;
+    }
+    banner.classList.remove('hidden');
+    const badge = $('#tunnelStepBadge');
+    if (badge) {
+      const stepNames = { 4: '4/4 (MÁXIMO)', 3: '3/4 (MEDIO ALTO)', 2: '2/4 (MEDIO)', 1: '1/4 (NORMAL)' };
+      badge.textContent = `🔍 ZOOM ${stepNames[data.step] || (data.step + '/4')}`;
+    }
+    const bonusTag = $('#tunnelBonusTag');
+    if (bonusTag) {
+      const bonuses = { 4: 'HASTA +1,500 PTS', 3: 'HASTA +750 PTS', 2: 'HASTA +250 PTS', 1: 'SIN BONUS (5,000 PTS)' };
+      bonusTag.textContent = bonuses[data.step] || 'BONUS';
+    }
+    const bar = $('#tunnelProgressBar');
+    if (bar) {
+      bar.style.width = `${Math.max(0, Math.min(100, data.progressPercent))}%`;
+    }
+    const nextLabel = $('#tunnelNextLabel');
+    const countdown = $('#tunnelCountdown');
+    if (countdown) {
+      if (data.step === 1) {
+        if (nextLabel) nextLabel.textContent = 'Estado:';
+        countdown.textContent = 'Zoom mínimo';
+      } else {
+        if (nextLabel) nextLabel.textContent = 'Siguiente zoom en';
+        const secs = Number(data.timeLeft) || 0;
+        countdown.textContent = `${secs.toFixed(1)}s`;
+      }
+    }
+  });
+  game.on('blurProgress', (data) => {
+    const banner = $('#blurBanner');
+    if (!banner) return;
+    if (!data || data.isFinished) {
+      banner.classList.add('hidden');
+      return;
+    }
+    banner.classList.remove('hidden');
+    const phase = data.phase !== undefined ? data.phase : (data.step !== undefined ? data.step : 1);
+    const badge = $('#blurStepBadge');
+    if (badge) {
+      const stepNames = {
+        1: '100% (FASE 1/5)',
+        2: '80% (FASE 2/5)',
+        3: '60% (FASE 3/5)',
+        4: '40% (FASE 4/5)',
+        5: '20% (FASE 5/5)',
+        0: '0% (ENFOCADO)',
+      };
+      badge.textContent = `🌫️ BORROSO ${stepNames[phase] || `${phase}/5`}`;
+    }
+    const bonusTag = $('#blurBonusTag');
+    if (bonusTag) {
+      const heals = {
+        1: 'PERFECT: +1,600 HP',
+        2: 'PERFECT: +1,200 HP',
+        3: 'PERFECT: +900 HP',
+        4: 'PERFECT: +600 HP',
+        5: 'PERFECT: +300 HP',
+        0: 'PERFECT: +150 HP',
+      };
+      bonusTag.textContent = heals[phase] || 'PERFECT BONUS';
+    }
+    const bar = $('#blurProgressBar');
+    if (bar) {
+      bar.style.width = `${Math.max(0, Math.min(100, data.progressPercent))}%`;
+    }
+    const nextLabel = $('#blurNextLabel');
+    const countdown = $('#blurCountdown');
+    if (countdown) {
+      if (phase === 0) {
+        if (nextLabel) nextLabel.textContent = 'Estado:';
+        countdown.textContent = 'Enfocado (100%)';
+      } else {
+        if (nextLabel) nextLabel.textContent = 'Enfocando en';
+        const secs = Number(data.timeLeft) || 0;
+        countdown.textContent = `${secs.toFixed(1)}s`;
+      }
+    }
+  });
 }
 
 function wireNet() {
@@ -1642,6 +2391,12 @@ function wireNet() {
 
   net.cb.onGuestLeave = (peerId) => {
     LOG('onGuestLeave', { peerId, role: net.role });
+    if (peerId && typingUsers.has(peerId)) {
+      const user = typingUsers.get(peerId);
+      if (user && user.timeoutId) clearTimeout(user.timeoutId);
+      typingUsers.delete(peerId);
+      renderTypingIndicator();
+    }
     if (net.role === 'host') {
       players = net.players;
       renderLobby();
@@ -1704,7 +2459,20 @@ function wireNet() {
 function boot() {
   detectPotatoMode();
   const versionBadge = $('#versionBadge');
-  if (versionBadge) versionBadge.textContent = CONFIG.VERSION || 'BETA v1.4.2';
+  if (versionBadge) {
+    versionBadge.textContent = CONFIG.VERSION || 'BETA v1.7.7';
+    versionBadge.style.cursor = 'pointer';
+    versionBadge.title = 'Ver historial de versiones';
+    versionBadge.addEventListener('click', () => {
+      if (!versionBadge.classList.contains('has-update')) {
+        const modal = document.getElementById('changelogModal');
+        if (modal) {
+          modal.classList.remove('hidden');
+          audio.click();
+        }
+      }
+    });
+  }
 
   wire();
   wireGame();
@@ -1720,11 +2488,22 @@ function boot() {
     audio.place();
   };
 
-  // Desbloqueo de audio al primer gesto.
-  document.addEventListener('pointerdown', () => audio.ensure(), { once: true });
+  // Desbloqueo de audio y música BGM al primer gesto del usuario.
+  const unlockAudioGesture = () => {
+    audio.userInteracted = true;
+    audio.ensure();
+    const isMenu = ['name', 'menu', 'solo', 'create', 'join', 'leaderboard', 'lobby'].some((s) => {
+      const el = document.getElementById('screen-' + s);
+      return el && !el.classList.contains('hidden');
+    });
+    if (isMenu) audio.startMenuMusic();
+  };
+  document.addEventListener('pointerdown', unlockAudioGesture, { once: true });
+  document.addEventListener('keydown', unlockAudioGesture, { once: true });
 
   // Captura errores globales y promesas rechazadas para que nada quede silencioso.
   window.addEventListener('error', (e) => {
+    if (e && e.message && (e.message.includes('ERR_BLOCKED_BY_CLIENT') || e.message.includes('QuotaService') || e.message.includes('gen_204'))) return;
     LOG('window error', e.message, e.filename, e.lineno, e.colno, e.error);
   });
   window.addEventListener('unhandledrejection', (e) => {
@@ -1744,15 +2523,11 @@ function boot() {
     }).catch(() => {});
   }
 
-  // Comprobación de versión en caliente: si el servidor publica una nueva versión, alertar al usuario ÚNICAMENTE en el menú
+  // Comprobación de versión en caliente: si el servidor publica una nueva versión, alertar al usuario
   let _updateToastShown = false;
   async function checkVersionUpdate() {
-    // Protección absoluta: si el jugador está jugando, en el lobby o en cualquier sala, NUNCA molestar ni actualizar
-    if (net.roomId || net.role || (game && game.mode === 'multi') || gameInProgress() || (game && game.state !== 'idle')) {
-      return;
-    }
-    const menuScreen = document.getElementById('screen-menu');
-    if (!menuScreen || menuScreen.classList.contains('hidden')) {
+    // Si el jugador está activamente conjeturando en una ronda, no interrumpirlo
+    if (gameInProgress() || (game && game.state === 'playing')) {
       return;
     }
     try {
@@ -1762,22 +2537,40 @@ function boot() {
         const curVer = (CONFIG.VERSION || '').replace(/^BETA\s+v/i, '').trim();
         if (vData && vData.version && vData.version !== curVer) {
           LOG('Nueva versión detectada:', vData.version, 'actual:', curVer);
+
+          // 1. Resaltar badge de versión flotante
+          const badge = document.getElementById('versionBadge');
+          if (badge) {
+            badge.textContent = `BETA v${vData.version} (Shift+F5)`;
+            badge.classList.add('has-update');
+            badge.title = 'Haz clic o presiona Shift + F5 para actualizar a la última versión';
+            badge.onclick = () => window.location.reload(true);
+          }
+
+          // 2. Mostrar banner destacado en el menú
+          const menuBanner = document.getElementById('menuUpdateBanner');
+          if (menuBanner) {
+            menuBanner.classList.remove('hidden');
+            const menuText = document.getElementById('menuUpdateText');
+            if (menuText) {
+              menuText.innerHTML = `¡Nueva versión <strong>v${escapeHtml(vData.version)}</strong> disponible! Presiona <strong>Shift + F5</strong> para actualizar.`;
+            }
+            const menuBtn = document.getElementById('menuUpdateBtn');
+            if (menuBtn) {
+              menuBtn.onclick = () => window.location.reload(true);
+            }
+          }
+
+          // 3. Notificación toast persistente
           if (!_updateToastShown) {
             _updateToastShown = true;
-            showToast(`Nueva versión disponible (v${vData.version}). Presiona Shift + F5 para actualizar`, 'warning', 25000);
-            const badge = document.getElementById('versionBadge');
-            if (badge) {
-              badge.textContent = `BETA v${vData.version} (Shift+F5)`;
-              badge.style.background = '#f59e0b';
-              badge.style.color = '#000';
-              badge.style.fontWeight = 'bold';
-            }
+            showToast(`¡Nueva versión BETA v${vData.version} disponible! Presiona Shift + F5 para actualizar`, 'warning', 35000);
           }
         }
       }
     } catch (e) {}
   }
-  setInterval(checkVersionUpdate, 15000);
+  setInterval(checkVersionUpdate, 5000);
   window.addEventListener('focus', () => checkVersionUpdate());
   checkVersionUpdate();
 

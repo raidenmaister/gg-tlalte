@@ -4,7 +4,7 @@
 
 export const CONFIG = {
   // Versión oficial de la aplicación visible en menús
-  VERSION: 'BETA v1.5.3',
+  VERSION: 'BETA v1.7.7',
 
   // Fallback opcional de API Key (cliente). La key real se define en
   // js/keys.js (window.GG_GOOGLE_MAPS_API_KEY), que se mantiene local y NO se
@@ -47,6 +47,7 @@ export const CONFIG = {
   BASE_SCORE: 5000,         // Puntos máximos por ronda.
   SCORE_DISTANCE: 1.2,      // Constante de decaimiento para escala urbana/local (km).
   PERFECT_DISTANCE: 0.025,  // Distancia (km) considerada "perfecta" (25 m).
+  MIN_LOCATION_SEPARATION_KM: 0.161, // Distancia mínima (km) entre TODOS los panos de la partida (161 m).
 
   SOLO_ROUNDS: 5,           // Rondas por defecto en modo solitario.
   DUEL_ROUNDS: 5,           // Rondas por defecto en multijugador.
@@ -58,10 +59,12 @@ export const CONFIG = {
     5: { label: '5 rondas', rounds: 5, totalSeconds: 105 },
     7: { label: '7 rondas', rounds: 7, totalSeconds: 120 },
     10: { label: '10 rondas', rounds: 10, totalSeconds: 150 },
+    15: { label: '15 rondas', rounds: 15, totalSeconds: 210 },
   },
+  SOLO_BONUS_SECONDS_ZOOM_BLUR: 60, // +1 minuto para variantes zoom y borroso en solitario
 
   // Modo multijugador: nº de rondas disponibles y tamaño de sala.
-  MULTI_ROUND_OPTIONS: [5, 7, 10],
+  MULTI_ROUND_OPTIONS: [5, 7, 10, 15],
   ROOM_MAX_PLAYERS: 25,     // Tamaño máximo permitido de sala (hasta 25 jugadores).
   ROOM_MIN_PLAYERS: 2,      // Mínimo para iniciar partida.
   RESULT_DURATION: 9000,    // ms que se muestra el resumen de ronda.
@@ -69,14 +72,40 @@ export const CONFIG = {
   NO_GUESS_BASE_PENALTY: 100, // Ronda 1: 100 pts
   NO_GUESS_STEP_PENALTY: 50,  // +50 pts cada ronda subsiguiente (150, 200, 250...)
 
-  // Modos de juego
+  // Modos de juego principales
   GAME_MODES: {
     normal: { id: 'normal', name: 'Normal', desc: 'Mueve la vista 360° y haz zoom libremente.' },
     static: { id: 'static', name: 'Estático', desc: 'Vista fija: no puedes girar ni mover la cámara.' },
     temporal: { id: 'temporal', name: 'Temporal', desc: 'La imagen se oculta tras x segundos y se abre el minimapa.' },
   },
+  // Variantes con Zoom Progresivo (Visión Túnel)
+  GAME_VARIANTS: {
+    normal_standard: { desc: 'Mueve la vista 360° y haz zoom libremente.' },
+    normal_zoom: { desc: 'Giro 360° con visión inicial ultra-telescópica que se aleja con el tiempo. ¡Hasta 6,500 pts en zoom máximo!' },
+    normal_blur: { desc: 'Giro 360° sin zoom manual. Inicia 100% borroso y se enfoca 20% en 5 fases. ¡Haz Perfect para curar HP y acumular rachas!' },
+    static_standard: { desc: 'Cámara fija, sin rotación ni movimiento. Desafío puro de reconocimiento visual.' },
+    static_zoom: { desc: 'Cámara fija con zoom ultra-telescópico inicial que se aleja con el tiempo. ¡Identifica el lugar antes de que retroceda!' },
+    static_blur: { desc: 'Cámara fija sin rotación ni zoom. Inicia 100% borroso y se enfoca 20% en 5 fases. ¡Haz Perfect para curar HP y acumular rachas!' },
+  },
   TEMPORAL_DURATIONS: [1, 2, 3, 5, 10],
   DEFAULT_TEMPORAL_SECONDS: 3,
+  TUNNEL_DURATIONS: [2, 3, 5, 8, 10, 15],
+  DEFAULT_TUNNEL_SECONDS: 3,
+  TUNNEL_ZOOM_LEVELS: [4.2, 2.8, 1.4, 0.0],
+  TUNNEL_MAX_SCORES: [5000, 5250, 5750, 6500],
+  TUNNEL_DECAY_DISTANCES: [1.2, 1.4, 1.7, 2.1],
+
+  // Modo Borroso Progresivo (Desenfocado)
+  BLUR_DURATIONS: [2, 3, 5, 8, 10, 15],
+  DEFAULT_BLUR_SECONDS: 3,
+  BLUR_STEPS: 5,
+  // Desenfocado en px: Fase 1 (100%), Fase 2 (80%), Fase 3 (60%), Fase 4 (40%), Fase 5 (20%), Final (0% nítido)
+  BLUR_LEVELS: [24, 16, 10, 5.5, 2.5, 0],
+  // Puntos máximos por adivinar en cada fase (Fase 1 al 100% otorga hasta 7,000 pts)
+  BLUR_MAX_SCORES: [7000, 6400, 5900, 5500, 5200, 5000],
+  BLUR_DECAY_DISTANCES: [2.2, 1.9, 1.6, 1.4, 1.3, 1.2],
+  // Curación base en HP al lograr Perfect (<= 25m) en cada fase
+  BLUR_BASE_HEALS: [1600, 1200, 900, 600, 300, 150],
 
   // 25 colores únicos y contrastantes para hasta 25 jugadores simultáneos
   PLAYER_COLORS: [
@@ -129,12 +158,15 @@ export function getNoGuessPenalty(round) {
 
 /**
  * Multiplicador de daño según la ronda (sistema de duelo).
- * Ronda 1-2: x1.0 · Ronda 3: x1.5 · Ronda 4: x2.0 · Ronda 5+: x3.0
+ * Ronda 1-2: x1.0 · Ronda 3: x1.5 · Ronda 4: x2.0 · Ronda 5-9: x3.0 · Ronda 10-14: x3.5 · Ronda 15+: x4.0
  */
 export function damageMultiplier(round) {
-  if (round <= 2) return 1.0;
-  if (round === 3) return 1.5;
-  if (round === 4) return 2.0;
-  return 3.0;
+  const r = Math.max(1, parseInt(round) || 1);
+  if (r <= 2) return 1.0;
+  if (r === 3) return 1.5;
+  if (r === 4) return 2.0;
+  if (r >= 5 && r <= 9) return 3.0;
+  if (r >= 10 && r <= 14) return 3.5;
+  return 4.0;
 }
 

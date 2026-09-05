@@ -12,7 +12,7 @@
 
     <!-- Leaflet (minimapa) -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-    <link rel="stylesheet" href="style.css?v=1.5.3">
+    <link rel="stylesheet" href="style.css?v=1.7.7">
 </head>
 <body>
 
@@ -20,7 +20,7 @@
     <div id="ascii-earth" class="hidden"></div>
 
     <!-- Badge de versión (menús) -->
-    <div id="versionBadge" class="version-badge">BETA v1.5.3</div>
+    <div id="versionBadge" class="version-badge" title="Ver historial de versiones">BETA v1.7.7</div>
 
     <!-- ====================== PANTALLA: NOMBRE ====================== -->
     <div id="screen-name" class="screen">
@@ -38,11 +38,21 @@
         <div class="menu">
             <h1 class="title">GG-TLALTE</h1>
             <p class="greeting">Bienvenido, <span id="menuPlayerName"></span>. Elige un modo:</p>
+
+            <!-- Banner de actualización disponible -->
+            <div id="menuUpdateBanner" class="update-banner hidden">
+                <div class="update-banner-info">
+                    <span class="update-banner-icon">⚡</span>
+                    <span class="update-banner-text" id="menuUpdateText">¡Nueva versión disponible! Presiona <strong>Shift + F5</strong> para actualizar.</span>
+                </div>
+                <button type="button" class="btn-update-reload" id="menuUpdateBtn">Actualizar ahora</button>
+            </div>
+
             <div class="modes">
                 <button class="mode-card" id="soloBtn">
                     <span class="icon">▶</span>
                     <h2>Jugar en solitario</h2>
-                    <p>Elige entre 5, 7 o 10 rondas · 5000 pts por ronda.</p>
+                    <p>Elige entre 5, 7, 10 o 15 rondas · 5000 pts por ronda.</p>
                 </button>
                 <button class="mode-card" id="createBtn">
                     <span class="icon">＋</span>
@@ -60,7 +70,10 @@
                     <p>Los mejores puntajes en solitario.</p>
                 </button>
             </div>
-            <button class="btn-sound" id="soundBtn" title="Activar/desactivar sonido">🔊</button>
+            <div class="menu-bottom-row">
+                <button class="btn-sound" id="soundBtn" title="Activar/desactivar sonido">🔊</button>
+                <button type="button" class="btn-changelog" id="changelogBtn" title="Historial de versiones y novedades">📜 Historial de versiones</button>
+            </div>
         </div>
     </div>
 
@@ -77,6 +90,27 @@
                     <button type="button" class="mode-tab" data-mode="static">🛑 Estático</button>
                     <button type="button" class="mode-tab" data-mode="temporal">⏱️ Temporal</button>
                 </div>
+
+                <!-- Sub-variante para Modo Normal (Solitario) -->
+                <div id="soloNormalSubmode" class="submode-section">
+                    <label class="config-label">Variante de Modo Normal</label>
+                    <div class="submode-select-row" id="soloNormalSubTabs">
+                        <button type="button" class="submode-tab active" data-variant="standard">Normal</button>
+                        <button type="button" class="submode-tab" data-variant="zoom">🔍 Zoom</button>
+                        <button type="button" class="submode-tab" data-variant="blur">🌫️ Borroso</button>
+                    </div>
+                </div>
+
+                <!-- Sub-variante para Modo Estático (Solitario) -->
+                <div id="soloStaticSubmode" class="submode-section hidden">
+                    <label class="config-label">Variante de Modo Estático</label>
+                    <div class="submode-select-row" id="soloStaticSubTabs">
+                        <button type="button" class="submode-tab active" data-variant="standard">Estático</button>
+                        <button type="button" class="submode-tab" data-variant="zoom">🔍 Zoom</button>
+                        <button type="button" class="submode-tab" data-variant="blur">🌫️ Borroso</button>
+                    </div>
+                </div>
+
                 <p class="mode-desc" id="soloModeDesc">Mueve la vista 360° y haz zoom libremente.</p>
 
                 <div id="soloTemporalConfig" class="temporal-config hidden">
@@ -87,6 +121,30 @@
                         <button type="button" class="pill-btn active" data-sec="3">3s</button>
                         <button type="button" class="pill-btn" data-sec="5">5s</button>
                         <button type="button" class="pill-btn" data-sec="10">10s</button>
+                    </div>
+                </div>
+
+                <div id="soloTunnelConfig" class="tunnel-config hidden">
+                    <label class="config-label">Segundos por cada nivel de zoom</label>
+                    <div class="pill-row" id="soloTunnelPills">
+                        <button type="button" class="pill-btn" data-sec="2">2s</button>
+                        <button type="button" class="pill-btn active" data-sec="3">3s</button>
+                        <button type="button" class="pill-btn" data-sec="5">5s</button>
+                        <button type="button" class="pill-btn" data-sec="8">8s</button>
+                        <button type="button" class="pill-btn" data-sec="10">10s</button>
+                        <button type="button" class="pill-btn" data-sec="15">15s</button>
+                    </div>
+                </div>
+
+                <div id="soloBlurConfig" class="blur-config hidden">
+                    <label class="config-label">Segundos por cada nivel de desenfoque</label>
+                    <div class="pill-row" id="soloBlurPills">
+                        <button type="button" class="pill-btn" data-sec="2">2s</button>
+                        <button type="button" class="pill-btn active" data-sec="3">3s</button>
+                        <button type="button" class="pill-btn" data-sec="5">5s</button>
+                        <button type="button" class="pill-btn" data-sec="8">8s</button>
+                        <button type="button" class="pill-btn" data-sec="10">10s</button>
+                        <button type="button" class="pill-btn" data-sec="15">15s</button>
                     </div>
                 </div>
             </div>
@@ -106,6 +164,10 @@
                         <span class="round-tab-title">10 rondas</span>
                         <span class="round-tab-sub">⏱️ 2:30</span>
                     </button>
+                    <button type="button" class="round-tab" data-rounds="15">
+                        <span class="round-tab-title">15 rondas</span>
+                        <span class="round-tab-sub">⏱️ 3:30</span>
+                    </button>
                 </div>
             </div>
 
@@ -122,13 +184,18 @@
             <h2>Leaderboard · Solitario</h2>
             <div class="lb-mode-tabs" id="lbModeTabs">
                 <button type="button" class="lb-mode-tab active" data-mode="normal">🎮 Normal</button>
+                <button type="button" class="lb-mode-tab" data-mode="tunnel">🔍 Normal (Zoom)</button>
+                <button type="button" class="lb-mode-tab" data-mode="blur">🌫️ Normal (Borroso)</button>
                 <button type="button" class="lb-mode-tab" data-mode="static">🛑 Estático</button>
+                <button type="button" class="lb-mode-tab" data-mode="static_tunnel">🔍 Estático (Zoom)</button>
+                <button type="button" class="lb-mode-tab" data-mode="static_blur">🌫️ Estático (Borroso)</button>
                 <button type="button" class="lb-mode-tab" data-mode="temporal">⏱️ Temporal</button>
             </div>
             <div class="lb-tabs" id="lbRoundsTabs">
                 <button type="button" class="lb-tab active" data-rounds="5">5 rondas</button>
                 <button type="button" class="lb-tab" data-rounds="7">7 rondas</button>
                 <button type="button" class="lb-tab" data-rounds="10">10 rondas</button>
+                <button type="button" class="lb-tab" data-rounds="15">15 rondas</button>
             </div>
             <div class="lb-list" id="leaderboardList"></div>
             <p class="empty-hint hidden" id="leaderboardEmpty">Aún no hay puntajes en esta categoría.</p>
@@ -158,6 +225,27 @@
                     <button type="button" class="mode-tab" data-mode="static">🛑 Estático</button>
                     <button type="button" class="mode-tab" data-mode="temporal">⏱️ Temporal</button>
                 </div>
+
+                <!-- Sub-variante para Modo Normal (Multi) -->
+                <div id="multiNormalSubmode" class="submode-section">
+                    <label class="config-label">Variante de Modo Normal</label>
+                    <div class="submode-select-row" id="multiNormalSubTabs">
+                        <button type="button" class="submode-tab active" data-variant="standard">Normal</button>
+                        <button type="button" class="submode-tab" data-variant="zoom">🔍 Zoom</button>
+                        <button type="button" class="submode-tab" data-variant="blur">🌫️ Borroso</button>
+                    </div>
+                </div>
+
+                <!-- Sub-variante para Modo Estático (Multi) -->
+                <div id="multiStaticSubmode" class="submode-section hidden">
+                    <label class="config-label">Variante de Modo Estático</label>
+                    <div class="submode-select-row" id="multiStaticSubTabs">
+                        <button type="button" class="submode-tab active" data-variant="standard">Estático</button>
+                        <button type="button" class="submode-tab" data-variant="zoom">🔍 Zoom</button>
+                        <button type="button" class="submode-tab" data-variant="blur">🌫️ Borroso</button>
+                    </div>
+                </div>
+
                 <p class="mode-desc" id="multiModeDesc">Mueve la vista 360° y haz zoom libremente.</p>
 
                 <div id="multiTemporalConfig" class="temporal-config hidden">
@@ -168,6 +256,30 @@
                         <button type="button" class="pill-btn active" data-sec="3">3s</button>
                         <button type="button" class="pill-btn" data-sec="5">5s</button>
                         <button type="button" class="pill-btn" data-sec="10">10s</button>
+                    </div>
+                </div>
+
+                <div id="multiTunnelConfig" class="tunnel-config hidden">
+                    <label class="config-label">Segundos por cada nivel de zoom</label>
+                    <div class="pill-row" id="multiTunnelPills">
+                        <button type="button" class="pill-btn" data-sec="2">2s</button>
+                        <button type="button" class="pill-btn active" data-sec="3">3s</button>
+                        <button type="button" class="pill-btn" data-sec="5">5s</button>
+                        <button type="button" class="pill-btn" data-sec="8">8s</button>
+                        <button type="button" class="pill-btn" data-sec="10">10s</button>
+                        <button type="button" class="pill-btn" data-sec="15">15s</button>
+                    </div>
+                </div>
+
+                <div id="multiBlurConfig" class="blur-config hidden">
+                    <label class="config-label">Segundos por cada nivel de desenfoque</label>
+                    <div class="pill-row" id="multiBlurPills">
+                        <button type="button" class="pill-btn" data-sec="2">2s</button>
+                        <button type="button" class="pill-btn active" data-sec="3">3s</button>
+                        <button type="button" class="pill-btn" data-sec="5">5s</button>
+                        <button type="button" class="pill-btn" data-sec="8">8s</button>
+                        <button type="button" class="pill-btn" data-sec="10">10s</button>
+                        <button type="button" class="pill-btn" data-sec="15">15s</button>
                     </div>
                 </div>
             </div>
@@ -184,6 +296,9 @@
                         </button>
                         <button type="button" class="round-tab" data-rounds="10">
                             <span class="round-tab-title">10</span>
+                        </button>
+                        <button type="button" class="round-tab" data-rounds="15">
+                            <span class="round-tab-title">15</span>
                         </button>
                     </div>
                     <input type="hidden" id="roomRounds" value="5">
@@ -235,22 +350,61 @@
 
     <!-- ====================== PANTALLA: LOBBY ====================== -->
     <div id="screen-lobby" class="screen hidden">
-        <div class="card lobby-card">
-            <h2 id="lobbyTitle">Sala</h2>
-            <div class="room-code" id="roomCodeSection">
-                <span class="room-code-label">Código de la sala</span>
-                <div class="room-code-value" id="roomCodeValue">----</div>
-                <button class="btn-ghost btn-copy" id="copyCodeBtn">Copiar código</button>
+        <div class="lobby-container">
+            <div class="card lobby-card">
+                <h2 id="lobbyTitle">Sala</h2>
+                <div class="room-code" id="roomCodeSection">
+                    <span class="room-code-label">Código de la sala</span>
+                    <div class="room-code-value" id="roomCodeValue">----</div>
+                    <button class="btn-ghost btn-copy" id="copyCodeBtn">Copiar código</button>
+                </div>
+                <p class="lobby-note" id="roomRoundsInfo"></p>
+                <h3 class="players-title">Jugadores <span id="playersCount"></span></h3>
+                <ul class="players-list" id="playersList"></ul>
+                <div class="lobby-actions">
+                    <button class="btn-primary hidden" id="startBtn">Iniciar partida</button>
+                    <button class="btn-ghost" id="leaveLobbyBtn">Salir de la sala</button>
+                    <button class="btn-ghost btn-danger hidden" id="deleteRoomBtn">Eliminar sala</button>
+                </div>
+                <p class="lobby-note" id="lobbyNote"></p>
             </div>
-            <p class="lobby-note" id="roomRoundsInfo"></p>
-            <h3 class="players-title">Jugadores <span id="playersCount"></span></h3>
-            <ul class="players-list" id="playersList"></ul>
-            <div class="lobby-actions">
-                <button class="btn-primary hidden" id="startBtn">Iniciar partida</button>
-                <button class="btn-ghost" id="leaveLobbyBtn">Salir de la sala</button>
-                <button class="btn-ghost btn-danger hidden" id="deleteRoomBtn">Eliminar sala</button>
+
+            <!-- CHAT GRUPAL DE LA SALA -->
+            <div class="card lobby-chat-card" id="lobbyChatCard">
+                <div class="chat-header">
+                    <div class="chat-header-title">
+                        <span class="chat-header-icon">💬</span>
+                        <span>Chat de la sala</span>
+                    </div>
+                    <span class="chat-header-badge" id="chatPlayersCountBadge">En línea</span>
+                </div>
+
+                <div class="chat-messages-wrap" id="chatMessagesWrap">
+                    <div class="chat-messages-list" id="chatMessagesList">
+                        <div class="chat-msg msg-system">
+                            <div class="msg-body">¡Bienvenidos a la sala! Puedes chatear antes de iniciar.</div>
+                        </div>
+                    </div>
+                    <!-- Indicador de escritura estilo WhatsApp / Discord -->
+                    <div class="chat-typing-indicator hidden" id="chatTypingIndicator">
+                        <div class="typing-bubble">
+                            <span class="typing-dot"></span>
+                            <span class="typing-dot"></span>
+                            <span class="typing-dot"></span>
+                        </div>
+                        <span class="typing-name" id="typingNameText">Alguien está escribiendo...</span>
+                    </div>
+                </div>
+
+                <form class="chat-input-row" id="chatForm" onsubmit="return false;">
+                    <input type="text" id="chatInput" class="chat-input" placeholder="Escribe un mensaje…" maxlength="200" autocomplete="off">
+                    <button type="button" class="btn-chat-send" id="chatSendBtn" title="Enviar mensaje">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                        </svg>
+                    </button>
+                </form>
             </div>
-            <p class="lobby-note" id="lobbyNote"></p>
         </div>
     </div>
 
@@ -265,6 +419,8 @@
     <!-- ====================== PANTALLA: JUEGO ====================== -->
     <div id="screen-game" class="screen hidden">
         <div id="pano"></div>
+        <!-- Capa de desenfoque óptico ultra-fluido (Modo Borroso) con cero lag -->
+        <div id="panoBlurOverlay" class="pano-blur-overlay hidden"></div>
         <!-- Capa física de bloqueo para modos estático y temporal -->
         <div id="panoStaticOverlay" class="pano-static-overlay hidden"></div>
         <!-- Cortina visual para sincronización anti-trampas y modo temporal -->
@@ -280,6 +436,40 @@
         <div class="temporal-banner hidden" id="temporalBanner">
             <span class="temporal-label">⏱️ Tiempo visible</span>
             <span class="temporal-number" id="temporalNumber">3s</span>
+        </div>
+
+        <!-- Banner modo Zoom Progresivo (Visión Túnel): cuenta regresiva y progreso hacia siguiente nivel de zoom -->
+        <div class="tunnel-banner hidden" id="tunnelBanner">
+            <div class="tunnel-main">
+                <div class="tunnel-header">
+                    <span class="tunnel-step-badge" id="tunnelStepBadge">🔍 ZOOM 4/4 (MÁXIMO)</span>
+                    <span class="tunnel-bonus-tag" id="tunnelBonusTag">HASTA +1,500 PTS</span>
+                </div>
+                <div class="tunnel-track">
+                    <div class="tunnel-bar" id="tunnelProgressBar"></div>
+                </div>
+                <div class="tunnel-footer">
+                    <span class="tunnel-label" id="tunnelNextLabel">Siguiente zoom en</span>
+                    <span class="tunnel-countdown" id="tunnelCountdown">3.0s</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Banner modo Borroso (Desenfocado Progresivo): cuenta regresiva y progreso hacia siguiente fase -->
+        <div class="blur-banner hidden" id="blurBanner">
+            <div class="blur-main">
+                <div class="blur-header">
+                    <span class="blur-step-badge" id="blurStepBadge">🌫️ BORROSO 100% (FASE 1/5)</span>
+                    <span class="blur-bonus-tag" id="blurBonusTag">PERFECT: +1,600 HP</span>
+                </div>
+                <div class="blur-track">
+                    <div class="blur-bar" id="blurProgressBar"></div>
+                </div>
+                <div class="blur-footer">
+                    <span class="blur-label" id="blurNextLabel">Enfocando en</span>
+                    <span class="blur-countdown" id="blurCountdown">3.0s</span>
+                </div>
+            </div>
         </div>
 
         <!-- HUD superior -->
@@ -298,11 +488,18 @@
             </div>
         </div>
 
-        <!-- Brújula en esquina inferior izquierda (no tapa nombres de jugadores) -->
-        <div class="hud-compass" id="hudCompass">
-            <div class="compass-ring">
-                <span class="compass-arrow" id="compassArrow">N</span>
+        <!-- Controles en esquina inferior izquierda (brújula y recarga de vista) -->
+        <div class="hud-bottom-left">
+            <div class="hud-compass" id="hudCompass" title="Orientación (Norte)">
+                <div class="compass-ring">
+                    <span class="compass-arrow" id="compassArrow">N</span>
+                </div>
             </div>
+            <button class="btn-pano-control" id="panoRecoverBtn" title="Recargar vista panorámica (tecla R)">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+                </svg>
+            </button>
         </div>
 
         <button class="btn-leave" id="leaveGameBtn" title="Abandonar partida">✕</button>
@@ -329,11 +526,11 @@
         <div class="minimap-wrap collapsed" id="minimapWrap">
             <button class="btn-confirm" id="confirmBtn" disabled>CONFIRMAR GUESS</button>
             <div class="minimap-panel" id="minimapPanel">
+                <div id="minimap"></div>
                 <div class="minimap-controls" id="minimapControls">
                     <button class="btn-map-control btn-recenter-map" id="recenterMapBtn" title="Recentrar en Tlaltenango">🎯</button>
                     <button class="btn-map-control btn-toggle-layer" id="toggleLayerBtn" title="Cambiar a vista satelital">🛰️</button>
                 </div>
-                <div id="minimap"></div>
             </div>
         </div>
 
@@ -357,6 +554,233 @@
         </div>
     </div>
 
+    <!-- ====================== MODAL: HISTORIAL DE VERSIONES ====================== -->
+    <div class="panel-overlay hidden" id="changelogModal">
+        <div class="panel changelog-panel">
+            <div class="changelog-header">
+                <h2 class="panel-title">📜 Historial de Versiones</h2>
+                <button type="button" class="btn-close-modal" id="changelogCloseBtn" aria-label="Cerrar">✕</button>
+            </div>
+            <div class="changelog-list" id="changelogList">
+                <!-- BETA v1.7.7 -->
+                <div class="changelog-entry current">
+                    <div class="changelog-title-row">
+                        <span class="changelog-version">BETA v1.7.7</span>
+                        <span class="changelog-badge badge-current">Actual</span>
+                    </div>
+                    <ul class="changelog-list-items">
+                        <li><strong>Corrección Visual en Botón de Historial de Versiones:</strong> Reparado el cierre de bloques CSS que provocaba que el botón del historial de versiones se renderizara sin estilos en el menú inferior. Restablecido el diseño cápsula translúcido con efecto vidrio y hover brillante.</li>
+                        <li><strong>Auditoría Integral de Temporizadores y Estados:</strong> Corrección de posibles avances dobles de ronda mediante cancelación garantizada de <code>_resultTimer</code> ante conjeturas tardías rescatadas, limpieza completa de la capa de desenfoque y bucles de cálculo de modo Borroso en <code>_clearTimers()</code>.</li>
+                        <li><strong>Normalización de Límites de Tiempo en el Servidor (Zoom y Borroso):</strong> Actualizado el cálculo de puntuación del leaderboard en PHP para respetar los +60 segundos adicionales otorgados en modo solitario para variantes Zoom y Borroso, evitando penalizaciones de velocidad injustas.</li>
+                        <li><strong>Prevención de Caídas y Sobrecarga en Servidor Compartido:</strong> Optimizado el relé de mensajes para evitar escrituras en disco innecesarias durante sondeos periódicos frecuentes y ampliado el margen de gracia para partidas en curso (de 15s a 90s) para evitar salas eliminadas prematuramente ante microcortes.</li>
+                    </ul>
+                </div>
+
+                <!-- BETA v1.7.6 -->
+                <div class="changelog-entry">
+                    <div class="changelog-title-row">
+                        <span class="changelog-version">BETA v1.7.6</span>
+                        <span class="changelog-badge">Actualización</span>
+                    </div>
+                    <ul class="changelog-list-items">
+                        <li><strong>Chat de Texto Grupal en el Lobby:</strong> Incorporado chat en tiempo real para salas públicas y privadas mientras se espera a los jugadores. Muestra el nombre del jugador, la hora exacta local del mensaje, y cuenta con indicador animado con burbuja y puntos rebotantes estilo WhatsApp/Discord cuando alguien está escribiendo.</li>
+                        <li><strong>Anuncio y Destrucción Automática:</strong> Al presionar "Iniciar partida", el chat anuncia <em>"🚀 Iniciando partida..."</em> y, en cuanto el juego arranca con éxito, el chat se destruye y limpia por completo sin dejar mensajes residuales en el DOM ni temporizadores activos. 100% P2P por PeerJS sin carga para PHP.</li>
+                    </ul>
+                </div>
+
+                <!-- BETA v1.7.5 -->
+                <div class="changelog-entry">
+                    <div class="changelog-title-row">
+                        <span class="changelog-version">BETA v1.7.5</span>
+                        <span class="changelog-badge">Parche</span>
+                    </div>
+                    <ul class="changelog-list-items">
+                        <li><strong>Envío de Conjeturas y Prevención AFK:</strong> Corregido el problema donde a algunos jugadores no se les registraba la chincheta y se les penalizaba como inactivos (AFK). Se implementó transporte dual (WebRTC + respaldo HTTP automático por relay), preservación estricta de IDs de remitente, recuperación automática de la chincheta colocada en el minimapa (<code>minimap.getPick()</code>), validación antes de cerrar el mapa y tolerancia de red con ventana de gracia y rescate de conjeturas en tránsito.</li>
+                        <li><strong>Tiempo Solitario (+1 minuto en Zoom y Borroso):</strong> Añadido +1 minuto (+60s) al tiempo total de partida en modo solitario para las variantes de Zoom (Visión Túnel) y Borroso en los modos Normal y Estático (165s en 5 rondas, 180s en 7 rondas, 210s en 10 rondas y 270s en 15 rondas), con actualización dinámica en tiempo real de los selectores del menú.</li>
+                    </ul>
+                </div>
+
+                <!-- BETA v1.7.4 -->
+                <div class="changelog-entry">
+                    <div class="changelog-title-row">
+                        <span class="changelog-version">BETA v1.7.4</span>
+                        <span class="changelog-badge">Parche</span>
+                    </div>
+                    <ul class="changelog-list-items">
+                        <li><strong>Separación Global entre Panorámicas (≥ 161 m):</strong> Se mejoró el algoritmo de selección de ubicaciones para que CADA ronda de la partida diste al menos 161 metros de TODAS las demás rondas ya seleccionadas (no solo de la anterior). Evita repeticiones o ubicaciones demasiado cercanas entre sí en partidas de 5, 7, 10 o 15 rondas en todos los modos y submodos (Solitario y Multijugador).</li>
+                    </ul>
+                </div>
+
+                <!-- BETA v1.7.3 -->
+                <div class="changelog-entry">
+                    <div class="changelog-title-row">
+                        <span class="changelog-version">BETA v1.7.3</span>
+                        <span class="changelog-badge">Parche</span>
+                    </div>
+                    <ul class="changelog-list-items">
+                        <li><strong>Corrección en Reducción Progresiva del Desenfoque:</strong> Resuelto bug donde el blur se quedaba bloqueado en un valor fijo (8px) durante todas las fases debido a una regla estricta de CSS. Ahora el desenfoque disminuye nítida y visiblemente en cada fase (24px → 16px → 10px → 5.5px → 2.5px → 0px).</li>
+                        <li><strong>Clases Dinámicas por Fase (<code>.phase-1</code> a <code>.phase-5</code>):</strong> Transición suave interpolada por el navegador entre fases, con valores calibrados tanto para PC estándar como para PC Modesta (Patata).</li>
+                    </ul>
+                </div>
+
+                <!-- BETA v1.7.2 -->
+                <div class="changelog-entry">
+                    <div class="changelog-title-row">
+                        <span class="changelog-version">BETA v1.7.2</span>
+                        <span class="changelog-badge">Rendimiento</span>
+                    </div>
+                    <ul class="changelog-list-items">
+                        <li><strong>Optimización de Rendimiento en Modo Borroso (60 FPS Nativos):</strong> Se eliminaron los filtros CSS y escalas directas sobre el contenedor de Google Street View que causaban pesadez y resistencia al arrastrar con el ratón.</li>
+                        <li><strong>Capa Óptica Independiente (<code>#panoBlurOverlay</code>):</strong> El desenfoque progresivo ahora se procesa mediante una capa óptica con aceleración por hardware y <code>pointer-events: none</code>, permitiendo rotar y arrastrar la vista panorámica con total ligereza, cero input lag y 60 FPS estables.</li>
+                    </ul>
+                </div>
+
+                <!-- BETA v1.7.1 -->
+                <div class="changelog-entry">
+                    <div class="changelog-title-row">
+                        <span class="changelog-version">BETA v1.7.1</span>
+                        <span class="changelog-badge">Parche</span>
+                    </div>
+                    <ul class="changelog-list-items">
+                        <li><strong>Corrección en Banner de Modo Borroso:</strong> Resuelto bug visual que mostraba <code>BORROSO UNDEFINED/5</code> en la cabecera del banner y <code>PERFECT BONUS</code> genérico. Ahora refleja con precisión la fase activa (<code>100% FASE 1/5</code>, <code>80% FASE 2/5</code>, etc.) y la curación real (+1,600 HP, +1,200 HP, etc.).</li>
+                        <li><strong>Corrección en Resumen de Ronda Solitario:</strong> Ajustada la indicación de fase en la tarjeta de resultados para coincidir con la fase 1 a 5 exacta.</li>
+                    </ul>
+                </div>
+
+                <!-- BETA v1.7.0 -->
+                <div class="changelog-entry">
+                    <div class="changelog-title-row">
+                        <span class="changelog-version">BETA v1.7.0</span>
+                        <span class="changelog-badge">Nuevo Modo</span>
+                    </div>
+                    <ul class="changelog-list-items">
+                        <li><strong>Nuevo Modo Borroso (Normal y Estático):</strong> Variante disponible tanto en Solitario como en Multijugador. El panorama se muestra a tamaño completo sin zoom (en Normal con rotación 360°, en Estático con cámara bloqueada) e inicia 100% desenfocado.</li>
+                        <li><strong>Desdesenfoque Progresivo en 5 Fases:</strong> Tras cada intervalo configurable (2s, 3s, 5s, 8s, 10s y 15s), la imagen se aclara un 20% menos borrosa con barra de progreso y cuenta atrás sincronizada vía PeerJS.</li>
+                        <li><strong>Bonificación y Curación por Perfect (≤ 25m):</strong> Si colocas tu chincheta a 25 metros o menos durante las fases borrosas ganas una enorme cantidad de vida (hasta +1,600 HP en 100%) y puntuación masiva (hasta 7,000 pts).</li>
+                        <li><strong>Vida sin Límite de 5,000 HP:</strong> En el Modo Borroso los aciertos perfectos permiten sobrecargar la vida por encima del tope tradicional de 5,000 HP.</li>
+                        <li><strong>Rachas Consecutivas de Perfect:</strong> Encadenar 2 o más Perfects seguidos multiplica la curación y bonificación de puntos, con avisos sonoros y visuales de racha activa (🔥 ¡Racha de X!).</li>
+                        <li><strong>Sincronización P2P por PeerJS:</strong> Comunicación en tiempo real cliente a cliente para evitar sobrecarga del hosting compartido, garantizando que todos los jugadores vean la imagen destapada al mismo milisegundo.</li>
+                    </ul>
+                </div>
+
+                <!-- BETA v1.6.3 -->
+                <div class="changelog-entry">
+                    <div class="changelog-title-row">
+                        <span class="changelog-version">BETA v1.6.3</span>
+                        <span class="changelog-badge">Actualización</span>
+                    </div>
+                    <ul class="changelog-list-items">
+                        <li><strong>Botón Flotante Limpio en Resultados:</strong> Eliminado el cuadro oscuro contenedor detrás del botón "Siguiente ronda", dejándolo flotando limpiamente sobre el mapa.</li>
+                        <li><strong>Bloqueo de Scroll en Modo Zoom:</strong> Eliminadas barras de desplazamiento y scroll indeseado en Street View mediante bloqueo de desbordamiento (<code>overflow: hidden</code>) y captura de eventos de rueda.</li>
+                        <li><strong>Corrección en Barra de Progreso de Zoom:</strong> Resuelto fallo de JavaScript en el temporizador progresivo de zoom (<code>toFixed</code> en <code>tunnelProgress</code>).</li>
+                        <li><strong>Compatibilidad en Alternancia de Mapa:</strong> Corregido error al alternar a vista satelital (<code>bringToFront</code> en <code>featureGroup</code> de Leaflet).</li>
+                        <li><strong>Carga Asíncrona de Google Maps:</strong> Implementado parámetro oficial <code>loading=async</code> para eliminar advertencias de rendimiento en consola.</li>
+                    </ul>
+                </div>
+
+                <!-- BETA v1.6.2 -->
+                <div class="changelog-entry">
+                    <div class="changelog-title-row">
+                        <span class="changelog-version">BETA v1.6.2</span>
+                        <span class="changelog-badge">Actualización</span>
+                    </div>
+                    <ul class="changelog-list-items">
+                        <li><strong>Modo Zoom como Variante Integrada:</strong> El Zoom Progresivo ahora es una opción dentro de Modo Normal y Modo Estático, permitiendo elegir Normal Estándar / Normal Zoom, y Estático Estándar / Estático Zoom.</li>
+                        <li><strong>Modo Estático con Zoom:</strong> Cámara fija sin rotación con zoom inicial ultra-telescópico y retroceso temporizado.</li>
+                        <li><strong>Chincheta Dorada con Degradado:</strong> La chincheta de ubicación real es más grande, dorada con degradado resplandeciente y halo ámbar para resaltar sobre el minimapa.</li>
+                        <li><strong>Música Ambiental en el Menú:</strong> Generador de audio procedural con acordes espaciales sintetizados en tiempo real para las pantallas de menús.</li>
+                        <li><strong>Panel de Historial de Versiones:</strong> Acceso completo a todas las notas de versión y novedades del proyecto desde el menú.</li>
+                    </ul>
+                </div>
+
+                <!-- BETA v1.6.1 -->
+                <div class="changelog-entry">
+                    <div class="changelog-title-row">
+                        <span class="changelog-version">BETA v1.6.1</span>
+                        <span class="changelog-badge">Actualización</span>
+                    </div>
+                    <ul class="changelog-list-items">
+                        <li><strong>Zoom Inicial Ultra-Telescópico:</strong> Zoom Street View 4.2 combinado con escala CSS de 1.5x en el nivel 4 para mayor profundidad.</li>
+                        <li><strong>Opciones de Tiempo hasta 15 Segundos:</strong> Nuevos intervalos para el zoom progresivo (2s, 3s, 5s, 8s, 10s y 15s).</li>
+                        <li><strong>Corrección en Salas Públicas:</strong> Escritura y reemplazo atómico en PHP para evitar salas desaparecidas por condiciones de carrera concurrentes.</li>
+                        <li><strong>Solución al Error de Salida de Invitados:</strong> Implementado manejador <code>_handleGuestLeave</code> en la capa de red.</li>
+                        <li><strong>Estilos para Notificaciones Toast:</strong> Variantes visuales para avisos de sistema con halo de advertencia ámbar.</li>
+                    </ul>
+                </div>
+
+                <!-- BETA v1.6.0 -->
+                <div class="changelog-entry">
+                    <div class="changelog-title-row">
+                        <span class="changelog-version">BETA v1.6.0</span>
+                        <span class="changelog-badge">Nuevo Modo</span>
+                    </div>
+                    <ul class="changelog-list-items">
+                        <li><strong>Modo Zoom Progresivo (Visión Túnel):</strong> Inicio con zoom extremo sincronizado y barra de tiempo retrocediente.</li>
+                        <li><strong>Bonificación de Puntuación por Zoom:</strong> Hasta 6,500 puntos por ronda al adivinar con precisión durante el zoom máximo.</li>
+                        <li><strong>Partidas de hasta 15 Rondas:</strong> Soporte para hasta 15 rondas con multiplicadores de daño dinámico de hasta x4.0.</li>
+                        <li><strong>Minimapa Adaptativo:</strong> Controles de satélite y recentrado reubicados inteligentemente en pantalla completa.</li>
+                    </ul>
+                </div>
+
+                <!-- BETA v1.5.0 - v1.5.6 -->
+                <div class="changelog-entry">
+                    <div class="changelog-title-row">
+                        <span class="changelog-version">BETA v1.5.0 – v1.5.6</span>
+                        <span class="changelog-badge">Mejoras de Red</span>
+                    </div>
+                    <ul class="changelog-list-items">
+                        <li><strong>Detección de Versiones en Caliente:</strong> Aviso automático y verificación periódica de <code>version.json</code> con banner y sugerencia Shift + F5.</li>
+                        <li><strong>Minimapa Satelital Híbrido HD:</strong> Alternancia rápida entre mapa vectorial y vista satelital híbrida.</li>
+                        <li><strong>Metadatos en Salas Públicas:</strong> Muestra de modo, capacidad y rondas en la lista de salas públicas.</li>
+                        <li><strong>Protección de Partida:</strong> Bloqueo de verificaciones de versión mientras el usuario adivina.</li>
+                    </ul>
+                </div>
+
+                <!-- BETA v1.4.2 -->
+                <div class="changelog-entry">
+                    <div class="changelog-title-row">
+                        <span class="changelog-version">BETA v1.4.2</span>
+                        <span class="changelog-badge">Optimización</span>
+                    </div>
+                    <ul class="changelog-list-items">
+                        <li><strong>Continentes Reales en Fondo ASCII 3D:</strong> Simulación orbital terrestre sobre canvas 2D con terminador día/noche.</li>
+                        <li><strong>Modo Hardware Modesto ("PC Ultrapatata"):</strong> Optimización de renderizado para eliminar lag en GPUs integradas.</li>
+                        <li><strong>Precarga de Teselas:</strong> Eliminación de imágenes borrosas en panorámicas.</li>
+                    </ul>
+                </div>
+
+                <!-- BETA v1.2.0 - v1.4.0 -->
+                <div class="changelog-entry">
+                    <div class="changelog-title-row">
+                        <span class="changelog-version">BETA v1.2.0 – v1.4.0</span>
+                        <span class="changelog-badge">Mecánicas</span>
+                    </div>
+                    <ul class="changelog-list-items">
+                        <li><strong>Barras de Vida Unificadas:</strong> Daño visual en rojo y número flotante <code>-HP</code> al revelar resultados.</li>
+                        <li><strong>Modo Temporal y Modo Estático:</strong> Opciones con cortina ciega y bloqueo de arrastre de cámara 360°.</li>
+                        <li><strong>Dispersión Geográfica de 161 Metros:</strong> Algoritmo para evitar rondas consecutivas en la misma ubicación.</li>
+                        <li><strong>Selectores Táctiles Tipo Píldora:</strong> Diseño táctil sin dropdowns para pantallas táctiles y móviles.</li>
+                    </ul>
+                </div>
+
+                <!-- BETA v1.0.0 -->
+                <div class="changelog-entry">
+                    <div class="changelog-title-row">
+                        <span class="changelog-version">BETA v1.0.0</span>
+                        <span class="changelog-badge">Lanzamiento</span>
+                    </div>
+                    <ul class="changelog-list-items">
+                        <li><strong>Lanzamiento Inicial de GG-TLALTE:</strong> Juego de adivinar ubicaciones en Tlaltenango de Sánchez Román, Zacatecas.</li>
+                        <li><strong>Multijugador Híbrido P2P:</strong> Salas de hasta 25 jugadores con colores individuales.</li>
+                        <li><strong>Sistema de Duelo:</strong> Daño por diferencia de distancia y cuenta regresiva de prisa de 15 segundos.</li>
+                        <li><strong>Leaderboard Global en Solitario:</strong> Clasificación por rondas y puntuación geodésica.</li>
+                    </ul>
+                </div>
+            </div>
+            <button type="button" class="btn-primary" id="changelogCloseBtnBottom">Cerrar</button>
+        </div>
+    </div>
+
     <!-- Toast -->
     <div id="toast"></div>
 
@@ -364,6 +788,6 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
     <script src="js/keys.js"></script>
-    <script type="module" src="js/app.js?v=1.5.3"></script>
+    <script type="module" src="js/app.js?v=1.7.7"></script>
 </body>
 </html>

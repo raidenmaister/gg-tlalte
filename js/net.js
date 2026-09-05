@@ -9,8 +9,8 @@
 //    exactamente igual y sin requerir servidores TURN adicionales ni VPS.
 // ============================================================================
 
-import { CONFIG } from './config.js?v=1.5.3';
-import { generateCode } from './utils.js?v=1.5.3';
+import { CONFIG } from './config.js?v=1.7.7';
+import { generateCode } from './utils.js?v=1.7.7';
 
 const API_URL = 'api.php';
 
@@ -42,6 +42,12 @@ export class Network {
 
     this.rounds = CONFIG.DUEL_ROUNDS;
     this.limit = CONFIG.ROOM_MAX_PLAYERS;
+    this.gameMode = 'normal';
+    this.zoomMode = false;
+    this.blurMode = false;
+    this.temporalSeconds = CONFIG.DEFAULT_TEMPORAL_SECONDS || 3;
+    this.tunnelSeconds = CONFIG.DEFAULT_TUNNEL_SECONDS || 3;
+    this.blurSeconds = CONFIG.DEFAULT_BLUR_SECONDS || 3;
 
     this._localName = '';
     this._guestPlayers = [];
@@ -56,6 +62,7 @@ export class Network {
     this._pollTimer = null;
     this._lastPollSeq = 0;
     this._seenMids = new Set();
+    this._awaitingGuesses = false;
   }
 
   get isHost() {
@@ -96,15 +103,19 @@ export class Network {
       this.rounds = config.rounds;
       this.limit = config.limit;
       if (config.gameMode) this.gameMode = config.gameMode;
+      if (config.zoomMode !== undefined) this.zoomMode = !!config.zoomMode;
+      if (config.blurMode !== undefined) this.blurMode = !!config.blurMode;
       if (config.temporalSeconds) this.temporalSeconds = config.temporalSeconds;
+      if (config.tunnelSeconds) this.tunnelSeconds = config.tunnelSeconds;
+      if (config.blurSeconds) this.blurSeconds = config.blurSeconds;
     }
   }
 
   /** Envía un mensaje al host (solo guest). */
   send(obj) {
     if (!obj._mid) obj._mid = generateCode(8) + '-' + Date.now();
-    obj.senderId = this.myId;
-    obj.senderName = this._localName;
+    if (!obj.senderId) obj.senderId = this.myId;
+    if (!obj.senderName) obj.senderName = this._localName;
     const conn = this.conns.get('__host__');
     let sentP2P = false;
     if (conn && conn.open) {
@@ -115,8 +126,11 @@ export class Network {
         LOG('send P2P error, enviando por HTTP', e);
       }
     }
-    // Si no hay P2P abierto o está negociando, enviar por relay HTTP
-    if (!sentP2P && this.roomId) {
+    // Mensajes críticos (como conjeturas 'guess' o confirmación 'ready') usan transporte dual:
+    // se envían por WebRTC y SIEMPRE también por HTTP relay si hay sala, asegurando 100% de entrega
+    // ante desconexiones silenciosas o pérdida de paquetes UDP/P2P.
+    const isCritical = obj.type === 'guess' || obj.type === 'ready';
+    if ((!sentP2P || isCritical) && this.roomId) {
       this._api('send-msg', {
         id: this.roomId,
         from: this.myId || 'guest',
@@ -129,14 +143,15 @@ export class Network {
   /**
    * Envía un mensaje a todos los invitados (solo host).
    */
-  broadcast(obj) {
+  broadcast(obj, excludePeerId = null) {
     if (!obj._mid) obj._mid = generateCode(8) + '-' + Date.now();
-    obj.senderId = this.myId;
-    obj.senderName = this._localName;
+    if (!obj.senderId) obj.senderId = this.myId;
+    if (!obj.senderName) obj.senderName = this._localName;
     let raw = null;
     let p2pCount = 0;
     this.conns.forEach((conn, peerId) => {
       if (peerId === '__host__' || !conn || !conn.open) return;
+      if (excludePeerId && (peerId === excludePeerId || conn.peer === excludePeerId)) return;
       if (raw === null) raw = JSON.stringify(obj);
       try {
         conn.send(raw);
@@ -145,8 +160,8 @@ export class Network {
     });
 
     // Si hay invitados que no tienen canal P2P abierto o no hay ninguno,
-    // se transmite por el relay HTTP
-    if (this.roomId && (p2pCount < this.guestNames.size || p2pCount === 0)) {
+    // se transmite por el relay HTTP (los eventos de tipeo solo van por P2P para no cargar PHP)
+    if (this.roomId && obj.type !== 'lobbyTyping' && (p2pCount < this.guestNames.size || p2pCount === 0)) {
       this._api('send-msg', {
         id: this.roomId,
         from: this.myId || 'host',
@@ -239,7 +254,10 @@ export class Network {
   /** Lista las salas públicas registradas en el servidor. */
   async listPublicRooms() {
     try {
-      const res = await fetch(`${API_URL}?action=list`);
+      const res = await fetch(`${API_URL}?action=list&_t=${Date.now()}`, {
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache' },
+      });
       const data = await res.json();
       if (data && data.ok) return data.rooms || [];
     } catch (e) {
@@ -257,7 +275,11 @@ export class Network {
       isPublic: isPublic ? 1 : 0,
       rounds: this.rounds || CONFIG.DUEL_ROUNDS,
       gameMode: this.gameMode || 'normal',
+      zoomMode: this.zoomMode ? 1 : 0,
+      blurMode: this.blurMode ? 1 : 0,
       temporalSeconds: this.temporalSeconds || CONFIG.DEFAULT_TEMPORAL_SECONDS,
+      tunnelSeconds: this.tunnelSeconds || CONFIG.DEFAULT_TUNNEL_SECONDS,
+      blurSeconds: this.blurSeconds || CONFIG.DEFAULT_BLUR_SECONDS,
     }).then((res) => {
       if ((!res || !res.ok) && isPublic && this.cb.onError) {
         this.cb.onError('public-register');
@@ -305,7 +327,7 @@ export class Network {
       const count = Math.max(1, this.players.length);
       const status = this.isGameInProgress() ? 'in_progress' : (this.roomStatus || 'waiting');
       this._api('update', { id: this.roomId, count, status }).catch(() => {});
-    }, 10000); // 10 segundos
+    }, 5000); // 5 segundos para reactividad inmediata
   }
 
   _clearHeartbeat() {
@@ -315,15 +337,26 @@ export class Network {
     }
   }
 
+  setAwaitingGuesses(val) {
+    this._awaitingGuesses = !!val;
+    if (this._awaitingGuesses && !this._pollTimer && this.roomId && this.isHost) {
+      this._startPolling();
+    }
+  }
+
   _startPolling() {
     this._stopPolling();
-    // Polling ligero (2.5s) que se apaga automáticamente cuando WebRTC P2P conecta con todos los clientes
+    // Polling ligero (2s) que se apaga automáticamente cuando WebRTC P2P conecta con todos los clientes,
+    // EXCEPTO cuando se está en una ronda activa esperando conjeturas de los jugadores.
     this._pollTimer = setInterval(async () => {
       if (this._closing || !this.roomId) return;
       // Si P2P ya está activo con todos los invitados (solo host), no gastar peticiones en PHP
+      // salvo que estemos esperando conjeturas en una ronda en curso.
       if (this.isHost && this._p2pConnected && this.conns.size >= this.guestNames.size && this.guestNames.size > 0) {
-        this._stopPolling();
-        return;
+        if (!this._awaitingGuesses) {
+          this._stopPolling();
+          return;
+        }
       }
       const res = await this._api('poll-msgs', {
         id: this.roomId,
@@ -522,6 +555,25 @@ export class Network {
     if (this.cb.onMessage) this.cb.onMessage(data, peerId);
   }
 
+  _handleGuestLeave(peerId, playerName = '') {
+    LOG('_handleGuestLeave', { peerId, playerName });
+    const targetName = (playerName || '').trim().toLowerCase();
+    for (const [id, name] of this.guestNames.entries()) {
+      if (id === peerId || (targetName && name.trim().toLowerCase() === targetName)) {
+        const conn = this.conns.get(id);
+        if (conn) {
+          try { conn.close(); } catch (e) {}
+          this.conns.delete(id);
+        }
+        this.guestNames.delete(id);
+      }
+    }
+    this._syncPlayers();
+    if (this.cb.onGuestLeave) {
+      this.cb.onGuestLeave(peerId, playerName);
+    }
+  }
+
   /* ------------------------------ HOST ---------------------------------- */
   createRoom(name, isPublic = false, opts = {}) {
     LOG('createRoom', { name, isPublic, opts });
@@ -531,7 +583,11 @@ export class Network {
     this.isPublic = isPublic;
     this.rounds = opts.rounds || CONFIG.DUEL_ROUNDS;
     this.gameMode = opts.gameMode || 'normal';
+    this.zoomMode = !!opts.zoomMode;
+    this.blurMode = !!opts.blurMode;
     this.temporalSeconds = Number(opts.temporalSeconds) || CONFIG.DEFAULT_TEMPORAL_SECONDS;
+    this.tunnelSeconds = Number(opts.tunnelSeconds) || CONFIG.DEFAULT_TUNNEL_SECONDS;
+    this.blurSeconds = Number(opts.blurSeconds) || CONFIG.DEFAULT_BLUR_SECONDS;
     this.limit = Math.min(
       CONFIG.ROOM_MAX_PLAYERS,
       Math.max(CONFIG.ROOM_MIN_PLAYERS, opts.limit || CONFIG.ROOM_MAX_PLAYERS)
@@ -558,6 +614,9 @@ export class Network {
     this.rounds = saved.rounds || CONFIG.DUEL_ROUNDS;
     this.gameMode = saved.gameMode || 'normal';
     this.temporalSeconds = saved.temporalSeconds || CONFIG.DEFAULT_TEMPORAL_SECONDS;
+    this.tunnelSeconds = saved.tunnelSeconds || CONFIG.DEFAULT_TUNNEL_SECONDS;
+    this.blurSeconds = saved.blurSeconds || CONFIG.DEFAULT_BLUR_SECONDS;
+    this.blurMode = !!saved.blurMode;
     this.limit = Math.min(
       CONFIG.ROOM_MAX_PLAYERS,
       Math.max(CONFIG.ROOM_MIN_PLAYERS, saved.limit || CONFIG.ROOM_MAX_PLAYERS)
@@ -737,7 +796,11 @@ export class Network {
       if (typeof raw === 'string') {
         try { data = JSON.parse(raw); } catch (e) { data = { type: 'raw', raw }; }
       }
-      this._handleIncoming(data, conn.peer);
+      try {
+        this._handleIncoming(data, conn.peer);
+      } catch (err) {
+        LOG('Error en _handleIncoming:', err);
+      }
     });
 
     conn.on('close', () => {
@@ -800,7 +863,11 @@ export class Network {
       rounds: this.rounds,
       limit: this.limit,
       gameMode: this.gameMode || 'normal',
+      zoomMode: this.zoomMode,
+      blurMode: this.blurMode,
       temporalSeconds: this.temporalSeconds || CONFIG.DEFAULT_TEMPORAL_SECONDS,
+      tunnelSeconds: this.tunnelSeconds || CONFIG.DEFAULT_TUNNEL_SECONDS,
+      blurSeconds: this.blurSeconds || CONFIG.DEFAULT_BLUR_SECONDS,
     };
     LOG('_syncPlayers', { count: players.length });
     this.broadcast({ type: 'players', players, config });
@@ -824,7 +891,7 @@ export class Network {
         this._api('delete', { id: this.roomId });
       }
     } else if (!this.isHost && !this._closing) {
-      const msg = { type: 'guestLeave', peerId: this.myId, name: this.myName };
+      const msg = { type: 'guestLeave', peerId: this.myId, name: this._localName };
       try { this.broadcast(msg); } catch (e) {}
       if (this.roomId) {
         this._api('send-msg', { id: this.roomId, from: this.myId || 'guest', to: 'host', payload: JSON.stringify(msg) });

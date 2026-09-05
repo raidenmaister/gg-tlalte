@@ -2,7 +2,7 @@
 // utils.js — Utilidades puras: matemáticas geográficas, puntuación, RNG, DOM.
 // ============================================================================
 
-import { CONFIG, damageMultiplier } from './config.js?v=1.5.3';
+import { CONFIG, damageMultiplier } from './config.js?v=1.7.7';
 
 /** Selector corto para querySelector. */
 export function $(sel, root = document) {
@@ -57,6 +57,59 @@ export function scoreForDistance(distanceKm) {
   return clamp(Math.floor(raw), 0, CONFIG.BASE_SCORE);
 }
 
+/**
+ * Curva de puntuación para el Modo Zoom Progresivo (Visión Túnel).
+ * Si se adivina con zoom máximo (paso 4) y muy cerca (<= 25m), otorga bonificación
+ * que supera los 5,000 pts (hasta 6,500 pts).
+ * A mayor distancia resta puntos progresivamente, pero con menor penalización
+ * a quien arriesgó con zoom alto respecto a quien esperó a la vista normal.
+ * @param {number} distanceKm Distancia de la conjetura en km.
+ * @param {number} zoomStep Nivel de zoom en el momento del guess (1 a 4).
+ */
+export function scoreForDistanceTunnel(distanceKm, zoomStep = 1) {
+  const step = clamp(Math.round(zoomStep || 1), 1, 4);
+  const maxScores = CONFIG.TUNNEL_MAX_SCORES || [5000, 5250, 5750, 6500];
+  const decayDistances = CONFIG.TUNNEL_DECAY_DISTANCES || [1.2, 1.4, 1.7, 2.1];
+
+  const maxScore = maxScores[step - 1] || CONFIG.BASE_SCORE;
+  const decayKm = decayDistances[step - 1] || CONFIG.SCORE_DISTANCE;
+
+  if (distanceKm <= CONFIG.PERFECT_DISTANCE) {
+    return maxScore;
+  }
+  const raw = maxScore * Math.exp(-distanceKm / decayKm);
+  return clamp(Math.floor(raw), 0, maxScore);
+}
+
+/**
+ * Curva de puntuación para el Modo Borroso (Desenfocado Progresivo).
+ * Si se adivina en la Fase 1 (100% borroso) a <= 25m (Perfect), otorga hasta 7,000 pts.
+ * En fases posteriores (80%, 60%, 40%, 20%, 0%) otorga puntuación escalada.
+ * Si excede los 25m decae exponencialmente según la distancia.
+ * @param {number} distanceKm Distancia de la conjetura en km.
+ * @param {number} blurPhase Fase de desenfoque (1 = 100%, 2 = 80%, 3 = 60%, 4 = 40%, 5 = 20%, 0 = nítido).
+ */
+export function scoreForDistanceBlur(distanceKm, blurPhase = 1) {
+  const maxScores = CONFIG.BLUR_MAX_SCORES || [7000, 6400, 5900, 5500, 5200, 5000];
+  const decayDistances = CONFIG.BLUR_DECAY_DISTANCES || [2.2, 1.9, 1.6, 1.4, 1.3, 1.2];
+
+  let idx = 5; // Por defecto nítido (5,000 pts)
+  if (blurPhase >= 1 && blurPhase <= 5) {
+    idx = blurPhase - 1;
+  } else if (blurPhase === 0) {
+    idx = 5;
+  }
+
+  const maxScore = maxScores[idx] || CONFIG.BASE_SCORE;
+  const decayKm = decayDistances[idx] || CONFIG.SCORE_DISTANCE;
+
+  if (distanceKm <= CONFIG.PERFECT_DISTANCE) {
+    return maxScore;
+  }
+  const raw = maxScore * Math.exp(-distanceKm / decayKm);
+  return clamp(Math.floor(raw), 0, maxScore);
+}
+
 /** Daño infligido por la diferencia de puntos multiplicada por el multiplicador. */
 export function computeDamage(winnerScore, loserScore, round) {
   const diff = Math.max(0, winnerScore - loserScore);
@@ -92,8 +145,10 @@ export function pickIndices(length, count, rng = Math.random) {
 }
 
 /**
- * Devuelve n índices únicos donde cada ubicación consecutiva dista al menos
- * minDistanceKm (por defecto 161 metros = 0.161 km) de la anterior.
+ * Devuelve n índices únicos donde CADA ubicación dista al menos
+ * minDistanceKm (por defecto 161 metros = 0.161 km) de TODAS las demás ubicaciones
+ * ya seleccionadas en la partida (no solo de la inmediatamente anterior).
+ * Evita que se repitan zonas o calles cercanas a lo largo de las 5, 7, 10 o 15 rondas.
  */
 export function pickSeparatedIndices(coordenadas, count, minDistanceKm = 0.161, rng = Math.random) {
   if (!Array.isArray(coordenadas) || coordenadas.length === 0) return [];
@@ -102,41 +157,77 @@ export function pickSeparatedIndices(coordenadas, count, minDistanceKm = 0.161, 
     return pickIndices(total, count, rng);
   }
 
+  // Intentos para encontrar una combinación donde el 100% de los pares disten >= minDistanceKm
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const selected = [];
+    const used = new Set();
+
+    const first = Math.floor(rng() * total);
+    selected.push(first);
+    used.add(first);
+
+    let completed = true;
+    for (let i = 1; i < count; i++) {
+      const candidates = [];
+      for (let idx = 0; idx < total; idx++) {
+        if (used.has(idx)) continue;
+        const c = coordenadas[idx];
+        let valid = true;
+        for (let s = 0; s < selected.length; s++) {
+          const selCoord = coordenadas[selected[s]];
+          if (haversineKm(selCoord.lat, selCoord.lng, c.lat, c.lng) < minDistanceKm) {
+            valid = false;
+            break;
+          }
+        }
+        if (valid) {
+          candidates.push(idx);
+        }
+      }
+
+      if (candidates.length === 0) {
+        completed = false;
+        break;
+      }
+
+      const nextIdx = candidates[Math.floor(rng() * candidates.length)];
+      selected.push(nextIdx);
+      used.add(nextIdx);
+    }
+
+    if (completed && selected.length === count) {
+      return selected;
+    }
+  }
+
+  // Fallback de máxima dispersión (si el catálogo es muy reducido o denso):
+  // Selección voraz maximizando la distancia mínima respecto a todos los ya elegidos
   const selected = [];
   const used = new Set();
+  const first = Math.floor(rng() * total);
+  selected.push(first);
+  used.add(first);
 
-  let currentIdx = Math.floor(rng() * total);
-  selected.push(currentIdx);
-  used.add(currentIdx);
-
-  for (let i = 1; i < count; i++) {
-    const prev = coordenadas[currentIdx];
-    const candidates = [];
+  while (selected.length < count) {
+    let bestIdx = -1;
+    let maxMinDist = -1;
     for (let idx = 0; idx < total; idx++) {
       if (used.has(idx)) continue;
       const c = coordenadas[idx];
-      const dist = haversineKm(prev.lat, prev.lng, c.lat, c.lng);
-      if (dist >= minDistanceKm) {
-        candidates.push(idx);
+      let minDist = Infinity;
+      for (let s = 0; s < selected.length; s++) {
+        const selCoord = coordenadas[selected[s]];
+        const d = haversineKm(selCoord.lat, selCoord.lng, c.lat, c.lng);
+        if (d < minDist) minDist = d;
+      }
+      if (minDist > maxMinDist) {
+        maxMinDist = minDist;
+        bestIdx = idx;
       }
     }
-
-    let nextIdx;
-    if (candidates.length > 0) {
-      nextIdx = candidates[Math.floor(rng() * candidates.length)];
-    } else {
-      // Fallback: si no hay candidatos a >= 161m, toma cualquiera no usado
-      const remaining = [];
-      for (let idx = 0; idx < total; idx++) {
-        if (!used.has(idx)) remaining.push(idx);
-      }
-      if (remaining.length === 0) break;
-      nextIdx = remaining[Math.floor(rng() * remaining.length)];
-    }
-
-    currentIdx = nextIdx;
-    selected.push(currentIdx);
-    used.add(currentIdx);
+    if (bestIdx === -1) break;
+    selected.push(bestIdx);
+    used.add(bestIdx);
   }
 
   return selected;
@@ -148,40 +239,40 @@ export function pickSeparatedIndices(coordenadas, count, minDistanceKm = 0.161, 
  */
 export function greatCirclePoints(lat1, lon1, lat2, lon2, segments = 64) {
   const toDeg = (r) => (r * 180) / Math.PI;
-  const φ1 = toRad(lat1);
-  const λ1 = toRad(lon1);
-  const φ2 = toRad(lat2);
-  const λ2 = toRad(lon2);
+  const phi1 = toRad(lat1);
+  const lambda1 = toRad(lon1);
+  const phi2 = toRad(lat2);
+  const lambda2 = toRad(lon2);
 
   const d =
     2 *
     Math.asin(
       Math.sqrt(
-        Math.sin((φ2 - φ1) / 2) ** 2 +
-          Math.cos(φ1) * Math.cos(φ2) * Math.sin((λ2 - λ1) / 2) ** 2
+        Math.sin((phi2 - phi1) / 2) ** 2 +
+          Math.cos(phi1) * Math.cos(phi2) * Math.sin((lambda2 - lambda1) / 2) ** 2
       )
     );
 
   const points = [];
   for (let i = 0; i <= segments; i++) {
     const f = i / segments;
-    let φ, λ;
+    let phi, lambda;
     if (d < 1e-9) {
       // Distancia casi nula: interpolación lineal.
-      φ = φ1 + (φ2 - φ1) * f;
-      λ = λ1 + (λ2 - λ1) * f;
+      phi = phi1 + (phi2 - phi1) * f;
+      lambda = lambda1 + (lambda2 - lambda1) * f;
     } else {
       const A = Math.sin((1 - f) * d) / Math.sin(d);
       const B = Math.sin(f * d) / Math.sin(d);
       const x =
-        A * Math.cos(φ1) * Math.cos(λ1) + B * Math.cos(φ2) * Math.cos(λ2);
+        A * Math.cos(phi1) * Math.cos(lambda1) + B * Math.cos(phi2) * Math.cos(lambda2);
       const y =
-        A * Math.cos(φ1) * Math.sin(λ1) + B * Math.cos(φ2) * Math.sin(λ2);
-      const z = A * Math.sin(φ1) + B * Math.sin(φ2);
-      φ = Math.atan2(z, Math.sqrt(x * x + y * y));
-      λ = Math.atan2(y, x);
+        A * Math.cos(phi1) * Math.sin(lambda1) + B * Math.cos(phi2) * Math.sin(lambda2);
+      const z = A * Math.sin(phi1) + B * Math.sin(phi2);
+      phi = Math.atan2(z, Math.sqrt(x * x + y * y));
+      lambda = Math.atan2(y, x);
     }
-    points.push([toDeg(φ), toDeg(λ)]);
+    points.push([toDeg(phi), toDeg(lambda)]);
   }
   return points;
 }

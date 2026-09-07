@@ -2,14 +2,14 @@
 // app.js — Punto de entrada. Coordina UI, red, visor panorámico y juego.
 // ============================================================================
 
-import { $, formatKm, formatNumber, clamp, escapeHtml, detectPotatoMode } from './utils.js?v=1.7.7';
-import { CONFIG } from './config.js?v=1.7.7';
-import { audio } from './audio.js?v=1.7.7';
-import { PanoramaViewer } from './panorama.js?v=1.7.7';
-import { Minimap } from './minimap.js?v=1.7.7';
-import { Network } from './net.js?v=1.7.7';
-import { Game } from './game.js?v=1.7.7';
-import { AsciiEarthBackground } from './ascii-earth.js?v=1.7.7';
+import { $, formatKm, formatNumber, clamp, escapeHtml, detectPotatoMode } from './utils.js?v=1.8.5';
+import { CONFIG } from './config.js?v=1.8.5';
+import { audio } from './audio.js?v=1.8.5';
+import { PanoramaViewer } from './panorama.js?v=1.8.5';
+import { Minimap } from './minimap.js?v=1.8.5';
+import { Network } from './net.js?v=1.8.5';
+import { Game } from './game.js?v=1.8.5';
+import { AsciiEarthBackground } from './ascii-earth.js?v=1.8.5';
 
 const PLAYER_KEY = 'ggtlalte:playerName';
 const ROOM_KEY = 'ggtlalte:activeRoom';
@@ -32,8 +32,19 @@ let minimapPinned = false;
 let viewersReady = false;
 let dataPromise = null;
 
+let isCreatingRoom = false;
+function setCreateRoomLoading(loading) {
+  isCreatingRoom = !!loading;
+  const btn = $('#createRoomConfirmBtn');
+  if (btn) {
+    btn.disabled = isCreatingRoom;
+    btn.textContent = isCreatingRoom ? 'Creando sala…' : '🚀 Crear sala';
+  }
+}
+
 /* --------------------------- Utilidades DOM ---------------------------- */
 function showScreen(id) {
+  setCreateRoomLoading(false);
   document.querySelectorAll('.screen').forEach((s) => s.classList.add('hidden'));
   const el = document.getElementById('screen-' + id);
   if (el) el.classList.remove('hidden');
@@ -223,7 +234,7 @@ function renderMultiHp(players) {
   const box = $('#hudHp');
   if (!box) return;
   box.innerHTML = '';
-  if (players && players.length > 10) {
+  if (players && players.length > 5) {
     box.classList.add('many-players');
   } else {
     box.classList.remove('many-players');
@@ -389,7 +400,15 @@ function renderConfirm({ enabled }) {
 
 function renderWaiting({ waiting }) {
   $('#waitingBanner').classList.toggle('hidden', !waiting);
-  if (waiting) collapseMinimap();
+  if (waiting) {
+    collapseMinimap();
+    const tb = $('#tunnelBanner');
+    if (tb) tb.classList.add('hidden');
+    const bb = $('#blurBanner');
+    if (bb) bb.classList.add('hidden');
+    const tempB = $('#temporalBanner');
+    if (tempB) tempB.classList.add('hidden');
+  }
 }
 
 function renderCountdown({ seconds, guesserName, penalty }) {
@@ -399,6 +418,9 @@ function renderCountdown({ seconds, guesserName, penalty }) {
   const sub = banner ? banner.querySelector('.countdown-sub') : null;
   if (seconds == null || seconds <= 0) {
     banner.classList.add('hidden');
+    if (game.myGuess) {
+      $('#waitingBanner').classList.remove('hidden');
+    }
   } else {
     banner.classList.remove('hidden');
     num.textContent = `${seconds}s`;
@@ -406,6 +428,8 @@ function renderCountdown({ seconds, guesserName, penalty }) {
     if (label) {
       if (game.myGuess) {
         label.textContent = 'Tiempo para tus rivales:';
+        // Si ya adiviné y se muestra el countdown para rivales, ocultar waitingBanner para no duplicar ni amontonar avisos
+        $('#waitingBanner').classList.add('hidden');
       } else if (guesserName) {
         label.textContent = `¡${guesserName} ya adivinó!`;
       } else {
@@ -449,6 +473,65 @@ function statRow(label, value, cls = '') {
 function renderResult(result) {
   resetGuessUI();
   $('#gameOverPanel').classList.add('hidden');
+
+  if (result.isRace) {
+    minimap.setFullscreen(true);
+    minimap.setInteractive(false);
+    if (result.real && minimap.revealMulti) {
+      minimap.revealMulti(result.players, result.real);
+    }
+    const hudTop = $('.hud-top');
+    if (hudTop) hudTop.classList.add('over-map');
+
+    const resultPanel = $('#resultPanel');
+    resultPanel.classList.remove('hidden');
+    resultPanel.classList.add('result-overlay', 'result-multi');
+
+    const title = $('#resultTitle');
+    title.textContent = `Ronda ${result.round}/${result.total} · Resultados de Carrera`;
+    title.className = 'panel-title panel-title-neutral';
+
+    const stats = $('#resultStats');
+    const colors = CONFIG.PLAYER_COLORS || [
+      '#38bdf8', '#f87171', '#34d399', '#fbbf24',
+      '#a78bfa', '#f472b6', '#2dd4bf', '#fb923c',
+      '#a3e635', '#818cf8', '#e879f9', '#facc15'
+    ];
+
+    const sorted = [...result.players].sort((a, b) => {
+      if (a.rank != null && b.rank != null) return a.rank - b.rank;
+      if (a.rank != null) return -1;
+      if (b.rank != null) return 1;
+      return (b.score || 0) - (a.score || 0);
+    });
+
+    stats.innerHTML = sorted.map((p, i) => {
+      const color = colors[i % colors.length];
+      const rankBadge = p.rank != null
+        ? `<span class="res-damage-badge safe">#${p.rank} (${p.finishTimeSec}s)</span>`
+        : `<span class="res-damage-badge hit">A ${p.finalDistMeters}m</span>`;
+      return `
+        <div class="res-multi-row">
+          <div class="res-multi-info">
+            <div class="res-multi-name" style="color:${color};">
+              <span class="res-color-dot" style="background:${color};"></span>
+              ${escapeHtml(p.name)}
+            </div>
+            <div class="res-multi-meta">
+              +${formatNumber(p.score)} pts · Total: ${formatNumber(p.totalScore)} pts
+            </div>
+          </div>
+          ${rankBadge}
+        </div>
+      `;
+    }).join('');
+
+    $('#resultNextBtn').classList.add('hidden');
+    const note = $('#resultNote');
+    note.classList.remove('hidden');
+    note.textContent = 'Siguiente ronda en unos segundos…';
+    return;
+  }
 
   // Solo: mapa a pantalla completa + botón flotante de "siguiente".
   // Multijugador: mapa a pantalla completa sin panel bloqueante (visibilidad total de chinchetas y daño en barras HUD).
@@ -591,6 +674,24 @@ function renderGameOver(result) {
     ].join('');
   } else {
     // Multijugador: ranking final.
+    if (result.isRace) {
+      if (result.won) {
+        title.textContent = '¡CAMPEÓN DE LA CARRERA!';
+        title.className = 'panel-title panel-title-win';
+      } else {
+        title.textContent = 'Fin de la Carrera';
+        title.className = 'panel-title panel-title-neutral';
+      }
+      stats.innerHTML = result.players.map((p) =>
+        statRow(
+          `#${p.rank} ${p.name}`,
+          `${formatNumber(p.score)} pts`
+        )
+      ).join('');
+      $('#gameOverPanel').classList.remove('hidden');
+      return;
+    }
+
     if (result.won) {
       title.textContent = result.reason === 'forfeit' ? '¡VICTORIA POR ABANDONO!' : '¡VICTORIA!';
       title.className = 'panel-title panel-title-win';
@@ -619,6 +720,11 @@ function resetGuessUI() {
   if (tunnelBanner) tunnelBanner.classList.add('hidden');
   const blurBanner = $('#blurBanner');
   if (blurBanner) blurBanner.classList.add('hidden');
+  const raceHud = $('#raceHud');
+  if (raceHud) raceHud.classList.add('hidden');
+  const raceArrivalBanner = $('#raceArrivalBanner');
+  if (raceArrivalBanner) raceArrivalBanner.classList.add('hidden');
+  document.body.classList.remove('is-race-mode');
   $('#hudTimer').classList.remove('prepare');
   $('#confirmBtn').disabled = true;
   if (pano) {
@@ -745,7 +851,10 @@ function renderLobby() {
   const roundsInfo = $('#roomRoundsInfo');
   if (roundsInfo) {
     let modeText = 'Modo Normal';
-    if (net.gameMode === 'static') modeText = 'Modo Estático';
+    if (net.gameMode === 'race') {
+      const dist = net.raceDistance ? (Number(net.raceDistance) >= 1000 ? ` · ${Number(net.raceDistance) / 1000}km` : ` · ${net.raceDistance}m`) : '';
+      modeText = `Modo Carrera (Normal)${dist}`;
+    } else if (net.gameMode === 'static') modeText = 'Modo Estático';
     else if (net.gameMode === 'temporal') modeText = `Modo Temporal (${net.temporalSeconds || 3}s)`;
     else if (net.gameMode === 'tunnel') modeText = `Zoom Progresivo (${net.tunnelSeconds || 3}s)`;
     else if (net.gameMode === 'static_tunnel') modeText = `Estático con Zoom (${net.tunnelSeconds || 3}s)`;
@@ -1124,9 +1233,26 @@ function renderPublicList(rooms) {
     empty.classList.remove('hidden');
     return;
   }
+
+  // Filtrar duplicados por nombre de anfitrión si los hubiera
+  const seenHostNames = new Set();
+  const filteredRooms = [];
+  for (const r of rooms) {
+    const hName = (r.name || '').trim().toLowerCase();
+    if (hName) {
+      if (seenHostNames.has(hName)) continue;
+      seenHostNames.add(hName);
+    }
+    filteredRooms.push(r);
+  }
+
+  if (!filteredRooms.length) {
+    empty.classList.remove('hidden');
+    return;
+  }
   empty.classList.add('hidden');
 
-  rooms.forEach((room) => {
+  filteredRooms.forEach((room) => {
     const li = document.createElement('li');
     li.className = 'public-room';
 
@@ -1144,7 +1270,10 @@ function renderPublicList(rooms) {
     const rounds = Number(room.rounds) || 5;
 
     let modeLabel = '🎮 Normal';
-    if (room.gameMode === 'static_tunnel') {
+    if (room.gameMode === 'race') {
+      const dist = Number(room.raceDistance) >= 1000 ? `${(Number(room.raceDistance) / 1000)}km` : `${room.raceDistance || 1000}m`;
+      modeLabel = `🏁 Carrera (Normal) · ${dist}`;
+    } else if (room.gameMode === 'static_tunnel') {
       const secs = Number(room.tunnelSeconds) || 3;
       modeLabel = `🛑 Estático + 🔍 Zoom (${secs}s)`;
     } else if (room.gameMode === 'tunnel') {
@@ -1320,6 +1449,8 @@ let multiStaticVariant = 'standard';
 let currentMultiTemporalSecs = CONFIG.DEFAULT_TEMPORAL_SECONDS || 3;
 let currentMultiTunnelSecs = CONFIG.DEFAULT_TUNNEL_SECONDS || 3;
 let currentMultiBlurSecs = CONFIG.DEFAULT_BLUR_SECONDS || 3;
+let currentMultiRaceDist = CONFIG.DEFAULT_RACE_DISTANCE || 1000;
+let currentMultiRaceSecs = CONFIG.DEFAULT_RACE_DURATION || 150;
 
 async function startSolo(rounds = soloRounds) {
   soloRounds = rounds;
@@ -1382,17 +1513,28 @@ async function hostStartGame() {
     setTimeout(() => pano.refresh(), 60);
     game.meName = meName;
 
+    const isRace = (currentMultiMode === 'normal' && multiNormalVariant === 'race');
     const isZoom = (currentMultiMode === 'normal' && multiNormalVariant === 'zoom') ||
                    (currentMultiMode === 'static' && multiStaticVariant === 'zoom');
     const isBlur = (currentMultiMode === 'normal' && multiNormalVariant === 'blur') ||
                    (currentMultiMode === 'static' && multiStaticVariant === 'blur');
     let effectiveMode = currentMultiMode;
-    if (currentMultiMode === 'normal' && isZoom) effectiveMode = 'tunnel';
-    if (currentMultiMode === 'static' && isZoom) effectiveMode = 'static_tunnel';
-    if (currentMultiMode === 'normal' && isBlur) effectiveMode = 'blur';
-    if (currentMultiMode === 'static' && isBlur) effectiveMode = 'static_blur';
+    if (isRace) effectiveMode = 'race';
+    else if (currentMultiMode === 'normal' && isZoom) effectiveMode = 'tunnel';
+    else if (currentMultiMode === 'static' && isZoom) effectiveMode = 'static_tunnel';
+    else if (currentMultiMode === 'normal' && isBlur) effectiveMode = 'blur';
+    else if (currentMultiMode === 'static' && isBlur) effectiveMode = 'static_blur';
 
-    game.hostStart(effectiveMode, currentMultiTemporalSecs, currentMultiTunnelSecs, isZoom, currentMultiBlurSecs, isBlur);
+    await game.hostStart(
+      effectiveMode,
+      currentMultiTemporalSecs,
+      currentMultiTunnelSecs,
+      isZoom,
+      currentMultiBlurSecs,
+      isBlur,
+      currentMultiRaceDist,
+      currentMultiRaceSecs
+    );
   } catch (err) {
     net.updateRoomStatus('waiting');
     showError('Error al cargar: ' + err.message);
@@ -1402,22 +1544,27 @@ async function hostStartGame() {
 }
 
 function createRoom(isPublic = false) {
+  if (isCreatingRoom) return;
+  setCreateRoomLoading(true);
+
   audio.ensure();
   destroyLobbyChat();
   const rounds = Number($('#roomRounds').value) || CONFIG.DUEL_ROUNDS;
   const limit = Number($('#roomLimit').value) || CONFIG.ROOM_MAX_PLAYERS;
 
+  const isRace = (currentMultiMode === 'normal' && multiNormalVariant === 'race');
   const isZoom = (currentMultiMode === 'normal' && multiNormalVariant === 'zoom') ||
                  (currentMultiMode === 'static' && multiStaticVariant === 'zoom');
   const isBlur = (currentMultiMode === 'normal' && multiNormalVariant === 'blur') ||
                  (currentMultiMode === 'static' && multiStaticVariant === 'blur');
   let effectiveMode = currentMultiMode;
-  if (currentMultiMode === 'normal' && isZoom) effectiveMode = 'tunnel';
-  if (currentMultiMode === 'static' && isZoom) effectiveMode = 'static_tunnel';
-  if (currentMultiMode === 'normal' && isBlur) effectiveMode = 'blur';
-  if (currentMultiMode === 'static' && isBlur) effectiveMode = 'static_blur';
+  if (isRace) effectiveMode = 'race';
+  else if (currentMultiMode === 'normal' && isZoom) effectiveMode = 'tunnel';
+  else if (currentMultiMode === 'static' && isZoom) effectiveMode = 'static_tunnel';
+  else if (currentMultiMode === 'normal' && isBlur) effectiveMode = 'blur';
+  else if (currentMultiMode === 'static' && isBlur) effectiveMode = 'static_blur';
 
-  LOG('createRoom', { isPublic, meName, rounds, limit, effectiveMode, isZoom, isBlur, currentMultiTemporalSecs, currentMultiTunnelSecs, currentMultiBlurSecs });
+  LOG('createRoom', { isPublic, meName, rounds, limit, effectiveMode, isZoom, isBlur, currentMultiTemporalSecs, currentMultiTunnelSecs, currentMultiBlurSecs, currentMultiRaceDist, currentMultiRaceSecs });
   net.createRoom(meName, isPublic, {
     rounds,
     limit,
@@ -1427,6 +1574,8 @@ function createRoom(isPublic = false) {
     temporalSeconds: currentMultiTemporalSecs,
     tunnelSeconds: currentMultiTunnelSecs,
     blurSeconds: currentMultiBlurSecs,
+    raceDistance: currentMultiRaceDist,
+    raceSeconds: currentMultiRaceSecs,
   });
 }
 
@@ -1448,6 +1597,8 @@ function persistActiveRoom() {
     tunnelSeconds: net.tunnelSeconds,
     blurSeconds: net.blurSeconds,
     blurMode: net.blurMode,
+    raceDistance: net.raceDistance,
+    raceSeconds: net.raceSeconds,
   }));
 }
 
@@ -1779,6 +1930,7 @@ function wire() {
     const isNormalBlur = currentMultiMode === 'normal' && multiNormalVariant === 'blur';
     const isStaticBlur = currentMultiMode === 'static' && multiStaticVariant === 'blur';
     const hasBlur = isNormalBlur || isStaticBlur;
+    const isRace = currentMultiMode === 'normal' && multiNormalVariant === 'race';
 
     const normalSub = $('#multiNormalSubmode');
     if (normalSub) normalSub.classList.toggle('hidden', currentMultiMode !== 'normal');
@@ -1795,10 +1947,15 @@ function wire() {
     const blurConf = $('#multiBlurConfig');
     if (blurConf) blurConf.classList.toggle('hidden', !hasBlur);
 
+    const raceConf = $('#multiRaceConfig');
+    if (raceConf) raceConf.classList.toggle('hidden', !isRace);
+
     const descEl = $('#multiModeDesc');
     if (descEl) {
       if (currentMultiMode === 'normal') {
-        if (isNormalZoom) {
+        if (isRace) {
+          descEl.textContent = 'Modo Carrera al Objetivo: Todos aparecen a la misma distancia del objetivo. ¡Avanza por las calles con la brújula para llegar primero!';
+        } else if (isNormalZoom) {
           descEl.textContent = 'Modo Normal con Zoom: Todos juegan con vista 360° y zoom sincronizado que se aleja al mismo tiempo.';
         } else if (isNormalBlur) {
           descEl.textContent = 'Modo Normal Borroso: Todos juegan con vista 360° y desenfoque progresivo sincronizado.';
@@ -1865,6 +2022,20 @@ function wire() {
       document.querySelectorAll('#multiBlurPills .pill-btn').forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
       currentMultiBlurSecs = Number(btn.dataset.sec) || 3;
+    });
+  });
+  document.querySelectorAll('#multiRaceDistPills .pill-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#multiRaceDistPills .pill-btn').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentMultiRaceDist = Number(btn.dataset.dist) || 1000;
+    });
+  });
+  document.querySelectorAll('#multiRaceTimePills .pill-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#multiRaceTimePills .pill-btn').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentMultiRaceSecs = Number(btn.dataset.sec) || 150;
     });
   });
 
@@ -2101,6 +2272,12 @@ function wire() {
       return;
     }
     collapseMinimap();
+    const tb = $('#tunnelBanner');
+    if (tb) tb.classList.add('hidden');
+    const bb = $('#blurBanner');
+    if (bb) bb.classList.add('hidden');
+    const tempB = $('#temporalBanner');
+    if (tempB) tempB.classList.add('hidden');
     game.confirmGuess();
   });
   $('#leaveGameBtn').addEventListener('click', () => {
@@ -2243,7 +2420,7 @@ function wireGame() {
     const banner = $('#temporalBanner');
     const num = $('#temporalNumber');
     if (!banner || !num) return;
-    if (seconds == null || seconds <= 0) {
+    if (seconds == null || seconds <= 0 || (game && game.myGuess)) {
       banner.classList.add('hidden');
     } else {
       banner.classList.remove('hidden');
@@ -2258,7 +2435,7 @@ function wireGame() {
   game.on('tunnelProgress', (data) => {
     const banner = $('#tunnelBanner');
     if (!banner) return;
-    if (!data || data.isFinished) {
+    if (!data || data.isFinished || (game && game.myGuess)) {
       banner.classList.add('hidden');
       return;
     }
@@ -2293,7 +2470,7 @@ function wireGame() {
   game.on('blurProgress', (data) => {
     const banner = $('#blurBanner');
     if (!banner) return;
-    if (!data || data.isFinished) {
+    if (!data || data.isFinished || (game && game.myGuess)) {
       banner.classList.add('hidden');
       return;
     }
@@ -2340,6 +2517,67 @@ function wireGame() {
       }
     }
   });
+
+  game.on('raceStart', (data) => {
+    document.body.classList.add('is-race-mode');
+    const hud = $('#raceHud');
+    if (hud) hud.classList.remove('hidden');
+    const distVal = $('#raceDistVal');
+    if (distVal) distVal.textContent = `${data.targetDistance || 1000} m`;
+    const statusTag = $('#raceStatusTag');
+    if (statusTag) {
+      statusTag.textContent = 'EN CARRERA';
+      statusTag.className = 'race-status-tag';
+    }
+    const banner = $('#raceArrivalBanner');
+    if (banner) banner.classList.add('hidden');
+  });
+
+  game.on('raceUpdate', (data) => {
+    const distVal = $('#raceDistVal');
+    if (distVal && data.distanceMeters != null) {
+      distVal.textContent = `${data.distanceMeters} m`;
+    }
+    const arrow = $('#raceCompassArrow');
+    if (arrow && data.relativeAngle != null) {
+      arrow.style.transform = `rotate(${Math.round(data.relativeAngle)}deg)`;
+    }
+  });
+
+  game.on('raceCompass', (data) => {
+    const arrow = $('#raceCompassArrow');
+    if (arrow && data.relativeAngle != null) {
+      arrow.style.transform = `rotate(${Math.round(data.relativeAngle)}deg)`;
+    }
+  });
+
+  game.on('raceReached', (data) => {
+    const statusTag = $('#raceStatusTag');
+    if (statusTag) {
+      statusTag.textContent = '¡META ALCANZADA!';
+      statusTag.className = 'race-status-tag arrived';
+    }
+    const distVal = $('#raceDistVal');
+    if (distVal) distVal.textContent = '¡LLEGASTE!';
+  });
+
+  game.on('raceRankAssigned', (data) => {
+    const banner = $('#raceArrivalBanner');
+    if (!banner) return;
+    banner.classList.remove('hidden');
+    const badge = $('#raceArrivalBadge');
+    if (badge) badge.textContent = `#${data.rank}`;
+    const title = $('#raceArrivalTitle');
+    if (title) title.textContent = data.rank === 1 ? '¡PRIMER LUGAR!' : '¡META ALCANZADA!';
+    const timeEl = $('#raceArrivalTime');
+    if (timeEl) timeEl.textContent = `Tiempo de llegada: ${data.finishTimeSec}s`;
+  });
+
+  game.on('raceArrivalBanner', (data) => {
+    if (!data.isMe) {
+      showToast(`🏁 ${data.name} llegó a la meta en el puesto #${data.rank} (${data.finishTimeSec}s)`, 'info');
+    }
+  });
 }
 
 function wireNet() {
@@ -2348,12 +2586,47 @@ function wireNet() {
   };
 
   net.cb.isExistingActivePlayer = (name) => {
-    if (!game || !game.players || !game.players.length) return false;
     const lower = (name || '').trim().toLowerCase();
-    return game.players.some((p) => (p.name || '').trim().toLowerCase() === lower);
+    if (!lower) return false;
+    if (game && game.players && game.players.length > 0) {
+      if (game.players.some((p) => (p.name || '').trim().toLowerCase() === lower)) {
+        return true;
+      }
+    }
+    if (net && net.players && net.players.length > 0) {
+      if (net.players.some((p) => (p.name || '').trim().toLowerCase() === lower)) {
+        return true;
+      }
+    }
+    if (net && net.guestNames && net.guestNames.size > 0) {
+      for (const gn of net.guestNames.values()) {
+        if ((gn || '').trim().toLowerCase() === lower) return true;
+      }
+    }
+    return false;
+  };
+
+  net.cb.onPlayerPeerIdUpdated = (oldPeerId, newPeerId, name) => {
+    LOG('onPlayerPeerIdUpdated', { oldPeerId, newPeerId, name });
+    if (game && game.players) {
+      const lower = (name || '').trim().toLowerCase();
+      const p = game.players.find((pl) => pl.id === oldPeerId || (pl.name && pl.name.trim().toLowerCase() === lower));
+      if (p) {
+        p.id = newPeerId;
+        p.disconnected = false;
+      }
+    }
+  };
+
+  net.cb.onGuestReconnectInGame = (peerId, name) => {
+    LOG('onGuestReconnectInGame', { peerId, name });
+    if (game && typeof game.syncGuestReconnect === 'function') {
+      game.syncGuestReconnect(peerId);
+    }
   };
 
   net.cb.onStatus = (status) => {
+    setCreateRoomLoading(false);
     LOG('onStatus', status, { role: net.role, myId: net.myId, isPublic: net.isPublic });
     if (status === 'host') {
       players = [{ id: net.myId, name: meName, isHost: true }];
@@ -2362,6 +2635,9 @@ function wireNet() {
       renderLobby();
       showToast('Sala creada');
     } else if (status === 'guest') {
+      if (gameInProgress() || (game && (game.state === 'playing' || game.state === 'result'))) {
+        return;
+      }
       players = [];
       showScreen('lobby');
       renderLobby();
@@ -2389,8 +2665,8 @@ function wireNet() {
     renderLobby();
   };
 
-  net.cb.onGuestLeave = (peerId) => {
-    LOG('onGuestLeave', { peerId, role: net.role });
+  net.cb.onGuestLeave = (peerId, playerName) => {
+    LOG('onGuestLeave', { peerId, playerName, role: net.role });
     if (peerId && typingUsers.has(peerId)) {
       const user = typingUsers.get(peerId);
       if (user && user.timeoutId) clearTimeout(user.timeoutId);
@@ -2401,7 +2677,7 @@ function wireNet() {
       players = net.players;
       renderLobby();
       if (gameInProgress()) {
-        game.removePlayer(peerId);
+        game.removePlayer(peerId, playerName);
       }
       showToast('Un jugador se desconectó', 'warning');
     } else {
@@ -2442,7 +2718,7 @@ function wireNet() {
 
   net.cb.onMessage = handleNetMessage;
 
-  // Si el anfitrión cierra o recarga la pestaña, notifica y cierra la sala
+  // Si el anfitrión o invitado cierra o recarga la pestaña, notifica la salida
   window.addEventListener('beforeunload', () => {
     if (net.role === 'host' && (net.roomId || net.roomCode)) {
       try { net.broadcast({ type: 'hostLeft', reason: 'El anfitrión cerró la ventana.' }); } catch (e) {}
@@ -2451,6 +2727,8 @@ function wireNet() {
         data.append('id', net.roomId);
         navigator.sendBeacon('api.php?action=delete', data);
       }
+    } else if (net.role === 'guest' && net.roomId) {
+      try { net.send({ type: 'guestLeave', name: meName }); } catch (e) {}
     }
   });
 }
@@ -2460,7 +2738,7 @@ function boot() {
   detectPotatoMode();
   const versionBadge = $('#versionBadge');
   if (versionBadge) {
-    versionBadge.textContent = CONFIG.VERSION || 'BETA v1.7.7';
+    versionBadge.textContent = CONFIG.VERSION || 'BETA v1.8.5';
     versionBadge.style.cursor = 'pointer';
     versionBadge.title = 'Ver historial de versiones';
     versionBadge.addEventListener('click', () => {
@@ -2479,7 +2757,19 @@ function boot() {
   wireNet();
 
   // Compás: actualiza al rotar la cámara.
-  pano.callbacks.onPovChange = (heading) => updateCompass(heading);
+  pano.callbacks.onPovChange = (heading, pitch) => {
+    updateCompass(heading);
+    if (game && typeof game.onPovChange === 'function') {
+      game.onPovChange(heading, pitch);
+    }
+  };
+
+  // Movimiento Street View en Carrera
+  pano.callbacks.onPositionChange = (lat, lng, panoId) => {
+    if (game && typeof game.onPositionChange === 'function') {
+      game.onPositionChange(lat, lng, panoId);
+    }
+  };
 
   // Colocar marcador en el minimapa.
   minimap.callbacks.onPick = (lat, lng) => {
@@ -2531,11 +2821,22 @@ function boot() {
       return;
     }
     try {
-      const res = await fetch('version.json?_t=' + Date.now(), { cache: 'no-store' });
-      if (res.ok) {
-        const vData = await res.json();
+      let vData = null;
+      try {
+        const res = await fetch('version.json?_t=' + Date.now(), { cache: 'no-store' });
+        if (res.ok) vData = await res.json();
+      } catch (_) {}
+
+      if (!vData || !vData.version) {
+        try {
+          const resApi = await fetch('api.php?action=version&_t=' + Date.now(), { cache: 'no-store' });
+          if (resApi.ok) vData = await resApi.json();
+        } catch (_) {}
+      }
+
+      if (vData && vData.version) {
         const curVer = (CONFIG.VERSION || '').replace(/^BETA\s+v/i, '').trim();
-        if (vData && vData.version && vData.version !== curVer) {
+        if (vData.version !== curVer) {
           LOG('Nueva versión detectada:', vData.version, 'actual:', curVer);
 
           // 1. Resaltar badge de versión flotante

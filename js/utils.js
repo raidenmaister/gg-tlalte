@@ -2,7 +2,7 @@
 // utils.js — Utilidades puras: matemáticas geográficas, puntuación, RNG, DOM.
 // ============================================================================
 
-import { CONFIG, damageMultiplier } from './config.js?v=1.7.7';
+import { CONFIG, damageMultiplier } from './config.js?v=1.8.5';
 
 /** Selector corto para querySelector. */
 export function $(sel, root = document) {
@@ -345,3 +345,219 @@ export function detectPotatoMode() {
 
   return isPotato;
 }
+
+/**
+ * Calcula el rumbo geodésico inicial (bearing) en grados [0, 360) desde (lat1, lon1) hacia (lat2, lon2).
+ * 0° = Norte, 90° = Este, 180° = Sur, 270° = Oeste.
+ */
+export function calculateBearing(lat1, lon1, lat2, lon2) {
+  const phi1 = toRad(lat1);
+  const phi2 = toRad(lat2);
+  const deltaLambda = toRad(lon2 - lon1);
+  const y = Math.sin(deltaLambda) * Math.cos(phi2);
+  const x = Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(phi2) * Math.cos(deltaLambda);
+  const brng = (Math.atan2(y, x) * 180) / Math.PI;
+  return (brng + 360) % 360;
+}
+
+/**
+ * Selecciona un punto objetivo y puntos de salida equidistantes para una ronda de carrera.
+ * Garantiza que cada jugador comience a la distancia configurada (con tolerancia ±8%) de la meta.
+ * @param {Array} coords Banco de coordenadas ({lat, lng, pano_id}).
+ * @param {number} targetDistMeters Distancia objetivo en metros (ej. 500, 1000, 2000).
+ * @param {number} playerCount Cantidad de jugadores a posicionar.
+ * @returns {{ targetIdx: number, targetCoord: object, spawnIndices: number[], spawnDistances: number[] }}
+ */
+export function pickRaceRound(coords, targetDistMeters = 1000, playerCount = 2) {
+  if (!Array.isArray(coords) || coords.length < 2) return null;
+  const tolerance = targetDistMeters * 0.08;
+  const minD = (targetDistMeters - tolerance) / 1000; // km
+  const maxD = (targetDistMeters + tolerance) / 1000; // km
+
+  // Barajar índices de posibles objetivos
+  const shuffledTargetIndices = Array.from({ length: coords.length }, (_, i) => i)
+    .sort(() => Math.random() - 0.5);
+
+  for (const targetIdx of shuffledTargetIndices) {
+    const target = coords[targetIdx];
+    const candidateSpawns = [];
+
+    for (let i = 0; i < coords.length; i++) {
+      if (i === targetIdx) continue;
+      const dKm = haversineKm(target.lat, target.lng, coords[i].lat, coords[i].lng);
+      if (dKm >= minD && dKm <= maxD) {
+        candidateSpawns.push({ idx: i, distMeters: Math.round(dKm * 1000) });
+      }
+    }
+
+    if (candidateSpawns.length >= Math.min(playerCount, 6)) {
+      candidateSpawns.sort(() => Math.random() - 0.5);
+      const chosen = [];
+      for (let p = 0; p < playerCount; p++) {
+        chosen.push(candidateSpawns[p % candidateSpawns.length]);
+      }
+      return {
+        targetIdx,
+        targetIndex: targetIdx,
+        targetCoord: target,
+        distanceMeters: targetDistMeters,
+        spawnIndices: chosen.map((c) => c.idx),
+        spawnDistances: chosen.map((c) => c.distMeters),
+      };
+    }
+  }
+
+  // Fallback seguro si ninguna coordenada cumplió el umbral estricto
+  const fallbackTarget = Math.floor(Math.random() * coords.length);
+  const spawns = [];
+  for (let p = 0; p < playerCount; p++) {
+    spawns.push(Math.floor(Math.random() * coords.length));
+  }
+  return {
+    targetIdx: fallbackTarget,
+    targetIndex: fallbackTarget,
+    targetCoord: coords[fallbackTarget],
+    distanceMeters: targetDistMeters,
+    spawnIndices: spawns,
+    spawnDistances: spawns.map(() => targetDistMeters),
+  };
+}
+
+/**
+ * Calcula los puntos de carrera según posición de llegada, tiempo empleado y distancia restante.
+ */
+export function computeRaceScore(rank, finishTimeSec, totalTimeSec, initialDistMeters, finalDistMeters) {
+  const baseScores = CONFIG.RACE_BASE_SCORES || [5000, 3500, 2500, 1800, 1200];
+  const maxTimeBonus = CONFIG.RACE_MAX_TIME_BONUS || 1500;
+
+  if (rank != null && rank >= 1) {
+    const base = baseScores[rank - 1] || baseScores[baseScores.length - 1];
+    const timeRatio = Math.max(0, Math.min(1, (totalTimeSec - finishTimeSec) / totalTimeSec));
+    const timeBonus = Math.round(maxTimeBonus * timeRatio);
+    return base + timeBonus;
+  }
+
+  // Jugador que no cruzó la meta: puntos proporcionales al avance
+  const progressRatio = Math.max(0, Math.min(1, (initialDistMeters - finalDistMeters) / (initialDistMeters || 1000)));
+  return Math.round(1200 * progressRatio);
+}
+
+const panoValidityCache = new Map();
+
+/**
+ * Consulta la validez y transitabilidad de un panorama en Street View usando StreetViewService.
+ * Verifica que el punto exista y tenga al menos enlaces de salida a calles contiguas.
+ * @param {google.maps.StreetViewService} svService
+ * @param {string} panoId
+ * @param {object} coord { lat, lng }
+ * @returns {Promise<{ ok: boolean, panoId?: string, linksCount?: number }>}
+ */
+export function checkStreetPanoValidity(svService, panoId, coord) {
+  const cacheKey = panoId || (coord ? `${Number(coord.lat).toFixed(5)},${Number(coord.lng).toFixed(5)}` : null);
+  if (cacheKey && panoValidityCache.has(cacheKey)) {
+    return Promise.resolve(panoValidityCache.get(cacheKey));
+  }
+
+  return new Promise((resolve) => {
+    if (!svService || typeof svService.getPanorama !== 'function') {
+      const res = { ok: true, linksCount: 2 };
+      if (cacheKey) panoValidityCache.set(cacheKey, res);
+      return resolve(res);
+    }
+
+    const timeout = setTimeout(() => {
+      const res = { ok: true, linksCount: 2 };
+      if (cacheKey) panoValidityCache.set(cacheKey, res);
+      resolve(res);
+    }, 900);
+
+    const query = panoId ? { pano: panoId } : { location: { lat: coord.lat, lng: coord.lng }, radius: 50 };
+    try {
+      svService.getPanorama(query, (data, status) => {
+        clearTimeout(timeout);
+        const ok = (status === 'OK' && data && Array.isArray(data.links) && data.links.length >= 1);
+        const res = {
+          ok,
+          panoId: data?.location?.pano || panoId,
+          linksCount: data?.links?.length || 0,
+        };
+        if (cacheKey) panoValidityCache.set(cacheKey, res);
+        resolve(res);
+      });
+    } catch (e) {
+      clearTimeout(timeout);
+      const res = { ok: true, linksCount: 2 };
+      if (cacheKey) panoValidityCache.set(cacheKey, res);
+      resolve(res);
+    }
+  });
+}
+
+/**
+ * Versión verificada de pickRaceRound: asegura bidireccionalmente que tanto el objetivo
+ * como cada uno de los puntos de salida de los jugadores tengan enlaces de calle activos
+ * (eliminando cualquier foto aislada o tomada por usuarios en medio de la nada).
+ */
+export async function pickVerifiedRaceRound(coords, targetDistMeters = 1000, playerCount = 2, svService = null) {
+  if (!Array.isArray(coords) || coords.length < 2) return null;
+  if (!svService) {
+    return pickRaceRound(coords, targetDistMeters, playerCount);
+  }
+
+  const tolerance = targetDistMeters * 0.08;
+  const minD = (targetDistMeters - tolerance) / 1000;
+  const maxD = (targetDistMeters + tolerance) / 1000;
+
+  const shuffledTargetIndices = Array.from({ length: coords.length }, (_, i) => i)
+    .sort(() => Math.random() - 0.5);
+
+  let checkedTargets = 0;
+  for (const targetIdx of shuffledTargetIndices) {
+    if (checkedTargets >= 4) break; // Límite para iniciar la partida de inmediato (< 1.5s)
+    checkedTargets++;
+
+    const target = coords[targetIdx];
+    const targetCheck = await checkStreetPanoValidity(svService, target.pano_id, target);
+    if (!targetCheck.ok) continue; // Objetivo no transitable o foto aislada
+
+    const candidateSpawns = [];
+    for (let i = 0; i < coords.length; i++) {
+      if (i === targetIdx) continue;
+      const dKm = haversineKm(target.lat, target.lng, coords[i].lat, coords[i].lng);
+      if (dKm >= minD && dKm <= maxD) {
+        candidateSpawns.push({ idx: i, distMeters: Math.round(dKm * 1000) });
+      }
+    }
+
+    if (candidateSpawns.length >= playerCount) {
+      candidateSpawns.sort(() => Math.random() - 0.5);
+      const toCheck = candidateSpawns.slice(0, Math.min(candidateSpawns.length, playerCount + 3));
+
+      // Verificación concurrente en paralelo de los candidatos a salida
+      const verifiedResults = await Promise.all(
+        toCheck.map(async (cand) => {
+          const spawnCoord = coords[cand.idx];
+          const spawnCheck = await checkStreetPanoValidity(svService, spawnCoord.pano_id, spawnCoord);
+          return spawnCheck.ok ? cand : null;
+        })
+      );
+
+      const verifiedSpawns = verifiedResults.filter(Boolean);
+
+      if (verifiedSpawns.length >= playerCount) {
+        return {
+          targetIdx,
+          targetIndex: targetIdx,
+          targetCoord: target,
+          distanceMeters: targetDistMeters,
+          spawnIndices: verifiedSpawns.slice(0, playerCount).map((c) => c.idx),
+          spawnDistances: verifiedSpawns.slice(0, playerCount).map((c) => c.distMeters),
+        };
+      }
+    }
+  }
+
+  // Fallback seguro inmediato si ninguna verificación estricta respondió a tiempo
+  return pickRaceRound(coords, targetDistMeters, playerCount);
+}
+

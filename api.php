@@ -29,13 +29,15 @@ $staleSeconds = 15;
 if (!function_exists('loadJson')) {
     function loadJson($file, $default = []) {
         if (!file_exists($file)) return $default;
-        $raw = @file_get_contents($file);
-        if ($raw === false || trim($raw) === '') {
-            usleep(8000);
+        for ($i = 0; $i < 4; $i++) {
             $raw = @file_get_contents($file);
+            if ($raw !== false && trim($raw) !== '') {
+                $data = json_decode($raw, true);
+                if (is_array($data)) return $data;
+            }
+            usleep(10000);
         }
-        $data = json_decode($raw, true);
-        return is_array($data) ? $data : $default;
+        return $default;
     }
 }
 
@@ -69,7 +71,7 @@ if (!function_exists('cleanupRooms')) {
     function cleanupRooms($rooms, $staleSeconds) {
         $now = time();
         foreach ($rooms as $id => $room) {
-            $threshold = ($room['status'] ?? '') === 'in_progress' ? 90 : max(45, $staleSeconds);
+            $threshold = ($room['status'] ?? '') === 'in_progress' ? 180 : max(120, $staleSeconds);
             if ($now - intval($room['updated'] ?? 0) > $threshold) {
                 unset($rooms[$id]);
             }
@@ -131,33 +133,66 @@ if (!function_exists('userExists')) {
     }
 }
 
-$staleSeconds = 600; // 10 minutos de gracia para no purgar salas activas
+$staleSeconds = 30; // 30s de gracia para salas en espera (los clientes envían heartbeat cada 5s)
 
 $rooms = cleanupRooms(loadRooms($roomsFile), $staleSeconds);
 $users = loadJson($usersFile, []);
 $leaderboard = loadJson($leaderboardFile, ['5' => [], '7' => [], '10' => []]);
 
 switch ($action) {
+    case 'version': {
+        $vFile = __DIR__ . '/version.json';
+        $vData = loadJson($vFile, ['version' => '1.8.5']);
+        echo json_encode(['ok' => true, 'version' => $vData['version'] ?? '1.8.5']);
+        exit;
+    }
+
     /* --------------------------- SALAS & MENSAJERÍA --------------------------- */
     case 'create': {
         $id = trim($_POST['id'] ?? '');
         $name = trim($_POST['name'] ?? 'Anónimo');
+        $cleanName = normalizeName($name);
+        $hostToken = trim($_POST['hostToken'] ?? '');
         $limit = intval($_POST['limit'] ?? 0);
         $isPublic = isset($_POST['isPublic']) ? intval($_POST['isPublic']) : 1;
         $rounds = intval($_POST['rounds'] ?? 5);
         $gameMode = trim($_POST['gameMode'] ?? 'normal');
-        if (!in_array($gameMode, ['normal', 'static', 'temporal', 'tunnel', 'static_tunnel', 'blur', 'static_blur'], true)) {
+        if (!in_array($gameMode, ['normal', 'static', 'temporal', 'tunnel', 'static_tunnel', 'blur', 'static_blur', 'race'], true)) {
             $gameMode = 'normal';
         }
         $temporalSeconds = intval($_POST['temporalSeconds'] ?? 3);
         $tunnelSeconds = intval($_POST['tunnelSeconds'] ?? 3);
         $blurSeconds = intval($_POST['blurSeconds'] ?? 3);
+        $raceDistance = intval($_POST['raceDistance'] ?? 1000);
+        $raceSeconds = intval($_POST['raceSeconds'] ?? 150);
         if ($id === '') {
             echo json_encode(['ok' => false, 'error' => 'id requerido']);
             exit;
         }
+
+        // Purgar cualquier sala previa creada por la MISMA sesión de anfitrión (por hostToken)
+        if ($hostToken !== '') {
+            foreach ($rooms as $oldId => $oldRoom) {
+                if (($oldRoom['hostToken'] ?? '') === $hostToken && $oldId !== $id) {
+                    unset($rooms[$oldId]);
+                }
+            }
+        } elseif ($cleanName !== '') {
+            $cleanLower = function_exists('mb_strtolower') ? mb_strtolower($cleanName) : strtolower($cleanName);
+            if (!in_array($cleanLower, ['anonimo', 'anónimo', 'invitado', 'player', 'jugador'], true)) {
+                // Solo si no hay hostToken y no es un nombre genérico: purgar si tiene más de 30s inactiva
+                foreach ($rooms as $oldId => $oldRoom) {
+                    $oldHost = normalizeName($oldRoom['name'] ?? '');
+                    if (sameName($oldHost, $cleanName) && (time() - intval($oldRoom['updated'] ?? 0)) > 30) {
+                        unset($rooms[$oldId]);
+                    }
+                }
+            }
+        }
+
         $rooms[$id] = [
             'name' => $name,
+            'hostToken' => $hostToken,
             'limit' => $limit,
             'count' => 1,
             'rounds' => $rounds,
@@ -165,6 +200,8 @@ switch ($action) {
             'temporalSeconds' => $temporalSeconds,
             'tunnelSeconds' => $tunnelSeconds,
             'blurSeconds' => $blurSeconds,
+            'raceDistance' => $raceDistance,
+            'raceSeconds' => $raceSeconds,
             'status' => 'waiting',
             'updated' => time(),
             'isPublic' => $isPublic,
@@ -221,14 +258,29 @@ switch ($action) {
             'temporalSeconds' => intval($room['temporalSeconds'] ?? 3),
             'tunnelSeconds' => intval($room['tunnelSeconds'] ?? 3),
             'blurSeconds' => intval($room['blurSeconds'] ?? 3),
+            'raceDistance' => intval($room['raceDistance'] ?? 1000),
+            'raceSeconds' => intval($room['raceSeconds'] ?? 150),
         ]);
         break;
     }
     case 'list': {
         $out = [];
+        $seenHostTokens = [];
+        uasort($rooms, function($a, $b) {
+            return intval($b['updated'] ?? 0) <=> intval($a['updated'] ?? 0);
+        });
         foreach ($rooms as $id => $room) {
             // No listar salas privadas en el listado público
             if (isset($room['isPublic']) && intval($room['isPublic']) === 0) continue;
+
+            $token = trim($room['hostToken'] ?? '');
+            if ($token !== '') {
+                if (isset($seenHostTokens[$token])) {
+                    continue; // Omitir duplicado del mismo anfitrión en el listado sin borrar de disco
+                }
+                $seenHostTokens[$token] = true;
+            }
+
             $out[] = [
                 'id' => $id,
                 'name' => $room['name'],
@@ -239,6 +291,8 @@ switch ($action) {
                 'temporalSeconds' => intval($room['temporalSeconds'] ?? 3),
                 'tunnelSeconds' => intval($room['tunnelSeconds'] ?? 3),
                 'blurSeconds' => intval($room['blurSeconds'] ?? 3),
+                'raceDistance' => intval($room['raceDistance'] ?? 1000),
+                'raceSeconds' => intval($room['raceSeconds'] ?? 150),
                 'status' => strval($room['status'] ?? 'waiting'),
             ];
         }

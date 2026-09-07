@@ -2,8 +2,8 @@
 // panorama.js — Visor panorámico 360° (Google Street View) + brújula.
 // ============================================================================
 
-import { CONFIG } from './config.js?v=1.7.7';
-import { detectPotatoMode } from './utils.js?v=1.7.7';
+import { CONFIG } from './config.js?v=1.8.5';
+import { detectPotatoMode } from './utils.js?v=1.8.5';
 
 let mapsPromise = null;
 
@@ -103,6 +103,7 @@ export class PanoramaViewer {
     this._fallbackAttempted = false;
     this.isPotato = detectPotatoMode();
     this.isBlur = false;
+    this.isRace = false;
   }
 
   async init() {
@@ -149,10 +150,26 @@ export class PanoramaViewer {
     // visor lo restablezca y garantiza la misma perspectiva en todos).
     this.panorama.addListener('pano_changed', () => {
       this.currentPanoId = this.panorama.getPano();
-      this.panorama.setPov({
-        heading: this.initialHeading,
-        pitch: this.initialPitch,
-      });
+      if (!this.isRace) {
+        this.panorama.setPov({
+          heading: this.initialHeading,
+          pitch: this.initialPitch,
+        });
+      } else {
+        const pos = this.panorama.getPosition();
+        if (pos && this.callbacks.onPositionChange) {
+          this.callbacks.onPositionChange(pos.lat(), pos.lng(), this.currentPanoId);
+        }
+      }
+    });
+
+    this.panorama.addListener('position_changed', () => {
+      if (this.isRace) {
+        const pos = this.panorama.getPosition();
+        if (pos && this.callbacks.onPositionChange) {
+          this.callbacks.onPositionChange(pos.lat(), pos.lng(), this.currentPanoId);
+        }
+      }
     });
 
     this.panorama.addListener('status_changed', () => {
@@ -180,6 +197,7 @@ export class PanoramaViewer {
     }, { passive: false });
 
     this._blockNavigation(el);
+    this._setupRaceControls(el);
 
     if (this.currentPanoId) {
       this.setPano(this.currentPanoId, this.initialHeading, this.initialPitch, this.currentCoord);
@@ -242,6 +260,9 @@ export class PanoramaViewer {
    */
   _blockNavigation(el) {
     el.addEventListener('keydown', (e) => {
+      // Si estamos en modo carrera, permitir desplazamiento por teclas (flechas / WASD)
+      if (this.isRace) return;
+
       const navKeys = [
         'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
         'w', 'a', 's', 'd', 'W', 'A', 'S', 'D',
@@ -259,11 +280,137 @@ export class PanoramaViewer {
       }
     }, true);
 
-    // clickToGo ya está desactivado; esto bloquea el doble clic de zoom+navegación.
+    // clickToGo ya está desactivado; esto bloquea el doble clic de zoom+navegación en modos normales.
     el.addEventListener('dblclick', (e) => {
+      if (this.isRace) return;
       e.preventDefault();
       e.stopPropagation();
     }, true);
+  }
+
+  /**
+   * Avanza en la dirección del heading indicado hacia el nodo conectado más cercano.
+   * Cuenta con protección contra parpadeo en negro y artefactos WebGL limitando
+   * la cadencia a máximo una transición fluida cada 240ms.
+   */
+  advanceInHeading(targetHeading) {
+    if (!this.panorama || !this.isRace) return;
+
+    const now = Date.now();
+    if (this._lastAdvanceTime && (now - this._lastAdvanceTime) < 240) return;
+
+    const links = this.panorama.getLinks();
+    if (!links || !Array.isArray(links) || links.length === 0) return;
+
+    let bestLink = null;
+    let minDiff = 180;
+    for (const link of links) {
+      if (!link || !link.pano) continue;
+      let diff = Math.abs(link.heading - targetHeading);
+      if (diff > 180) diff = 360 - diff;
+      if (diff < minDiff) {
+        minDiff = diff;
+        bestLink = link;
+      }
+    }
+
+    if (!bestLink || minDiff > 85) return; // Fuera del ángulo de calles navegables
+    if (bestLink.pano === this.currentPanoId) return;
+
+    this._lastAdvanceTime = now;
+    this.panorama.setPano(bestLink.pano);
+  }
+
+  _setupRaceControls(el) {
+    let downX = 0, downY = 0, downTime = 0;
+
+    el.addEventListener('mousedown', (e) => {
+      if (!this.isRace) return;
+      downX = e.clientX;
+      downY = e.clientY;
+      downTime = Date.now();
+    }, true);
+
+    el.addEventListener('mouseup', (e) => {
+      if (!this.isRace) return;
+      const elapsed = Date.now() - downTime;
+      const dist = Math.hypot(e.clientX - downX, e.clientY - downY);
+      // Si fue arrastre para rotar la cámara o pulsación larga, no es click de avance
+      if (dist > 12 || elapsed > 400) return;
+
+      // Ignorar clicks sobre controles de interfaz, minimapa, botones o HUD
+      if (e.target.closest('.hud-top, .minimap-wrap, button, .race-hud, .modal, .panel, input, textarea')) return;
+
+      const rect = el.getBoundingClientRect();
+      const clickX = e.clientX - rect.left;
+      const clickY = e.clientY - rect.top;
+      const normX = (clickX / rect.width) - 0.5; // [-0.5, 0.5]
+      const normY = clickY / rect.height; // [0, 1]
+
+      // Ignorar clicks en el cielo a menos que esté mirando hacia abajo
+      if (normY < 0.18 && this.getPitch() >= 0) return;
+
+      const zoom = (this.panorama && this.panorama.getZoom()) || 0;
+      const fov = 90 / Math.pow(1.5, zoom);
+      const targetHeading = (this.getHeading() + normX * fov + 360) % 360;
+
+      this.advanceInHeading(targetHeading);
+    }, true);
+
+    // Controles táctiles para móviles / tablets
+    let touchStartX = 0, touchStartY = 0, touchStartTime = 0;
+    el.addEventListener('touchstart', (e) => {
+      if (!this.isRace || e.touches.length !== 1) return;
+      touchStartX = e.touches[0].clientX;
+      touchStartY = e.touches[0].clientY;
+      touchStartTime = Date.now();
+    }, { passive: true });
+
+    el.addEventListener('touchend', (e) => {
+      if (!this.isRace || e.changedTouches.length !== 1) return;
+      const elapsed = Date.now() - touchStartTime;
+      const t = e.changedTouches[0];
+      const dist = Math.hypot(t.clientX - touchStartX, t.clientY - touchStartY);
+      if (dist > 16 || elapsed > 450) return;
+      if (e.target.closest('.hud-top, .minimap-wrap, button, .race-hud, .modal, .panel, input, textarea')) return;
+
+      const rect = el.getBoundingClientRect();
+      const clickX = t.clientX - rect.left;
+      const normX = (clickX / rect.width) - 0.5;
+      const targetHeading = (this.getHeading() + normX * 85 + 360) % 360;
+      this.advanceInHeading(targetHeading);
+    }, { passive: true });
+
+    // Controles de teclado en carrera (WASD y flechas con límite de velocidad para evitar sobrecarga WebGL)
+    window.addEventListener('keydown', (e) => {
+      if (!this.isRace) return;
+      if (['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return;
+
+      const key = e.key.toLowerCase();
+      const now = Date.now();
+
+      if (key === 'w' || key === 'arrowup') {
+        e.preventDefault();
+        if (this._lastAdvanceTime && (now - this._lastAdvanceTime) < 240) return;
+        this.advanceInHeading(this.getHeading());
+      } else if (key === 's' || key === 'arrowdown') {
+        e.preventDefault();
+        if (this._lastAdvanceTime && (now - this._lastAdvanceTime) < 240) return;
+        this.advanceInHeading((this.getHeading() + 180) % 360);
+      } else if (key === 'a' || key === 'arrowleft') {
+        e.preventDefault();
+        if (this.panorama) {
+          const cur = this.panorama.getPov();
+          this.panorama.setPov({ heading: (cur.heading - 25 + 360) % 360, pitch: cur.pitch });
+        }
+      } else if (key === 'd' || key === 'arrowright') {
+        e.preventDefault();
+        if (this.panorama) {
+          const cur = this.panorama.getPov();
+          this.panorama.setPov({ heading: (cur.heading + 25) % 360, pitch: cur.pitch });
+        }
+      }
+    });
   }
 
   /** Refresca el lienzo de StreetView forzando resize y visibilidad activa. */
@@ -618,6 +765,20 @@ export class PanoramaViewer {
       if (spinnerEl) spinnerEl.style.display = showSpinner ? 'block' : 'none';
     } else {
       blind.classList.add('hidden');
+    }
+  }
+
+  /** Activa/desactiva el modo Carrera al Objetivo (navegación por calles en 360° permitida). */
+  setRaceMode(enabled) {
+    this.isRace = !!enabled;
+    this._lastAdvanceTime = 0;
+    if (this.panorama) {
+      this.panorama.setOptions({
+        clickToGo: false,             // Evita colisiones entre raycast nativo y advanceInHeading
+        linksControl: !!enabled,      // Flechas en el suelo
+        showRoadLabels: false,
+        disableDoubleClickZoom: true, // Evita zoom repentino al hacer clics rápidos
+      });
     }
   }
 

@@ -2,8 +2,8 @@
 // minimap.js — Minimapa interactivo Leaflet para adivinar y revelar.
 // ============================================================================
 
-import { CONFIG } from './config.js?v=1.7.7';
-import { greatCirclePoints } from './utils.js?v=1.7.7';
+import { CONFIG } from './config.js?v=1.8.5';
+import { greatCirclePoints } from './utils.js?v=1.8.5';
 
 const MARKER = {
   real: { color: '#f59e0b', size: 42, label: '📍 Ubicación real' },
@@ -74,6 +74,20 @@ function makePlayerPin({ lat, lng, color, size, label, damage }) {
   return L.marker([lat, lng], { icon, interactive: false });
 }
 
+/** Marcador de jugador en modo Carrera: punto con halo y nombre legible. */
+function makeRacePlayerPin({ lat, lng, color, name, isMe }) {
+  const icon = L.divIcon({
+    className: 'gg-race-pin' + (isMe ? ' is-me' : ''),
+    html: `<div class="gg-race-pin__wrap" style="--player-color:${color};">
+        <div class="gg-race-pin__label" style="border-color:${color}; color:${color};">${escapeHtml(name)}${isMe ? ' (Tú)' : ''}</div>
+        <div class="gg-race-pin__dot" style="background:${color}; box-shadow: 0 0 10px ${color};"></div>
+      </div>`,
+    iconSize: [24, 24],
+    iconAnchor: [12, 12],
+  });
+  return L.marker([lat, lng], { icon, interactive: false, zIndexOffset: isMe ? 2000 : 1000 });
+}
+
 export class Minimap {
   /**
    * @param {string} containerId ID del div del mapa.
@@ -85,6 +99,9 @@ export class Minimap {
     this.map = null;
     this.pickMarker = null;
     this.revealLayer = null;
+    this.raceLayer = null;
+    this.raceMarkers = new Map();
+    this.isRaceMode = false;
     this.pick = null;          // {lat, lng}
     this.interactive = true;   // por defecto interactivo durante el juego
     this.myColor = null;       // Color asignado al jugador en la partida
@@ -145,8 +162,10 @@ export class Minimap {
     }
 
     this.revealLayer = L.featureGroup().addTo(this.map);
+    this.raceLayer = L.featureGroup().addTo(this.map);
 
     this.map.on('click', (e) => {
+      if (this.isRaceMode) return; // En modo carrera no se colocan chinchetas
       if (this.interactive === false) return;
       const wrap = this.map.getContainer().closest('.minimap-wrap');
       if (wrap && wrap.classList.contains('fullscreen')) return;
@@ -157,6 +176,69 @@ export class Minimap {
 
     if (this.callbacks.onReady) this.callbacks.onReady();
     return this.map;
+  }
+
+  /** Activa/desactiva el modo Carrera (muestra solo a los jugadores desplazándose). */
+  setRaceMode(enabled) {
+    this.isRaceMode = !!enabled;
+    if (enabled) {
+      this.setInteractive(false);
+      this.clear();
+    } else {
+      this.clearRacePlayers();
+    }
+  }
+
+  /**
+   * Actualiza o crea el marcador dinámico de un jugador en la carrera.
+   */
+  updateRacePlayer(id, { lat, lng, color, name, isMe }) {
+    if (!this.map || !this.raceLayer) return;
+    const key = String(id || name);
+    const numLat = Number(lat);
+    const numLng = Number(lng);
+    if (isNaN(numLat) || isNaN(numLng)) return;
+
+    if (this.raceMarkers.has(key)) {
+      const marker = this.raceMarkers.get(key);
+      marker.setLatLng([numLat, numLng]);
+    } else {
+      const marker = makeRacePlayerPin({ lat: numLat, lng: numLng, color, name, isMe });
+      marker.addTo(this.raceLayer);
+      this.raceMarkers.set(key, marker);
+    }
+
+    if (isMe && this.isRaceMode && this.map) {
+      this.map.panTo([numLat, numLng], { animate: true, duration: 0.35 });
+    }
+  }
+
+  /**
+   * Elimina el marcador de un jugador de la carrera (ej. al alcanzar la meta y ganar).
+   */
+  removeRacePlayer(id, name) {
+    if (!this.map || !this.raceLayer) return;
+    const keys = [];
+    if (id != null) keys.push(String(id));
+    if (name) keys.push(String(name));
+
+    for (const key of keys) {
+      if (this.raceMarkers.has(key)) {
+        const marker = this.raceMarkers.get(key);
+        try {
+          this.raceLayer.removeLayer(marker);
+        } catch (e) {}
+        this.raceMarkers.delete(key);
+      }
+    }
+  }
+
+  /** Elimina todos los marcadores de jugadores de la carrera. */
+  clearRacePlayers() {
+    if (this.raceLayer) {
+      this.raceLayer.clearLayers();
+    }
+    this.raceMarkers.clear();
   }
 
   /** Activa/desactiva la recogida de clics (modo adivinar). */
@@ -276,6 +358,16 @@ export class Minimap {
         makeRealPin({ lat: realLat, lng: realLng, ...MARKER.real })
       );
       bounds.push([realLat, realLng]);
+    }
+
+    if (this.isRaceMode) {
+      this.raceMarkers.forEach((marker) => {
+        if (marker && marker.getLatLng) {
+          bounds.push(marker.getLatLng());
+        }
+      });
+      if (bounds.length) this._fitBounds(bounds);
+      return;
     }
 
     (players || []).forEach((p, i) => {

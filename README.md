@@ -1,4 +1,4 @@
-# GG-TLALTE · GeoGuessr P2P (BETA v1.7.7)
+# GG-TLALTE · GeoGuessr P2P (BETA v1.8.5)
 
 Juego de adivinar ubicaciones con panorámicas 360° de Google Maps Street View, inspirado en GeoGuessr y ambientado en Tlaltenango de Sánchez Román, Zacatecas. Incluye modo solitario con leaderboard global por modos y partidas multijugador en duelo 1v1 y hasta 25 jugadores simultáneos.
 

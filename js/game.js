@@ -13,7 +13,7 @@
 //   'toast'       {message, kind}
 // ============================================================================
 
-import { CONFIG, damageMultiplier, getNoGuessPenalty } from './config.js?v=1.7.7';
+import { CONFIG, damageMultiplier, getNoGuessPenalty } from './config.js?v=1.8.5';
 import {
   haversineKm,
   scoreForDistance,
@@ -22,8 +22,12 @@ import {
   computeDamage,
   pickIndices,
   pickSeparatedIndices,
+  calculateBearing,
+  pickRaceRound,
+  pickVerifiedRaceRound,
+  computeRaceScore,
   clamp,
-} from './utils.js?v=1.7.7';
+} from './utils.js?v=1.8.5';
 
 export class Game {
   constructor({ pano, map, net, audio }) {
@@ -53,6 +57,21 @@ export class Game {
     this._blurTimer = null;
     this._blurStartTime = null;
     this.soloPerfectStreak = 0;
+
+    // Submodo Carrera al Objetivo (Rally Equidistante)
+    this.isRaceMode = false;
+    this.raceTargetCoord = null;
+    this.raceInitialDist = 1000;
+    this.raceCurrentDist = 1000;
+    this.raceDistanceSetting = 1000;
+    this.raceDurationSetting = 150;
+    this.raceFinishedPlayers = [];
+    this.raceMyFinished = false;
+    this.raceMyRank = null;
+    this.raceRoundsData = [];
+    this._racePosBroadcastTimer = null;
+    this._raceHurryActive = false;
+    this._lastPosBroadcast = 0;
 
     this.rounds = CONFIG.SOLO_ROUNDS;
     this.soloTotalSeconds = CONFIG.SOLO_MODES[CONFIG.SOLO_ROUNDS].totalSeconds;
@@ -161,17 +180,24 @@ export class Game {
   }
 
   /** Host: inicia la partida y envía la semilla/orden a los invitados. */
-  hostStart(gameMode = 'normal', temporalSeconds = CONFIG.DEFAULT_TEMPORAL_SECONDS, tunnelSeconds = CONFIG.DEFAULT_TUNNEL_SECONDS, zoomMode = false, blurSeconds = CONFIG.DEFAULT_BLUR_SECONDS, blurMode = false) {
+  async hostStart(gameMode = 'normal', temporalSeconds = CONFIG.DEFAULT_TEMPORAL_SECONDS, tunnelSeconds = CONFIG.DEFAULT_TUNNEL_SECONDS, zoomMode = false, blurSeconds = CONFIG.DEFAULT_BLUR_SECONDS, blurMode = false, raceDistance = null, raceSeconds = null) {
     this._reset();
     this.mode = 'multi';
     this.role = 'host';
     this.gameMode = gameMode || 'normal';
+    this.isRaceMode = (this.gameMode === 'race');
     this.zoomMode = !!zoomMode || this.gameMode === 'tunnel' || this.gameMode === 'static_tunnel';
     this.blurMode = !!blurMode || this.gameMode === 'blur' || this.gameMode === 'static_blur';
     this.temporalSeconds = Number(temporalSeconds) || CONFIG.DEFAULT_TEMPORAL_SECONDS;
     this.tunnelSeconds = Number(tunnelSeconds) || CONFIG.DEFAULT_TUNNEL_SECONDS;
     this.blurSeconds = Number(blurSeconds) || CONFIG.DEFAULT_BLUR_SECONDS;
     this.rounds = this.net.rounds || CONFIG.DUEL_ROUNDS;
+
+    if (this.isRaceMode) {
+      this.raceDistanceSetting = Number(raceDistance) || (this.net && this.net.raceDistance) || CONFIG.DEFAULT_RACE_DISTANCE || 1000;
+      this.raceDurationSetting = Number(raceSeconds) || (this.net && this.net.raceSeconds) || CONFIG.DEFAULT_RACE_DURATION || 150;
+      this.raceRoundsData = [];
+    }
 
     this.players = this.net.players.map((p) => ({
       id: p.id,
@@ -190,8 +216,27 @@ export class Game {
     }
 
     const seed = (Math.random() * 0xffffffff) >>> 0;
-    // Selección aleatoria garantizando al menos 161m entre TODOS los panos de la partida
-    this.locations = pickSeparatedIndices(this.coordenadas, this.rounds, CONFIG.MIN_LOCATION_SEPARATION_KM || 0.161);
+
+    if (this.isRaceMode) {
+      const svService = (this.pano && this.pano._svService) ||
+        (window.google?.maps?.StreetViewService ? new window.google.maps.StreetViewService() : null);
+      if (svService) {
+        this.emit('toast', { message: 'Verificando transitabilidad y enlaces de calles…', kind: 'info' });
+      }
+      for (let r = 0; r < this.rounds; r++) {
+        const raceRound = await pickVerifiedRaceRound(
+          this.coordenadas,
+          this.raceDistanceSetting,
+          this.players.length,
+          svService
+        );
+        this.raceRoundsData.push(raceRound);
+      }
+      this.locations = this.raceRoundsData.map((rd) => rd.targetIndex);
+    } else {
+      // Selección aleatoria garantizando al menos 161m entre TODOS los panos de la partida
+      this.locations = pickSeparatedIndices(this.coordenadas, this.rounds, CONFIG.MIN_LOCATION_SEPARATION_KM || 0.161);
+    }
 
     this.net.broadcast({
       type: 'start',
@@ -200,6 +245,10 @@ export class Game {
       locations: this.locations,
       mode: 'multi',
       gameMode: this.gameMode,
+      isRaceMode: this.isRaceMode,
+      raceDistanceSetting: this.raceDistanceSetting,
+      raceDurationSetting: this.raceDurationSetting,
+      raceRoundsData: this.raceRoundsData,
       zoomMode: this.zoomMode,
       blurMode: this.blurMode,
       temporalSeconds: this.temporalSeconds,
@@ -224,6 +273,10 @@ export class Game {
     this.mode = 'multi';
     this.role = 'guest';
     this.gameMode = data.gameMode || 'normal';
+    this.isRaceMode = !!(data.gameMode === 'race' || data.isRaceMode);
+    this.raceDistanceSetting = Number(data.raceDistanceSetting) || (this.net && this.net.raceDistance) || CONFIG.DEFAULT_RACE_DISTANCE || 1000;
+    this.raceDurationSetting = Number(data.raceDurationSetting) || (this.net && this.net.raceSeconds) || CONFIG.DEFAULT_RACE_DURATION || 150;
+    this.raceRoundsData = data.raceRoundsData || [];
     this.zoomMode = !!data.zoomMode || this.gameMode === 'tunnel' || this.gameMode === 'static_tunnel';
     this.blurMode = !!data.blurMode || this.gameMode === 'blur' || this.gameMode === 'static_blur';
     this.temporalSeconds = Number(data.temporalSeconds) || CONFIG.DEFAULT_TEMPORAL_SECONDS;
@@ -332,6 +385,18 @@ export class Game {
     this.soloRoundStartTime = 0;
     this.soloTotalPlayedMs = 0;
     this.state = 'idle';
+    this.isRaceMode = false;
+    this.raceTargetCoord = null;
+    this.raceFinishedPlayers = [];
+    this.raceMyFinished = false;
+    this.raceMyRank = null;
+    this.raceRoundsData = [];
+    this._raceHurryActive = false;
+    this._lastPosBroadcast = 0;
+    if (this._racePosBroadcastTimer) {
+      clearInterval(this._racePosBroadcastTimer);
+      this._racePosBroadcastTimer = null;
+    }
     this._guestReady = true;
     this._pendingRoundStart = null;
     this._pendingHurryStart = null;
@@ -342,6 +407,13 @@ export class Game {
       this.pano.setStatic(false);
       this.pano.setTunnelMode(false);
       this.pano.setBlurMode(false);
+      if (typeof this.pano.setRaceMode === 'function') {
+        this.pano.setRaceMode(false);
+      }
+    }
+    if (this.map && typeof this.map.setRaceMode === 'function') {
+      this.map.setRaceMode(false);
+      this.map.clearRacePlayers();
     }
   }
 
@@ -362,7 +434,115 @@ export class Game {
       p.guessed = false;
       p._preRoundHp = typeof p.hp === 'number' ? p.hp : CONFIG.MAX_HP;
       p._preRoundScore = typeof p.score === 'number' ? p.score : 0;
+      p._lastDistMeters = null;
     });
+
+    if (this.isRaceMode) {
+      this.raceFinishedPlayers = [];
+      this.raceMyFinished = false;
+      this.raceMyRank = null;
+      this._raceHurryActive = false;
+      this.myGuess = null;
+
+      const raceRound = this.raceRoundsData && this.raceRoundsData[round - 1];
+      if (raceRound) {
+        this.raceTargetCoord = raceRound.targetCoord;
+        this.raceInitialDist = raceRound.distanceMeters || this.raceDistanceSetting;
+        this.raceCurrentDist = this.raceInitialDist;
+
+        // Determinar índice de spawn para este jugador según su posición en la lista de jugadores
+        const myIndex = Math.max(0, this.players.findIndex((p) => p.id === this.net.myId));
+        const spawnIdx = (raceRound.spawnIndices && raceRound.spawnIndices.length > 0)
+          ? raceRound.spawnIndices[myIndex % raceRound.spawnIndices.length]
+          : raceRound.targetIndex;
+        const spawnCoord = this.coordenadas[spawnIdx];
+        this.currentCoord = spawnCoord;
+
+        // Orientación inicial hacia el objetivo
+        const initialBearing = calculateBearing(
+          spawnCoord.lat,
+          spawnCoord.lng,
+          this.raceTargetCoord.lat,
+          this.raceTargetCoord.lng
+        );
+        this.roundHeading = initialBearing;
+
+        // Configuración de Street View y Minimapa
+        this.pano.setRaceMode(true);
+        this.pano.setStatic(false);
+        this.pano.setTunnelMode(false);
+        this.pano.setBlurMode(false);
+        this.pano.setBlind(true, 'Ronda ' + round, 'Cargando punto de salida en alta definición…', true);
+        this.pano.setPano(spawnCoord.pano_id, initialBearing, 0, spawnCoord);
+
+        this.map.setRaceMode(true);
+        this.map.clearRacePlayers();
+
+        // Posicionar a todos los jugadores en el minimapa en sus respectivos puntos de spawn
+        this.players.forEach((p, idx) => {
+          const pSpawnIdx = (raceRound.spawnIndices && raceRound.spawnIndices.length > 0)
+            ? raceRound.spawnIndices[idx % raceRound.spawnIndices.length]
+            : raceRound.targetIndex;
+          const pCoord = this.coordenadas[pSpawnIdx];
+          const pColor = (CONFIG.PLAYER_COLORS && CONFIG.PLAYER_COLORS[idx % CONFIG.PLAYER_COLORS.length]) || '#38bdf8';
+          this.map.updateRacePlayer(p.id, {
+            lat: pCoord.lat,
+            lng: pCoord.lng,
+            color: pColor,
+            name: p.name,
+            isMe: p.id === this.net.myId,
+          });
+        });
+
+        this.emit('waiting', { waiting: false });
+        this.emit('confirm', { enabled: false });
+        this.emit('temporalBlind', { active: false });
+        this.emit('temporalTimer', { seconds: null });
+        this.emit('raceStart', {
+          round,
+          total: this.rounds,
+          targetDistance: this.raceInitialDist,
+          duration: this.raceDurationSetting,
+        });
+        this._emitHud();
+
+        if (this.role === 'host') {
+          if (this.net && typeof this.net.setAwaitingGuesses === 'function') {
+            this.net.setAwaitingGuesses(true);
+          }
+          this._panoReadyPeers = new Set();
+          if (this._syncTimeout) clearTimeout(this._syncTimeout);
+
+          this.net.broadcast({
+            type: 'roundStart',
+            round,
+            gameMode: 'race',
+            isRaceMode: true,
+            raceRoundIndex: round - 1,
+            raceDistanceSetting: this.raceDistanceSetting,
+            raceDurationSetting: this.raceDurationSetting,
+            raceRoundsData: this.raceRoundsData,
+            players: this.players.map((p) => ({
+              id: p.id,
+              name: p.name,
+              score: p.score || 0,
+            })),
+          });
+
+          this.pano.waitForReady(2500)
+            .catch(() => {})
+            .then(() => {
+              this._panoReadyPeers.add(this.net.myId);
+              this._checkAllPanoReady(round);
+            });
+
+          this._syncTimeout = setTimeout(() => {
+            this._triggerSyncStart(round);
+          }, 1200);
+        }
+        return;
+      }
+    }
 
     const idx = this.locations[round - 1];
     const coord = this.coordenadas[idx];
@@ -783,6 +963,36 @@ export class Game {
     this.map.setInteractive(true);
     this.emit('prepare', { seconds: null });
 
+    if (this.isRaceMode) {
+      this.pano.setRaceMode(true);
+      this.pano.setStatic(false);
+      this._raceRoundStartTime = Date.now();
+      const totalSecs = this.raceDurationSetting || CONFIG.DEFAULT_RACE_DURATION || 150;
+      this.roundEnd = Date.now() + totalSecs * 1000;
+      this.emit('timer', { seconds: totalSecs, danger: false });
+
+      if (this.currentCoord && this.raceTargetCoord) {
+        const bearing = calculateBearing(
+          this.currentCoord.lat,
+          this.currentCoord.lng,
+          this.raceTargetCoord.lat,
+          this.raceTargetCoord.lng
+        );
+        this._currentBearing = bearing;
+        const heading = (this.pano && typeof this.pano.getHeading === 'function') ? this.pano.getHeading() : (this.roundHeading || 0);
+        const relativeAngle = (bearing - heading + 360) % 360;
+        this.emit('raceUpdate', {
+          distanceMeters: this.raceInitialDist,
+          bearing,
+          relativeAngle,
+          initialDistance: this.raceInitialDist,
+        });
+      }
+
+      this._startRaceTimer(totalSecs);
+      return;
+    }
+
     if (this.mode === 'solo') {
       this.soloRoundStartTime = Date.now();
       this.roundEnd = Date.now() + this.soloRemainingSeconds * 1000;
@@ -805,18 +1015,11 @@ export class Game {
     }
   }
 
-  _clearPrepare() {
-    if (this._prepare) {
-      clearInterval(this._prepare);
-      this._prepare = null;
-    }
-  }
-
   /* ------------------------------------------------------------------ */
   /* Colocación de marcador y confirmación                               */
   /* ------------------------------------------------------------------ */
   placePick(lat, lng) {
-    if (this.state === 'result' || this._over) return;
+    if (this.isRaceMode || this.state === 'result' || this._over) return;
     this._roundActive = true;
     this.myGuess = { lat: Number(lat), lng: Number(lng) };
     this.emit('confirm', { enabled: true });
@@ -840,6 +1043,7 @@ export class Game {
   }
 
   confirmGuess() {
+    if (this.isRaceMode) return;
     this._ensureMyGuess();
     if (this.mode === 'solo') {
       this._soloConfirm();
@@ -973,6 +1177,318 @@ export class Game {
     }
   }
 
+  /* ------------------------------------------------------------------ */
+  /* Submodo Carrera al Objetivo (Rally Equidistante)                   */
+  /* ------------------------------------------------------------------ */
+  onPositionChange(lat, lng, panoId) {
+    if (!this.isRaceMode || !this._roundActive || !this.raceTargetCoord || this.raceMyFinished) return;
+    this._lastLocalCoord = { lat: Number(lat), lng: Number(lng) };
+
+    const distKm = haversineKm(lat, lng, this.raceTargetCoord.lat, this.raceTargetCoord.lng);
+    const distMeters = Math.round(distKm * 1000);
+    this.raceCurrentDist = distMeters;
+
+    const bearing = calculateBearing(lat, lng, this.raceTargetCoord.lat, this.raceTargetCoord.lng);
+    this._currentBearing = bearing;
+
+    const heading = (this.pano && typeof this.pano.getHeading === 'function') ? this.pano.getHeading() : (this.roundHeading || 0);
+    const relativeAngle = (bearing - heading + 360) % 360;
+
+    this.emit('raceUpdate', {
+      distanceMeters: distMeters,
+      bearing,
+      relativeAngle,
+      initialDistance: this.raceInitialDist,
+    });
+
+    const myIndex = Math.max(0, this.players.findIndex((p) => p.id === this.net.myId));
+    const myColor = (CONFIG.PLAYER_COLORS && CONFIG.PLAYER_COLORS[myIndex % CONFIG.PLAYER_COLORS.length]) || '#38bdf8';
+    this.map.updateRacePlayer(this.net.myId, {
+      lat: Number(lat),
+      lng: Number(lng),
+      color: myColor,
+      name: this.meName,
+      isMe: true,
+    });
+
+    const now = Date.now();
+    if (!this._lastPosBroadcast || now - this._lastPosBroadcast > 200) {
+      this._lastPosBroadcast = now;
+      this._broadcastRacePosition(lat, lng, myColor);
+    }
+
+    // Detección automática al llegar a la meta (distancia <= 25m)
+    if (distMeters <= 25 && !this.raceMyFinished) {
+      this._onLocalReachedTarget();
+    }
+  }
+
+  onPovChange(heading, pitch) {
+    if (!this.isRaceMode || !this._roundActive || this.raceMyFinished) return;
+    if (this._currentBearing != null) {
+      const relativeAngle = (this._currentBearing - heading + 360) % 360;
+      this.emit('raceCompass', {
+        heading,
+        relativeAngle,
+        bearing: this._currentBearing,
+      });
+    }
+  }
+
+  _broadcastRacePosition(lat, lng, color) {
+    const payload = {
+      type: 'racePos',
+      id: this.net.myId,
+      name: this.meName,
+      color,
+      lat: Number(lat),
+      lng: Number(lng),
+      distMeters: this.raceCurrentDist,
+    };
+    if (this.role === 'host') {
+      this.net.broadcast(payload);
+    } else {
+      this.net.send(payload);
+    }
+  }
+
+  _onRacePos(data, fromPeerId) {
+    if (!this.isRaceMode || data.lat == null || data.lng == null) return;
+    const pId = data.id || fromPeerId;
+    if (pId === this.net.myId) return;
+
+    // Si el jugador ya terminó la carrera, asegurar que su punto se quite del minimapa
+    if (this.raceFinishedPlayers && this.raceFinishedPlayers.some((f) => f.id === pId || f.name === data.name)) {
+      if (this.map && typeof this.map.removeRacePlayer === 'function') {
+        this.map.removeRacePlayer(pId, data.name);
+      }
+      return;
+    }
+
+    const p = this.players.find((x) => x.id === pId || x.name === data.name);
+    if (p) {
+      p._lastDistMeters = data.distMeters != null
+        ? data.distMeters
+        : (this.raceTargetCoord ? Math.round(haversineKm(data.lat, data.lng, this.raceTargetCoord.lat, this.raceTargetCoord.lng) * 1000) : null);
+    }
+
+    const pIndex = Math.max(0, this.players.findIndex((x) => x.id === pId || x.name === data.name));
+    const pColor = data.color || (CONFIG.PLAYER_COLORS && CONFIG.PLAYER_COLORS[pIndex % CONFIG.PLAYER_COLORS.length]) || '#fb7171';
+
+    this.map.updateRacePlayer(pId, {
+      lat: Number(data.lat),
+      lng: Number(data.lng),
+      color: pColor,
+      name: data.name || (p ? p.name : 'Rival'),
+      isMe: false,
+    });
+
+    if (this.role === 'host') {
+      this.net.broadcast({
+        type: 'racePos',
+        id: pId,
+        name: data.name,
+        color: pColor,
+        lat: data.lat,
+        lng: data.lng,
+        distMeters: data.distMeters,
+      });
+    }
+  }
+
+  _onLocalReachedTarget() {
+    if (this.raceMyFinished) return;
+    this.raceMyFinished = true;
+    const finishTimeSec = Math.max(0.5, Number(((Date.now() - this._raceRoundStartTime) / 1000).toFixed(1)));
+    this.pano.setStatic(true);
+    this.emit('raceReached', { finishTimeSec, distMeters: 0 });
+    this.audio.roundWin();
+
+    // Eliminar mi punto del minimapa al ganar/llegar a la meta
+    if (this.map && typeof this.map.removeRacePlayer === 'function') {
+      this.map.removeRacePlayer(this.net.myId, this.meName);
+    }
+
+    if (this.role === 'host') {
+      this._handlePlayerReached(this.net.myId, this.meName, finishTimeSec);
+    } else {
+      this.net.send({
+        type: 'raceReach',
+        id: this.net.myId,
+        name: this.meName,
+        finishTimeSec,
+      });
+    }
+  }
+
+  _handlePlayerReached(playerId, playerName, finishTimeSec) {
+    if (this.role !== 'host' || this._resolved) return;
+    const existing = this.raceFinishedPlayers.find((f) => f.id === playerId || f.name === playerName);
+    if (existing) return;
+
+    const rank = this.raceFinishedPlayers.length + 1;
+    const entry = {
+      id: playerId,
+      name: playerName,
+      rank,
+      finishTimeSec: Number(finishTimeSec) || 0,
+    };
+    this.raceFinishedPlayers.push(entry);
+
+    // En el host también eliminamos el punto del jugador que llegó
+    if (this.map && typeof this.map.removeRacePlayer === 'function') {
+      this.map.removeRacePlayer(playerId, playerName);
+    }
+
+    this.net.broadcast({
+      type: 'raceFinishedOrder',
+      id: playerId,
+      name: playerName,
+      rank,
+      finishTimeSec: entry.finishTimeSec,
+    });
+
+    this._onRaceFinishedOrder(entry);
+
+    // Si es el primer jugador en llegar, arrancar cuenta atrás de 30s para los demás
+    if (rank === 1) {
+      this._startRaceHurry(playerName);
+    }
+
+    const connectedPlayers = this.players.filter((p) => !p.disconnected);
+    if (this.raceFinishedPlayers.length >= connectedPlayers.length) {
+      this._resolveRaceRound();
+    }
+  }
+
+  _startRaceHurry(winnerName) {
+    if (this._raceHurryActive || this._resolved) return;
+    this._raceHurryActive = true;
+    const hurrySecs = CONFIG.RACE_HURRY_COUNTDOWN || 30;
+    this.hurryEnd = Date.now() + hurrySecs * 1000;
+
+    if (this.roundEnd > this.hurryEnd) {
+      this.roundEnd = this.hurryEnd;
+    }
+
+    this.net.broadcast({
+      type: 'raceHurryStart',
+      seconds: hurrySecs,
+      winnerName,
+    });
+
+    this._onRaceHurryStart({ seconds: hurrySecs, winnerName });
+  }
+
+  _onRaceHurryStart(data) {
+    this._raceHurryActive = true;
+    const secs = data.seconds || 30;
+    this.hurryEnd = Date.now() + secs * 1000;
+    this.emit('countdown', {
+      seconds: secs,
+      guesserName: data.winnerName || 'Un rival',
+      penalty: 0,
+    });
+  }
+
+  _onRaceFinishedOrder(data) {
+    // Eliminar el punto del jugador del minimapa para todos
+    if (this.map && typeof this.map.removeRacePlayer === 'function') {
+      this.map.removeRacePlayer(data.id, data.name);
+    }
+
+    if (data.id === this.net.myId || data.name === this.meName) {
+      this.raceMyRank = data.rank;
+      this.emit('raceRankAssigned', { rank: data.rank, finishTimeSec: data.finishTimeSec });
+    }
+    this.emit('raceArrivalBanner', {
+      rank: data.rank,
+      name: data.name,
+      finishTimeSec: data.finishTimeSec,
+      isMe: (data.id === this.net.myId || data.name === this.meName),
+    });
+  }
+
+  _startRaceTimer(totalSecs) {
+    this._clearTimers();
+    let lastSecond = -1;
+    this._tick = setInterval(() => {
+      if (this.state !== 'playing' || !this._roundActive) return;
+      const remaining = Math.max(0, Math.ceil((this.roundEnd - Date.now()) / 1000));
+      if (remaining !== lastSecond) {
+        lastSecond = remaining;
+        this.emit('timer', { seconds: remaining, danger: remaining <= 10 });
+        if (this.role === 'host') {
+          this.net.broadcast({ type: 'tick', remaining });
+        }
+      }
+
+      if (this._raceHurryActive && this.hurryEnd && Date.now() >= this.hurryEnd && !this._resolved) {
+        if (this.role === 'host') {
+          this._resolveRaceRound();
+        }
+        return;
+      }
+
+      if (remaining <= 0 && !this._resolved) {
+        if (this.role === 'host') {
+          this._resolveRaceRound();
+        }
+      }
+    }, 250);
+  }
+
+  _resolveRaceRound() {
+    if (this._resolved) return;
+    this._resolved = true;
+    this._lastResolvedAt = Date.now();
+    if (this.net && typeof this.net.setAwaitingGuesses === 'function') {
+      this.net.setAwaitingGuesses(false);
+    }
+    this._clearTimers();
+    this.state = 'result';
+
+    const results = this.players.map((p) => {
+      const fin = this.raceFinishedPlayers.find((f) => f.id === p.id || f.name === p.name);
+      const rank = fin ? fin.rank : null;
+      const finishTimeSec = fin ? fin.finishTimeSec : null;
+      const finalDistMeters = fin ? 0 : (p._lastDistMeters != null ? p._lastDistMeters : (p.id === this.net.myId ? this.raceCurrentDist : this.raceInitialDist));
+
+      const roundScore = computeRaceScore(
+        rank,
+        finishTimeSec,
+        this.raceDurationSetting,
+        this.raceInitialDist,
+        finalDistMeters
+      );
+
+      p.score = (p.score || 0) + roundScore;
+
+      return {
+        id: p.id,
+        name: p.name,
+        rank,
+        finishTimeSec,
+        finalDistMeters,
+        score: roundScore,
+        totalScore: p.score,
+        isRace: true,
+      };
+    });
+
+    const neutral = {
+      round: this.currentRound,
+      total: this.rounds,
+      real: { lat: this.raceTargetCoord.lat, lng: this.raceTargetCoord.lng },
+      players: results,
+      isRace: true,
+    };
+
+    this.net.broadcast({ type: 'roundResult', ...neutral });
+    this._showMultiResult(neutral);
+    this._scheduleAdvance();
+  }
+
   /** Contador de 15 segundos cuando el primer jugador adivina. */
   _startHurry(guesserName = '') {
     if (this._hurryActive) return;
@@ -1071,9 +1587,10 @@ export class Game {
   }
 
   /** Marca a un jugador desconectado durante la partida con tiempo de gracia para reconectar. */
-  removePlayer(peerId) {
-    if (!peerId) return;
-    const player = this.players.find((p) => p.id === peerId);
+  removePlayer(peerId, playerName = null) {
+    if (!peerId && !playerName) return;
+    const lower = (playerName || '').trim().toLowerCase();
+    const player = this.players.find((p) => p.id === peerId || (lower && (p.name || '').trim().toLowerCase() === lower));
     if (player) {
       player.disconnected = true;
     }
@@ -1254,6 +1771,125 @@ export class Game {
           this._pendingRoundStart = data;
           break;
         }
+
+        if (data.isRaceMode || data.gameMode === 'race' || this.isRaceMode) {
+          this.isRaceMode = true;
+          this.gameMode = 'race';
+          this.currentRound = data.round;
+          this.state = 'playing';
+          this._resolved = false;
+          this._roundActive = false;
+          this._syncStartedRound = null;
+          this._roundSyncStarted = null;
+          this.raceFinishedPlayers = [];
+          this.raceMyFinished = false;
+          this.raceMyRank = null;
+          this._raceHurryActive = false;
+          this.myGuess = null;
+
+          if (data.raceRoundsData) {
+            this.raceRoundsData = data.raceRoundsData;
+          }
+          if (data.raceDistanceSetting) {
+            this.raceDistanceSetting = data.raceDistanceSetting;
+          }
+          if (data.raceDurationSetting) {
+            this.raceDurationSetting = data.raceDurationSetting;
+          }
+
+          if (data.players && Array.isArray(data.players)) {
+            this.players = data.players.map((dp) => ({
+              id: dp.id,
+              name: dp.name,
+              score: dp.score || 0,
+              hp: CONFIG.MAX_HP,
+              guess: null,
+              guessed: false,
+              _preRoundScore: dp.score || 0,
+            }));
+          }
+
+          const raceRound = this.raceRoundsData && this.raceRoundsData[data.round - 1];
+          if (raceRound) {
+            this.raceTargetCoord = raceRound.targetCoord;
+            this.raceInitialDist = raceRound.distanceMeters || this.raceDistanceSetting;
+            this.raceCurrentDist = this.raceInitialDist;
+
+            const myIndex = Math.max(0, this.players.findIndex((p) => p.id === this.net.myId));
+            const spawnIdx = (raceRound.spawnIndices && raceRound.spawnIndices.length > 0)
+              ? raceRound.spawnIndices[myIndex % raceRound.spawnIndices.length]
+              : raceRound.targetIndex;
+            const spawnCoord = this.coordenadas[spawnIdx];
+            this.currentCoord = spawnCoord;
+
+            const initialBearing = calculateBearing(
+              spawnCoord.lat,
+              spawnCoord.lng,
+              this.raceTargetCoord.lat,
+              this.raceTargetCoord.lng
+            );
+            this.roundHeading = initialBearing;
+
+            this.pano.setRaceMode(true);
+            this.pano.setStatic(false);
+            this.pano.setTunnelMode(false);
+            this.pano.setBlurMode(false);
+            this.pano.setBlind(true, 'Ronda ' + data.round, 'Cargando punto de salida en alta definición…', true);
+            this.pano.setPano(spawnCoord.pano_id, initialBearing, 0, spawnCoord);
+
+            this.map.setRaceMode(true);
+            this.map.clearRacePlayers();
+
+            this.players.forEach((p, idx) => {
+              const pSpawnIdx = (raceRound.spawnIndices && raceRound.spawnIndices.length > 0)
+                ? raceRound.spawnIndices[idx % raceRound.spawnIndices.length]
+                : raceRound.targetIndex;
+              const pCoord = this.coordenadas[pSpawnIdx];
+              const pColor = (CONFIG.PLAYER_COLORS && CONFIG.PLAYER_COLORS[idx % CONFIG.PLAYER_COLORS.length]) || '#38bdf8';
+              this.map.updateRacePlayer(p.id, {
+                lat: pCoord.lat,
+                lng: pCoord.lng,
+                color: pColor,
+                name: p.name,
+                isMe: p.id === this.net.myId,
+              });
+            });
+
+            this.emit('waiting', { waiting: false });
+            this.emit('confirm', { enabled: false });
+            this.emit('temporalBlind', { active: false });
+            this.emit('temporalTimer', { seconds: null });
+            this.emit('raceStart', {
+              round: data.round,
+              total: this.rounds,
+              targetDistance: this.raceInitialDist,
+              duration: this.raceDurationSetting,
+            });
+            this._emitHud();
+
+            if (this._guestBlindFailsafe) clearTimeout(this._guestBlindFailsafe);
+            this._guestBlindFailsafe = setTimeout(() => {
+              if (this.state === 'playing' && this.currentRound === data.round && !this._roundActive) {
+                this.pano.refresh();
+                this.pano.setBlind(false);
+                this._activateRound(data.round);
+              }
+            }, 3600);
+
+            this.pano.waitForReady(2500)
+              .catch(() => {})
+              .then(() => {
+                if (this.state !== 'playing' || this.currentRound !== data.round) return;
+                this.net.send({
+                  type: 'panoReady',
+                  round: this.currentRound,
+                  senderId: this.net.myId,
+                });
+              });
+            break;
+          }
+        }
+
         this.currentRound = data.round;
         this.state = 'playing';
         this.roundHeading = data.heading || 0;
@@ -1485,6 +2121,20 @@ export class Game {
         }
         this._onGameOver(data);
         break;
+      case 'racePos':
+        this._onRacePos(data, fromPeerId);
+        break;
+      case 'raceReach':
+        if (this.role === 'host') {
+          this._handlePlayerReached(data.id || fromPeerId, data.name, data.finishTimeSec);
+        }
+        break;
+      case 'raceFinishedOrder':
+        this._onRaceFinishedOrder(data);
+        break;
+      case 'raceHurryStart':
+        this._onRaceHurryStart(data);
+        break;
     }
   }
 
@@ -1614,6 +2264,12 @@ export class Game {
 
   _showMultiResult(neutral) {
     const result = this._adaptResult(neutral);
+    if (neutral.isRace) {
+      if (result.wonRound) this.audio.roundWin();
+      else this.audio.roundLose();
+      this.emit('result', result);
+      return;
+    }
     if (neutral.players.some((p) => (p.damage || 0) > 0)) {
       if (result.wonRound) this.audio.roundWin();
       else this.audio.roundLose();
@@ -1626,6 +2282,24 @@ export class Game {
   _onRoundResult(neutral) {
     this._clearTimers();
     this.state = 'result';
+
+    if (neutral.isRace) {
+      this.isRaceMode = true;
+      neutral.players.forEach((r) => {
+        const p = this.players.find((x) => x.id === r.id || x.name === r.name);
+        if (p) {
+          p.score = r.totalScore;
+          p.rank = r.rank;
+          p.finishTimeSec = r.finishTimeSec;
+          p.finalDistMeters = r.finalDistMeters;
+        }
+      });
+      const result = this._adaptResult(neutral);
+      if (result.wonRound) this.audio.roundWin();
+      else this.audio.roundLose();
+      this.emit('result', result);
+      return;
+    }
 
     neutral.players.forEach((r) => {
       const p = this.players.find((x) => x.id === r.id || x.name === r.name);
@@ -1656,6 +2330,25 @@ export class Game {
       (this.net.myId && p.id === this.net.myId) ||
       (myClean && norm(p.name) === myClean)
     ) || neutral.players[0];
+
+    if (neutral.isRace) {
+      return {
+        mode: 'multi',
+        isRace: true,
+        round: neutral.round,
+        total: neutral.total,
+        real: neutral.real,
+        players: neutral.players,
+        me,
+        myScore: me ? me.score : 0,
+        myTotalScore: me ? me.totalScore : 0,
+        myRank: me ? me.rank : null,
+        myFinishTime: me ? me.finishTimeSec : null,
+        myFinalDist: me ? me.finalDistMeters : null,
+        wonRound: me ? (me.rank === 1 || (me.rank != null && me.rank <= 3)) : false,
+      };
+    }
+
     return {
       mode: 'multi',
       round: neutral.round,
@@ -1692,6 +2385,15 @@ export class Game {
         return;
       }
 
+      if (this.isRaceMode) {
+        if (this.currentRound >= this.rounds) {
+          this._endGame('rounds');
+          return;
+        }
+        this._beginRound(this.currentRound + 1);
+        return;
+      }
+
       // El KO solo termina la partida en 1v1 (2 jugadores).
       // Con 3+ jugadores se sigue hasta agotar las rondas.
       if (this.players.length === 2 && this.players.some((p) => p.hp <= 0)) {
@@ -1711,20 +2413,27 @@ export class Game {
     this.state = 'gameover';
     this._clearTimers();
 
-    const ranked = [...this.players].sort((a, b) => {
-      if (b.hp !== a.hp) return b.hp - a.hp;
-      return b.score - a.score;
-    });
+    let ranked;
+    if (this.isRaceMode) {
+      ranked = [...this.players].sort((a, b) => (b.score || 0) - (a.score || 0));
+    } else {
+      ranked = [...this.players].sort((a, b) => {
+        if (b.hp !== a.hp) return b.hp - a.hp;
+        return b.score - a.score;
+      });
+    }
 
     const neutral = {
       reason,
       total: this.rounds,
+      isRace: this.isRaceMode,
       players: ranked.map((p, i) => ({
         id: p.id,
         name: p.name,
         hp: p.hp,
         score: p.score,
         rank: i + 1,
+        isRace: this.isRaceMode,
       })),
     };
 
@@ -1757,6 +2466,7 @@ export class Game {
     ) || neutral.players[0];
     return {
       mode: 'multi',
+      isRace: !!neutral.isRace,
       total: neutral.total,
       reason: neutral.reason,
       players: neutral.players,

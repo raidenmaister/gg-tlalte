@@ -4,7 +4,7 @@
 
 export const CONFIG = {
   // Versión oficial de la aplicación visible en menús
-  VERSION: 'BETA v1.7.7',
+  VERSION: 'BETA v1.8.5',
 
   // Fallback opcional de API Key (cliente). La key real se define en
   // js/keys.js (window.GG_GOOGLE_MAPS_API_KEY), que se mantiene local y NO se
@@ -83,6 +83,7 @@ export const CONFIG = {
     normal_standard: { desc: 'Mueve la vista 360° y haz zoom libremente.' },
     normal_zoom: { desc: 'Giro 360° con visión inicial ultra-telescópica que se aleja con el tiempo. ¡Hasta 6,500 pts en zoom máximo!' },
     normal_blur: { desc: 'Giro 360° sin zoom manual. Inicia 100% borroso y se enfoca 20% en 5 fases. ¡Haz Perfect para curar HP y acumular rachas!' },
+    normal_race: { desc: 'Carrera al Objetivo: Todos inician a la misma distancia de la meta. Desplázate por las calles en 360° siguiendo la brújula y la distancia. ¡Gana el primero en llegar!' },
     static_standard: { desc: 'Cámara fija, sin rotación ni movimiento. Desafío puro de reconocimiento visual.' },
     static_zoom: { desc: 'Cámara fija con zoom ultra-telescópico inicial que se aleja con el tiempo. ¡Identifica el lugar antes de que retroceda!' },
     static_blur: { desc: 'Cámara fija sin rotación ni zoom. Inicia 100% borroso y se enfoca 20% en 5 fases. ¡Haz Perfect para curar HP y acumular rachas!' },
@@ -106,6 +107,16 @@ export const CONFIG = {
   BLUR_DECAY_DISTANCES: [2.2, 1.9, 1.6, 1.4, 1.3, 1.2],
   // Curación base en HP al lograr Perfect (<= 25m) en cada fase
   BLUR_BASE_HEALS: [1600, 1200, 900, 600, 300, 150],
+
+  // Submodo Carrera al Objetivo (Rally Equidistante)
+  RACE_DISTANCES: [500, 1000, 2000],
+  DEFAULT_RACE_DISTANCE: 1000,
+  RACE_DURATIONS: [90, 150, 240], // Segundos: 1:30, 2:30, 4:00
+  DEFAULT_RACE_DURATION: 150,
+  RACE_TARGET_RADIUS_KM: 0.025,   // 25 metros para considerar llegada a la meta
+  RACE_BASE_SCORES: [5000, 3500, 2500, 1800, 1200], // 1º, 2º, 3º, 4º, 5º+
+  RACE_MAX_TIME_BONUS: 1500,     // Puntos extra máximos por velocidad
+  RACE_HURRY_COUNTDOWN: 30,      // Segundos de prisa cuando el primer jugador cruza la meta
 
   // 25 colores únicos y contrastantes para hasta 25 jugadores simultáneos
   PLAYER_COLORS: [

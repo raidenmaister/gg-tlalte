@@ -12,7 +12,7 @@
 
     <!-- Leaflet (minimapa) -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-    <link rel="stylesheet" href="style.css?v=1.7.7">
+    <link rel="stylesheet" href="style.css?v=1.8.5">
 </head>
 <body>
 
@@ -20,7 +20,7 @@
     <div id="ascii-earth" class="hidden"></div>
 
     <!-- Badge de versión (menús) -->
-    <div id="versionBadge" class="version-badge" title="Ver historial de versiones">BETA v1.7.7</div>
+    <div id="versionBadge" class="version-badge" title="Ver historial de versiones">BETA v1.8.5</div>
 
     <!-- ====================== PANTALLA: NOMBRE ====================== -->
     <div id="screen-name" class="screen">
@@ -233,6 +233,23 @@
                         <button type="button" class="submode-tab active" data-variant="standard">Normal</button>
                         <button type="button" class="submode-tab" data-variant="zoom">🔍 Zoom</button>
                         <button type="button" class="submode-tab" data-variant="blur">🌫️ Borroso</button>
+                        <button type="button" class="submode-tab" data-variant="race">🏁 Carrera</button>
+                    </div>
+                </div>
+
+                <!-- Configuración de Carrera al Objetivo -->
+                <div id="multiRaceConfig" class="race-config hidden">
+                    <label class="config-label">Distancia al objetivo (Equidistante)</label>
+                    <div class="pill-row" id="multiRaceDistPills">
+                        <button type="button" class="pill-btn" data-dist="500">500 m</button>
+                        <button type="button" class="pill-btn active" data-dist="1000">1 km</button>
+                        <button type="button" class="pill-btn" data-dist="2000">2 km</button>
+                    </div>
+                    <label class="config-label" style="margin-top: 10px;">Tiempo límite por carrera</label>
+                    <div class="pill-row" id="multiRaceTimePills">
+                        <button type="button" class="pill-btn" data-sec="90">1:30 min</button>
+                        <button type="button" class="pill-btn active" data-sec="150">2:30 min</button>
+                        <button type="button" class="pill-btn" data-sec="240">4:00 min</button>
                     </div>
                 </div>
 
@@ -432,51 +449,27 @@
             </div>
         </div>
 
-        <!-- Banner modo temporal: tiempo visible restante -->
-        <div class="temporal-banner hidden" id="temporalBanner">
-            <span class="temporal-label">⏱️ Tiempo visible</span>
-            <span class="temporal-number" id="temporalNumber">3s</span>
-        </div>
-
-        <!-- Banner modo Zoom Progresivo (Visión Túnel): cuenta regresiva y progreso hacia siguiente nivel de zoom -->
-        <div class="tunnel-banner hidden" id="tunnelBanner">
-            <div class="tunnel-main">
-                <div class="tunnel-header">
-                    <span class="tunnel-step-badge" id="tunnelStepBadge">🔍 ZOOM 4/4 (MÁXIMO)</span>
-                    <span class="tunnel-bonus-tag" id="tunnelBonusTag">HASTA +1,500 PTS</span>
-                </div>
-                <div class="tunnel-track">
-                    <div class="tunnel-bar" id="tunnelProgressBar"></div>
-                </div>
-                <div class="tunnel-footer">
-                    <span class="tunnel-label" id="tunnelNextLabel">Siguiente zoom en</span>
-                    <span class="tunnel-countdown" id="tunnelCountdown">3.0s</span>
-                </div>
-            </div>
-        </div>
-
-        <!-- Banner modo Borroso (Desenfocado Progresivo): cuenta regresiva y progreso hacia siguiente fase -->
-        <div class="blur-banner hidden" id="blurBanner">
-            <div class="blur-main">
-                <div class="blur-header">
-                    <span class="blur-step-badge" id="blurStepBadge">🌫️ BORROSO 100% (FASE 1/5)</span>
-                    <span class="blur-bonus-tag" id="blurBonusTag">PERFECT: +1,600 HP</span>
-                </div>
-                <div class="blur-track">
-                    <div class="blur-bar" id="blurProgressBar"></div>
-                </div>
-                <div class="blur-footer">
-                    <span class="blur-label" id="blurNextLabel">Enfocando en</span>
-                    <span class="blur-countdown" id="blurCountdown">3.0s</span>
-                </div>
-            </div>
-        </div>
-
         <!-- HUD superior -->
         <div class="hud-top">
             <div class="hud-left">
                 <div class="hud-round" id="hudRound">RONDA 1/5</div>
                 <div class="hud-timer" id="hudTimer">60</div>
+            </div>
+
+            <!-- HUD de Carrera: Flecha vectorial hacia el objetivo y distancia en metros (centro superior) -->
+            <div class="race-hud hidden" id="raceHud">
+                <div class="race-hud-card">
+                    <div class="race-compass-arrow" id="raceCompassArrow" title="Rumbo hacia la meta">
+                        <svg class="race-arrow-svg" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true">
+                            <path d="M12 2 L20.5 11.5 H15 V22 H9 V11.5 H3.5 L12 2 Z" fill="#38bdf8" stroke="#ffffff" stroke-width="1.2" stroke-linejoin="round"/>
+                        </svg>
+                    </div>
+                    <div class="race-distance-text" id="raceDistanceText">
+                        <span class="race-dist-label">Meta:</span>
+                        <span id="raceDistVal">1,000 m</span>
+                    </div>
+                </div>
+                <div class="race-status-tag hidden" id="raceStatusTag">¡META ALCANZADA!</div>
             </div>
 
             <div class="hud-right">
@@ -504,23 +497,75 @@
 
         <button class="btn-leave" id="leaveGameBtn" title="Abandonar partida">✕</button>
 
-        <!-- Banner: preparándose (fase previa a adivinar) -->
-        <div class="prepare-banner hidden" id="prepareBanner">
-            <span class="prepare-label">Prepárate</span>
-            <span class="prepare-number" id="prepareNumber">3</span>
-        </div>
-
-        <!-- Banner: el rival ya adivinó -->
-        <div class="countdown-banner hidden" id="countdownBanner">
-            <div class="countdown-main">
-                <span class="countdown-label">¡Tu rival ya adivinó!</span>
-                <span class="countdown-number" id="countdownNumber">15s</span>
+        <!-- Contenedor central de banners HUD (evita solapamientos entre avisos) -->
+        <div class="game-banners-container" id="gameBannersContainer">
+            <!-- Banner: preparándose (fase previa a adivinar) -->
+            <div class="prepare-banner hidden" id="prepareBanner">
+                <span class="prepare-label">Prepárate</span>
+                <span class="prepare-number" id="prepareNumber">3</span>
             </div>
-            <div class="countdown-sub hidden" id="countdownSub">¡Adivina ahora o perderás puntos!</div>
-        </div>
 
-        <!-- Banner: esperando al rival -->
-        <div class="waiting-banner hidden" id="waitingBanner">Esperando al rival…</div>
+            <!-- Banner: cuenta regresiva de rivales / tiempo de rivales -->
+            <div class="countdown-banner hidden" id="countdownBanner">
+                <div class="countdown-main">
+                    <span class="countdown-label">¡Tu rival ya adivinó!</span>
+                    <span class="countdown-number" id="countdownNumber">15s</span>
+                </div>
+                <div class="countdown-sub hidden" id="countdownSub">¡Adivina ahora o perderás puntos!</div>
+            </div>
+
+            <!-- Banner modo Zoom Progresivo (Visión Túnel): cuenta regresiva y progreso hacia siguiente nivel de zoom -->
+            <div class="tunnel-banner hidden" id="tunnelBanner">
+                <div class="tunnel-main">
+                    <div class="tunnel-header">
+                        <span class="tunnel-step-badge" id="tunnelStepBadge">🔍 ZOOM 4/4 (MÁXIMO)</span>
+                        <span class="tunnel-bonus-tag" id="tunnelBonusTag">HASTA +1,500 PTS</span>
+                    </div>
+                    <div class="tunnel-track">
+                        <div class="tunnel-bar" id="tunnelProgressBar"></div>
+                    </div>
+                    <div class="tunnel-footer">
+                        <span class="tunnel-label" id="tunnelNextLabel">Siguiente zoom en</span>
+                        <span class="tunnel-countdown" id="tunnelCountdown">3.0s</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Banner modo Borroso (Desenfocado Progresivo): cuenta regresiva y progreso hacia siguiente fase -->
+            <div class="blur-banner hidden" id="blurBanner">
+                <div class="blur-main">
+                    <div class="blur-header">
+                        <span class="blur-step-badge" id="blurStepBadge">🌫️ BORROSO 100% (FASE 1/5)</span>
+                        <span class="blur-bonus-tag" id="blurBonusTag">PERFECT: +1,600 HP</span>
+                    </div>
+                    <div class="blur-track">
+                        <div class="blur-bar" id="blurProgressBar"></div>
+                    </div>
+                    <div class="blur-footer">
+                        <span class="blur-label" id="blurNextLabel">Enfocando en</span>
+                        <span class="blur-countdown" id="blurCountdown">3.0s</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Banner modo temporal: tiempo visible restante -->
+            <div class="temporal-banner hidden" id="temporalBanner">
+                <span class="temporal-label">⏱️ Tiempo visible</span>
+                <span class="temporal-number" id="temporalNumber">3s</span>
+            </div>
+
+            <!-- Banner: esperando al rival -->
+            <div class="waiting-banner hidden" id="waitingBanner">Esperando al rival…</div>
+
+            <!-- Banner de llegada a la meta en carrera -->
+            <div class="race-arrival-banner hidden" id="raceArrivalBanner">
+                <div class="race-arrival-main">
+                    <span class="race-arrival-badge" id="raceArrivalBadge">🥇 1º LUGAR</span>
+                    <span class="race-arrival-title" id="raceArrivalTitle">¡Has llegado a la meta!</span>
+                    <span class="race-arrival-time" id="raceArrivalTime">Tiempo: 45.2s · +5,800 pts</span>
+                </div>
+            </div>
+        </div>
 
         <!-- Minimapa + confirmar -->
         <div class="minimap-wrap collapsed" id="minimapWrap">
@@ -562,11 +607,69 @@
                 <button type="button" class="btn-close-modal" id="changelogCloseBtn" aria-label="Cerrar">✕</button>
             </div>
             <div class="changelog-list" id="changelogList">
-                <!-- BETA v1.7.7 -->
+                <!-- BETA v1.8.5 -->
                 <div class="changelog-entry current">
                     <div class="changelog-title-row">
-                        <span class="changelog-version">BETA v1.7.7</span>
+                        <span class="changelog-version">BETA v1.8.5</span>
                         <span class="changelog-badge badge-current">Actual</span>
+                    </div>
+                    <ul class="changelog-list-items">
+                        <li><strong>Retirada del Punto de Jugador al Ganar:</strong> Cuando un jugador alcanza el objetivo y cruza la meta, su marcador/punto es retirado de inmediato del minimapa para evitar saturación y reflejar visualmente que ya completó su recorrido.</li>
+                        <li><strong>Flecha de Rumbo Vectorial Nítida:</strong> Reemplazado el indicador anterior por una flecha direccional SVG pura (sin emojis confusos ni triángulos ambiguos) que rota con máxima precisión y claridad apuntando a la meta.</li>
+                        <li><strong>Eliminación de Pantallazos Negros y Artefactos:</strong> Optimizado el motor de avance en Street View con límite de frecuencia (debounce de 240ms) y avance nodo a nodo, eliminando por completo los parpadeos en negro, agujeros en texturas y colisiones al hacer clics rápidos o mantener teclas pulsadas.</li>
+                    </ul>
+                </div>
+
+                <!-- BETA v1.8.4 -->
+                <div class="changelog-entry">
+                    <div class="changelog-title-row">
+                        <span class="changelog-version">BETA v1.8.4</span>
+                    </div>
+                    <ul class="changelog-list-items">
+                        <li><strong>Corrección Crítica de Expulsión al Iniciar Partida:</strong> Resuelto el problema donde los invitados eran sacados de la partida al comenzar la ronda mientras cargaba el panorama. Se corrigió la validación de clientes activos ante transiciones tardías de WebRTC, evitando rechazos accidentales de conexión y bloqueando salidas indeseadas de la pantalla de juego.</li>
+                        <li><strong>Optimización Ultrarrápida de Verificación Vial:</strong> Implementada ejecución concurrente en paralelo y caché en memoria para las comprobaciones de Street View, permitiendo que las rondas de carrera arranquen de forma instantánea sin bloqueos de red.</li>
+                    </ul>
+                </div>
+
+                <!-- BETA v1.8.3 -->
+                <div class="changelog-entry">
+                    <div class="changelog-title-row">
+                        <span class="changelog-version">BETA v1.8.3</span>
+                    </div>
+                    <ul class="changelog-list-items">
+                        <li><strong>Verificación Bidireccional de Transitabilidad (Modo Carrera):</strong> Implementada validación en tiempo real antes de arrancar cada ronda mediante <code>StreetViewService</code> de Google Maps. Se verifica que tanto el punto misterioso objetivo como cada una de las posiciones de salida asignadas a los jugadores posean enlaces de calle contiguos activos (<code>links.length &ge; 1</code>).</li>
+                        <li><strong>Eliminación de Fotos Aisladas y Callejones Bloqueados:</strong> Garantiza que ningún jugador quede atrapado en fotos esféricas desconectadas de usuarios particulares ni en interiores aislados donde no se pueda avanzar, asegurando que todos tengan calles abiertas para llegar a la meta.</li>
+                    </ul>
+                </div>
+
+                <!-- BETA v1.8.2 -->
+                <div class="changelog-entry">
+                    <div class="changelog-title-row">
+                        <span class="changelog-version">BETA v1.8.2</span>
+                    </div>
+                    <ul class="changelog-list-items">
+                        <li><strong>Corrección Integral de Responsividad y Desplazamiento Vertical:</strong> Solucionado el problema donde el título "Crear sala" y los botones inferiores quedaban cortados en pantallas con altura reducida. Ahora el scroll es completamente fluido de extremo a extremo sin recortes.</li>
+                        <li><strong>Rediseño en Cuadrícula 2x2 para Variantes:</strong> Las 4 opciones de modo normal (Normal, Zoom, Borroso, Carrera) ahora se distribuyen en una cuadrícula espaciosa de 2x2, eliminando el apiñamiento de iconos y textos.</li>
+                        <li><strong>Optimización de Espaciados:</strong> Ajustados los márgenes y rellenos de las tarjetas de configuración para aprovechar mejor el espacio vertical en laptops y dispositivos móviles.</li>
+                    </ul>
+                </div>
+
+                <!-- BETA v1.7.8 -->
+                <div class="changelog-entry">
+                    <div class="changelog-title-row">
+                        <span class="changelog-version">BETA v1.7.8</span>
+                    </div>
+                    <ul class="changelog-list-items">
+                        <li><strong>Prevención de Salas Duplicadas por el Mismo Anfitrión:</strong> Corregido el bug donde un anfitrión podía figurar con múltiples salas públicas en la lista. Ahora el servidor purga automáticamente cualquier sala anterior del mismo creador al crear o listar, y el botón de creación bloquea pulsaciones repetidas.</li>
+                        <li><strong>Limpieza Dinámica y Gracia de Salas:</strong> Ajustado el umbral de expiración para salas inactivas o abandonadas (de 10 min a 30s) sincronizado con el latido de 5s del anfitrión, eliminando salas fantasma.</li>
+                        <li><strong>Rediseño de Avisos y HUD Central:</strong> Unificado el sistema de banners superiores (Zoom progresivo, desenfoque borroso, cuenta regresiva de rivales y espera) en un contenedor flex que previene solapamientos visuales y colisiones con las barras de vida multijugador.</li>
+                    </ul>
+                </div>
+
+                <!-- BETA v1.7.7 -->
+                <div class="changelog-entry">
+                    <div class="changelog-title-row">
+                        <span class="changelog-version">BETA v1.7.7</span>
                     </div>
                     <ul class="changelog-list-items">
                         <li><strong>Corrección Visual en Botón de Historial de Versiones:</strong> Reparado el cierre de bloques CSS que provocaba que el botón del historial de versiones se renderizara sin estilos en el menú inferior. Restablecido el diseño cápsula translúcido con efecto vidrio y hover brillante.</li>
@@ -788,6 +891,6 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
     <script src="js/keys.js"></script>
-    <script type="module" src="js/app.js?v=1.7.7"></script>
+    <script type="module" src="js/app.js?v=1.8.5"></script>
 </body>
 </html>

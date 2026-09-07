@@ -9,8 +9,8 @@
 //    exactamente igual y sin requerir servidores TURN adicionales ni VPS.
 // ============================================================================
 
-import { CONFIG } from './config.js?v=1.7.7';
-import { generateCode } from './utils.js?v=1.7.7';
+import { CONFIG } from './config.js?v=1.8.5';
+import { generateCode } from './utils.js?v=1.8.5';
 
 const API_URL = 'api.php';
 
@@ -56,6 +56,9 @@ export class Network {
     this._heartbeat = null;
     this._closing = false;
     this._connTimeout = null;
+    this._notFoundCount = 0;
+    this.clientId = this._getClientId();
+    this._guestClientMap = new Map();
 
     // Capa de transporte HTTP relay (solo respaldo cuando P2P no está activo)
     this._p2pConnected = false;
@@ -63,6 +66,34 @@ export class Network {
     this._lastPollSeq = 0;
     this._seenMids = new Set();
     this._awaitingGuesses = false;
+  }
+
+  _getClientId() {
+    let cid = '';
+    try {
+      cid = sessionStorage.getItem('gg_client_id');
+      if (!cid) {
+        cid = 'cl-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+        sessionStorage.setItem('gg_client_id', cid);
+      }
+    } catch (e) {
+      cid = 'cl-' + Math.random().toString(36).slice(2);
+    }
+    return cid;
+  }
+
+  _getHostToken() {
+    let tok = '';
+    try {
+      tok = localStorage.getItem('gg_host_token');
+      if (!tok) {
+        tok = 'htok-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+        localStorage.setItem('gg_host_token', tok);
+      }
+    } catch (e) {
+      tok = 'htok-' + Math.random().toString(36).slice(2);
+    }
+    return tok;
   }
 
   get isHost() {
@@ -73,26 +104,21 @@ export class Network {
     if (this.isHost) {
       const hostName = (this._localName || 'Anfitrión').trim();
       const list = [{ id: this.myId || 'host', name: hostName, isHost: true }];
-      const seenNames = new Set([hostName.toLowerCase()]);
       this.guestNames.forEach((name, peerId) => {
-        const clean = (name || 'Anónimo').trim();
-        const lower = clean.toLowerCase();
-        if (!seenNames.has(lower)) {
-          seenNames.add(lower);
-          list.push({ id: peerId, name: clean, isHost: false });
-        }
+        const clean = (name || 'Invitado').trim();
+        list.push({ id: peerId, name: clean, isHost: false });
       });
       return list;
     }
     return this._guestPlayers || [];
   }
 
-  /** Actualiza la lista de jugadores que recibe un invitado (deduplicada). */
+  /** Actualiza la lista de jugadores que recibe un invitado (deduplicada por ID único). */
   setGuestPlayers(players, config) {
     const seen = new Set();
     const cleanList = [];
     for (const p of (players || [])) {
-      const key = (p.name || '').trim().toLowerCase();
+      const key = p.id || (p.name || '').trim().toLowerCase();
       if (key && !seen.has(key)) {
         seen.add(key);
         cleanList.push(p);
@@ -108,6 +134,8 @@ export class Network {
       if (config.temporalSeconds) this.temporalSeconds = config.temporalSeconds;
       if (config.tunnelSeconds) this.tunnelSeconds = config.tunnelSeconds;
       if (config.blurSeconds) this.blurSeconds = config.blurSeconds;
+      if (config.raceDistance) this.raceDistance = config.raceDistance;
+      if (config.raceSeconds) this.raceSeconds = config.raceSeconds;
     }
   }
 
@@ -126,10 +154,10 @@ export class Network {
         LOG('send P2P error, enviando por HTTP', e);
       }
     }
-    // Mensajes críticos (como conjeturas 'guess' o confirmación 'ready') usan transporte dual:
+    // Mensajes críticos (como conjeturas 'guess', 'ready' o llegada de carrera 'raceReach') usan transporte dual:
     // se envían por WebRTC y SIEMPRE también por HTTP relay si hay sala, asegurando 100% de entrega
     // ante desconexiones silenciosas o pérdida de paquetes UDP/P2P.
-    const isCritical = obj.type === 'guess' || obj.type === 'ready';
+    const isCritical = obj.type === 'guess' || obj.type === 'ready' || obj.type === 'raceReach';
     if ((!sentP2P || isCritical) && this.roomId) {
       this._api('send-msg', {
         id: this.roomId,
@@ -271,6 +299,7 @@ export class Network {
     this._api('create', {
       id: this.roomId,
       name,
+      hostToken: this._getHostToken(),
       limit: this.limit,
       isPublic: isPublic ? 1 : 0,
       rounds: this.rounds || CONFIG.DUEL_ROUNDS,
@@ -280,6 +309,8 @@ export class Network {
       temporalSeconds: this.temporalSeconds || CONFIG.DEFAULT_TEMPORAL_SECONDS,
       tunnelSeconds: this.tunnelSeconds || CONFIG.DEFAULT_TUNNEL_SECONDS,
       blurSeconds: this.blurSeconds || CONFIG.DEFAULT_BLUR_SECONDS,
+      raceDistance: this.raceDistance || CONFIG.DEFAULT_RACE_DISTANCE || 1000,
+      raceSeconds: this.raceSeconds || CONFIG.DEFAULT_RACE_DURATION || 150,
     }).then((res) => {
       if ((!res || !res.ok) && isPublic && this.cb.onError) {
         this.cb.onError('public-register');
@@ -365,6 +396,7 @@ export class Network {
       });
 
       if (res && res.ok && Array.isArray(res.messages)) {
+        this._notFoundCount = 0;
         if (typeof res.lastSeq === 'number' && res.lastSeq > this._lastPollSeq) {
           this._lastPollSeq = res.lastSeq;
         }
@@ -377,11 +409,16 @@ export class Network {
           }
         }
       } else if (res && !res.ok && !this.isHost && (res.error === 'sala no existe' || res.error === 'sala no encontrada' || res.error === 'sala cerrada')) {
-        this._stopPolling();
-        if (this.cb.onHostLeft) {
-          this.cb.onHostLeft('El anfitrión abandonó o eliminó la sala.');
-        } else if (this.cb.onGuestLeave) {
-          this.cb.onGuestLeave(null);
+        this._notFoundCount = (this._notFoundCount || 0) + 1;
+        // Solo considerar la sala cerrada si falla de forma consecutiva al menos 3 veces (6s)
+        // para prevenir falsos positivos por concurrencia o microcortes temporales de red
+        if (this._notFoundCount >= 3) {
+          this._stopPolling();
+          if (this.cb.onHostLeft) {
+            this.cb.onHostLeft('El anfitrión abandonó o eliminó la sala.');
+          } else if (this.cb.onGuestLeave) {
+            this.cb.onGuestLeave(null);
+          }
         }
       }
     }, 2000);
@@ -393,6 +430,7 @@ export class Network {
       this._pollTimer = null;
     }
     this._lastPollSeq = 0;
+    this._notFoundCount = 0;
   }
 
   updatePublicCount(count) {
@@ -419,55 +457,63 @@ export class Network {
     const peerId = fromPeerId || data.senderId;
     LOG('Incoming message:', data.type, 'from:', peerId, 'senderId:', data.senderId);
 
+    // Cancelar timeout de conexión en el invitado en cuanto se recibe cualquier mensaje válido del host
+    if (this.role === 'guest' && this._connTimeout) {
+      clearTimeout(this._connTimeout);
+      this._connTimeout = null;
+    }
+
     if (data.type === 'join') {
       const name = (data.name || data.senderName || 'Anónimo').trim();
+      const clientId = data.clientId || peerId;
       if (this.role === 'host') {
-        const lower = name.toLowerCase();
+        this._guestClientMap = this._guestClientMap || new Map();
 
-        // 0. Si la partida está en transcurso, NO permitir que un jugador externo se meta
-        if (this.isGameInProgress()) {
-          const isExisting = this.isExistingActivePlayer(name);
-          if (!isExisting) {
-            LOG('Partida en curso: rechazando a jugador externo', { name, peerId });
-            this.sendTo(peerId, {
-              type: 'in_progress',
-              reason: 'La sala ya está en juego. No puedes unirte a una partida en curso.'
-            });
-            setTimeout(() => {
-              const rejectedConn = this.conns.get(peerId);
-              if (rejectedConn) {
-                try { rejectedConn.close(); } catch (e) {}
-                this.conns.delete(peerId);
-              }
-            }, 600);
-            return;
-          }
-        }
-
-        // 1. Verificar si este nombre ya estaba previamente en la sala
+        // 1. Identificar si este cliente ya es un jugador activo o registrado en la sala
+        // Buscar por peerId directo, por clientId (valor en _guestClientMap), o por nombre normalizado
+        const lowerName = name.toLowerCase();
         let existingPeerId = null;
-        for (const [oldPeerId, oldName] of this.guestNames.entries()) {
-          if (oldName.trim().toLowerCase() === lower) {
-            existingPeerId = oldPeerId;
+        for (const [pId, cId] of this._guestClientMap.entries()) {
+          if (cId === clientId || pId === peerId) {
+            existingPeerId = pId;
             break;
           }
         }
-
-        // 2. Calcular cuántos invitados únicos distintos hay actualmente
-        const uniqueOtherGuests = new Set();
-        for (const [id, n] of this.guestNames.entries()) {
-          const nLower = n.trim().toLowerCase();
-          if (nLower !== lower) {
-            uniqueOtherGuests.add(nLower);
+        if (!existingPeerId) {
+          for (const [pId, gName] of this.guestNames.entries()) {
+            if (pId === peerId || (gName && gName.trim().toLowerCase() === lowerName)) {
+              existingPeerId = pId;
+              break;
+            }
           }
+        }
+
+        const isExistingActive = !!existingPeerId || this.isExistingActivePlayer(name);
+
+        // 0. Si la partida está en transcurso:
+        // Solo rechazar si es un jugador verdaderamente EXTERNO que no pertenecía a la sala
+        if (this.isGameInProgress() && !isExistingActive) {
+          LOG('Partida en curso: rechazando a jugador externo', { name, peerId });
+          this.sendTo(peerId, {
+            type: 'in_progress',
+            reason: 'La sala ya está en juego. No puedes unirte a una partida en curso.'
+          });
+          setTimeout(() => {
+            const rejectedConn = this.conns.get(peerId);
+            if (rejectedConn) {
+              try { rejectedConn.close(); } catch (e) {}
+              this.conns.delete(peerId);
+            }
+          }, 600);
+          return;
         }
 
         // Capacidad total de invitados = limit - 1 (el anfitrión ocupa 1 slot)
         const maxGuestSlots = Math.max(1, this.limit - 1);
 
         // Si es un jugador nuevo y ya no hay cupos para nuevos invitados:
-        if (!existingPeerId && uniqueOtherGuests.size >= maxGuestSlots) {
-          LOG('Sala llena, rechazando a', name, { uniqueOthers: uniqueOtherGuests.size, maxGuestSlots });
+        if (!isExistingActive && this.guestNames.size >= maxGuestSlots) {
+          LOG('Sala llena, rechazando a', name);
           this.sendTo(peerId, { type: 'full' });
           setTimeout(() => {
             const rejectedConn = this.conns.get(peerId);
@@ -479,22 +525,38 @@ export class Network {
           return;
         }
 
-        // 3. Si es reconexión o reemplazo de peerId anterior del mismo jugador:
+        // 2. Si es reconexión o reemplazo de peerId anterior del mismo cliente (upgrade WebRTC):
         if (existingPeerId && existingPeerId !== peerId) {
-          LOG('Actualizando conexión de invitado:', name, existingPeerId, '->', peerId);
+          LOG('Actualizando conexión de invitado reconectado/P2P upgrade:', name, existingPeerId, '->', peerId);
           this.guestNames.delete(existingPeerId);
+          this._guestClientMap.delete(existingPeerId);
           const oldConn = this.conns.get(existingPeerId);
           if (oldConn) {
             try { oldConn.close(); } catch (e) {}
             this.conns.delete(existingPeerId);
           }
+          if (this.cb.onPlayerPeerIdUpdated) {
+            this.cb.onPlayerPeerIdUpdated(existingPeerId, peerId, name);
+          }
         }
 
-        const isNew = !existingPeerId;
+        const isNew = !existingPeerId && !this.guestNames.has(peerId);
         this.guestNames.set(peerId, name);
+        if (clientId) {
+          this._guestClientMap.set(peerId, clientId);
+        }
         this.remoteName = name;
-        if (isNew && this.cb.onGuestJoin) this.cb.onGuestJoin(peerId, name);
-        this._syncPlayers();
+
+        // Solo emitir onGuestJoin y syncPlayers si el juego aún está en el lobby
+        if (!this.isGameInProgress()) {
+          if (isNew && this.cb.onGuestJoin) this.cb.onGuestJoin(peerId, name);
+          this._syncPlayers();
+        } else {
+          LOG('Invitado reenganchado durante partida en curso (sin alterar UI del lobby):', name, peerId);
+          if (this.cb.onGuestReconnectInGame) {
+            this.cb.onGuestReconnectInGame(peerId, name);
+          }
+        }
       }
       return;
     }
@@ -513,8 +575,9 @@ export class Network {
 
     if (data.type === 'players') {
       if (this.role === 'guest') {
+        const wasEmpty = !this._guestPlayers || this._guestPlayers.length === 0;
         this.setGuestPlayers(data.players, data.config);
-        if (this.cb.onStatus) this.cb.onStatus('guest');
+        if (wasEmpty && this.cb.onStatus) this.cb.onStatus('guest');
         if (this.cb.onPlayers) this.cb.onPlayers(data.players, data.config);
         if (this._connTimeout) {
           clearTimeout(this._connTimeout);
@@ -577,6 +640,9 @@ export class Network {
   /* ------------------------------ HOST ---------------------------------- */
   createRoom(name, isPublic = false, opts = {}) {
     LOG('createRoom', { name, isPublic, opts });
+    if (this.isHost && this.roomId) {
+      try { this._api('delete', { id: this.roomId }); } catch (e) {}
+    }
     this._resetConnection();
     this._localName = name;
     this.role = 'host';
@@ -588,6 +654,8 @@ export class Network {
     this.temporalSeconds = Number(opts.temporalSeconds) || CONFIG.DEFAULT_TEMPORAL_SECONDS;
     this.tunnelSeconds = Number(opts.tunnelSeconds) || CONFIG.DEFAULT_TUNNEL_SECONDS;
     this.blurSeconds = Number(opts.blurSeconds) || CONFIG.DEFAULT_BLUR_SECONDS;
+    this.raceDistance = Number(opts.raceDistance) || CONFIG.DEFAULT_RACE_DISTANCE || 1000;
+    this.raceSeconds = Number(opts.raceSeconds) || CONFIG.DEFAULT_RACE_DURATION || 150;
     this.limit = Math.min(
       CONFIG.ROOM_MAX_PLAYERS,
       Math.max(CONFIG.ROOM_MIN_PLAYERS, opts.limit || CONFIG.ROOM_MAX_PLAYERS)
@@ -644,19 +712,19 @@ export class Network {
 
     // Iniciar polling y enviar join por HTTP de inmediato
     this._startPolling();
-    this.send({ type: 'join', name });
+    this.send({ type: 'join', name, clientId: this.clientId });
 
     // Intento de conexión WebRTC en paralelo
     this._openPeer(null, name);
 
-    // Timeout de seguridad: solo si tras 15s no hay respuesta ni por P2P ni por HTTP
+    // Timeout de seguridad: solo si tras 20s no hay respuesta ni por P2P ni por HTTP
     this._connTimeout = setTimeout(() => {
       if (!this._guestPlayers || this._guestPlayers.length === 0) {
-        LOG('guest conn timeout (15s sin respuesta) → peer-unavailable');
+        LOG('guest conn timeout (20s sin respuesta) → peer-unavailable');
         this.leave();
         this._emitError('peer-unavailable');
       }
-    }, 15000);
+    }, 20000);
   }
 
   joinPublicRoom(peerId, name) {
@@ -674,19 +742,19 @@ export class Network {
 
     // Iniciar polling y enviar join por HTTP de inmediato
     this._startPolling();
-    this.send({ type: 'join', name });
+    this.send({ type: 'join', name, clientId: this.clientId });
 
     // Intento de conexión WebRTC en paralelo
     this._openPeer(null, name);
 
-    // Timeout de seguridad: solo si tras 15s no hay respuesta
+    // Timeout de seguridad: solo si tras 20s no hay respuesta
     this._connTimeout = setTimeout(() => {
       if (!this._guestPlayers || this._guestPlayers.length === 0) {
-        LOG('guest conn timeout (15s sin respuesta) → peer-unavailable');
+        LOG('guest conn timeout (20s sin respuesta) → peer-unavailable');
         this.leave();
         this._emitError('peer-unavailable');
       }
-    }, 15000);
+    }, 20000);
   }
 
   _resetConnection() {
@@ -754,12 +822,6 @@ export class Network {
       const conn = this.peer.connect(this._targetPeerId, { reliable: true });
       this.conns.set('__host__', conn);
       this._wireConn(conn, true);
-
-      conn.on('open', () => {
-        LOG('guest DataChannel open!');
-        // Enviar join por P2P también
-        conn.send(JSON.stringify({ type: 'join', name }));
-      });
     });
 
     this.peer.on('connection', (conn) => {
@@ -787,7 +849,7 @@ export class Network {
       this._p2pConnected = true;
       this._stopPolling();
       if (isGuestSide) {
-        conn.send(JSON.stringify({ type: 'join', name: this._localName }));
+        conn.send(JSON.stringify({ type: 'join', name: this._localName, clientId: this.clientId }));
       }
     });
 
@@ -809,28 +871,24 @@ export class Network {
       if (isGuestSide) {
         this.conns.delete('__host__');
         this._p2pConnected = false;
-        // Si el host cerró la conexión P2P y no estamos en proceso de cierre voluntario,
-        // el anfitrión abandonó o eliminó la sala.
-        if (this.cb.onHostLeft) {
-          this.cb.onHostLeft('El anfitrión abandonó o cerró la sala.');
-        } else if (this.cb.onGuestLeave) {
-          this.cb.onGuestLeave(null);
+        // Iniciar polling HTTP de inmediato para mantener comunicación ininterrumpida con el anfitrión
+        if (this.roomId) {
+          this._startPolling();
         }
       } else {
         const peerId = conn.peer;
-        const pName = this.guestNames.get(peerId);
         this.conns.delete(peerId);
-        if (this.guestNames.has(peerId)) {
-          this.guestNames.delete(peerId);
-          this._syncPlayers();
-          if (this.cb.onGuestLeave) {
-            this.cb.onGuestLeave(peerId, pName);
-          }
+        // IMPORTANTE: NO expulsar al jugador de la partida ni borrarlo de this.guestNames.
+        // El jugador continúa en la sala/partida a través del relay HTTP (api.php).
+        // Solo debe eliminarse si envía explícitamente data.type === 'guestLeave' o si el anfitrión lo expulsa manualmente.
+        this._p2pConnected = false;
+        if (!this._closing && this.roomId) {
+          this._startPolling();
         }
       }
       if (this.conns.size === 0) {
         this._p2pConnected = false;
-        // Si aún estamos en la sala y se cayó P2P, reanudar polling ligero de emergencia
+        // Si aún estamos en la sala y se cayó P2P, reanudar polling de emergencia
         if (!this._closing && this.roomId) {
           this._startPolling();
         }
@@ -845,18 +903,23 @@ export class Network {
   _syncPlayers() {
     if (!this.isHost) return;
 
-    // Depuración activa de this.guestNames para eliminar duplicados huérfanos antes de transmitir
-    const seen = new Set([this._localName.trim().toLowerCase()]);
-    const toDelete = [];
+    // Disambiguar nombres duplicados sin borrar jamás a ningún jugador conectado
+    const nameCounts = new Map();
+    const hostLower = (this._localName || 'Anfitrión').trim().toLowerCase();
+    nameCounts.set(hostLower, 1);
+
     for (const [peerId, name] of this.guestNames.entries()) {
-      const lower = (name || '').trim().toLowerCase();
-      if (seen.has(lower)) {
-        toDelete.push(peerId);
+      let clean = (name || 'Invitado').trim();
+      let lower = clean.toLowerCase();
+      if (nameCounts.has(lower)) {
+        const count = nameCounts.get(lower) + 1;
+        nameCounts.set(lower, count);
+        clean = `${clean} (${count})`;
+        this.guestNames.set(peerId, clean);
       } else {
-        seen.add(lower);
+        nameCounts.set(lower, 1);
       }
     }
-    toDelete.forEach((id) => this.guestNames.delete(id));
 
     const players = this.players;
     const config = {
@@ -868,6 +931,8 @@ export class Network {
       temporalSeconds: this.temporalSeconds || CONFIG.DEFAULT_TEMPORAL_SECONDS,
       tunnelSeconds: this.tunnelSeconds || CONFIG.DEFAULT_TUNNEL_SECONDS,
       blurSeconds: this.blurSeconds || CONFIG.DEFAULT_BLUR_SECONDS,
+      raceDistance: this.raceDistance || CONFIG.DEFAULT_RACE_DISTANCE || 1000,
+      raceSeconds: this.raceSeconds || CONFIG.DEFAULT_RACE_DURATION || 150,
     };
     LOG('_syncPlayers', { count: players.length });
     this.broadcast({ type: 'players', players, config });

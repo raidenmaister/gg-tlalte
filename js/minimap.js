@@ -2,8 +2,8 @@
 // minimap.js — Minimapa interactivo Leaflet para adivinar y revelar.
 // ============================================================================
 
-import { CONFIG } from './config.js?v=1.8.5';
-import { greatCirclePoints } from './utils.js?v=1.8.5';
+import { CONFIG } from './config.js?v=1.8.6';
+import { greatCirclePoints } from './utils.js?v=1.8.6';
 
 const MARKER = {
   real: { color: '#f59e0b', size: 42, label: '📍 Ubicación real' },
@@ -194,16 +194,58 @@ export class Minimap {
    */
   updateRacePlayer(id, { lat, lng, color, name, isMe }) {
     if (!this.map || !this.raceLayer) return;
-    const key = String(id || name);
     const numLat = Number(lat);
     const numLng = Number(lng);
     if (isNaN(numLat) || isNaN(numLng)) return;
 
+    // Clave canónica única por nombre de jugador (o por ID si no hay nombre)
+    const normName = name ? String(name).trim().toLowerCase() : '';
+    const key = normName ? `p_${normName}` : String(id || 'unknown');
+
+    // Buscar si ya existe un marcador registrado para este jugador (por clave canónica o por nombre)
+    let existingKey = null;
     if (this.raceMarkers.has(key)) {
-      const marker = this.raceMarkers.get(key);
+      existingKey = key;
+    } else if (normName) {
+      for (const [k, m] of this.raceMarkers.entries()) {
+        if (m && m._ggPlayerName && m._ggPlayerName.toLowerCase() === normName) {
+          existingKey = k;
+          break;
+        }
+      }
+    }
+
+    if (existingKey) {
+      const marker = this.raceMarkers.get(existingKey);
       marker.setLatLng([numLat, numLng]);
+      // Si el estado isMe cambió o el icono necesita actualizarse
+      if (isMe && !marker._isMe) {
+        marker._isMe = true;
+        if (typeof marker.setIcon === 'function') {
+          marker.setIcon(makeRacePlayerPin({ lat: numLat, lng: numLng, color, name, isMe: true }).options.icon);
+        }
+        if (typeof marker.setZIndexOffset === 'function') {
+          marker.setZIndexOffset(2000);
+        }
+      }
+      if (existingKey !== key) {
+        this.raceMarkers.delete(existingKey);
+        this.raceMarkers.set(key, marker);
+      }
     } else {
+      // Purgar preventivamente cualquier marcador residual con el mismo nombre antes de añadir
+      if (normName) {
+        for (const [k, m] of this.raceMarkers.entries()) {
+          if (m && m._ggPlayerName && m._ggPlayerName.toLowerCase() === normName) {
+            try { this.raceLayer.removeLayer(m); } catch (e) {}
+            this.raceMarkers.delete(k);
+          }
+        }
+      }
       const marker = makeRacePlayerPin({ lat: numLat, lng: numLng, color, name, isMe });
+      marker._ggPlayerName = name;
+      marker._ggPlayerId = id != null ? String(id) : '';
+      marker._isMe = !!isMe;
       marker.addTo(this.raceLayer);
       this.raceMarkers.set(key, marker);
     }
@@ -218,13 +260,22 @@ export class Minimap {
    */
   removeRacePlayer(id, name) {
     if (!this.map || !this.raceLayer) return;
-    const keys = [];
-    if (id != null) keys.push(String(id));
-    if (name) keys.push(String(name));
+    const normName = name ? String(name).trim().toLowerCase() : '';
+    const keysToRemove = [];
 
-    for (const key of keys) {
-      if (this.raceMarkers.has(key)) {
-        const marker = this.raceMarkers.get(key);
+    if (normName) {
+      keysToRemove.push(`p_${normName}`);
+    }
+    if (id != null) {
+      keysToRemove.push(String(id));
+    }
+
+    for (const [key, marker] of this.raceMarkers.entries()) {
+      if (
+        keysToRemove.includes(key) ||
+        (normName && marker._ggPlayerName && marker._ggPlayerName.toLowerCase() === normName) ||
+        (id != null && marker._ggPlayerId === String(id))
+      ) {
         try {
           this.raceLayer.removeLayer(marker);
         } catch (e) {}

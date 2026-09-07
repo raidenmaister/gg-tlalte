@@ -2,14 +2,14 @@
 // app.js — Punto de entrada. Coordina UI, red, visor panorámico y juego.
 // ============================================================================
 
-import { $, formatKm, formatNumber, clamp, escapeHtml, detectPotatoMode } from './utils.js?v=1.8.5';
-import { CONFIG } from './config.js?v=1.8.5';
-import { audio } from './audio.js?v=1.8.5';
-import { PanoramaViewer } from './panorama.js?v=1.8.5';
-import { Minimap } from './minimap.js?v=1.8.5';
-import { Network } from './net.js?v=1.8.5';
-import { Game } from './game.js?v=1.8.5';
-import { AsciiEarthBackground } from './ascii-earth.js?v=1.8.5';
+import { $, formatKm, formatNumber, clamp, escapeHtml, detectPotatoMode } from './utils.js?v=1.8.6';
+import { CONFIG } from './config.js?v=1.8.6';
+import { audio } from './audio.js?v=1.8.6';
+import { PanoramaViewer } from './panorama.js?v=1.8.6';
+import { Minimap } from './minimap.js?v=1.8.6';
+import { Network } from './net.js?v=1.8.6';
+import { Game } from './game.js?v=1.8.6';
+import { AsciiEarthBackground } from './ascii-earth.js?v=1.8.6';
 
 const PLAYER_KEY = 'ggtlalte:playerName';
 const ROOM_KEY = 'ggtlalte:activeRoom';
@@ -2738,7 +2738,7 @@ function boot() {
   detectPotatoMode();
   const versionBadge = $('#versionBadge');
   if (versionBadge) {
-    versionBadge.textContent = CONFIG.VERSION || 'BETA v1.8.5';
+    versionBadge.textContent = CONFIG.VERSION || 'BETA v1.8.6';
     versionBadge.style.cursor = 'pointer';
     versionBadge.title = 'Ver historial de versiones';
     versionBadge.addEventListener('click', () => {

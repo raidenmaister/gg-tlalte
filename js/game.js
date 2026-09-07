@@ -13,7 +13,7 @@
 //   'toast'       {message, kind}
 // ============================================================================
 
-import { CONFIG, damageMultiplier, getNoGuessPenalty } from './config.js?v=1.8.5';
+import { CONFIG, damageMultiplier, getNoGuessPenalty } from './config.js?v=1.8.6';
 import {
   haversineKm,
   scoreForDistance,
@@ -27,7 +27,7 @@ import {
   pickVerifiedRaceRound,
   computeRaceScore,
   clamp,
-} from './utils.js?v=1.8.5';
+} from './utils.js?v=1.8.6';
 
 export class Game {
   constructor({ pano, map, net, audio }) {
@@ -451,7 +451,7 @@ export class Game {
         this.raceCurrentDist = this.raceInitialDist;
 
         // Determinar índice de spawn para este jugador según su posición en la lista de jugadores
-        const myIndex = Math.max(0, this.players.findIndex((p) => p.id === this.net.myId));
+        const myIndex = Math.max(0, this.players.findIndex((p) => p.id === this.net.myId || (this.meName && p.name && p.name.trim().toLowerCase() === this.meName.trim().toLowerCase())));
         const spawnIdx = (raceRound.spawnIndices && raceRound.spawnIndices.length > 0)
           ? raceRound.spawnIndices[myIndex % raceRound.spawnIndices.length]
           : raceRound.targetIndex;
@@ -485,12 +485,13 @@ export class Game {
             : raceRound.targetIndex;
           const pCoord = this.coordenadas[pSpawnIdx];
           const pColor = (CONFIG.PLAYER_COLORS && CONFIG.PLAYER_COLORS[idx % CONFIG.PLAYER_COLORS.length]) || '#38bdf8';
+          const isMe = p.id === this.net.myId || (this.meName && p.name && p.name.trim().toLowerCase() === this.meName.trim().toLowerCase());
           this.map.updateRacePlayer(p.id, {
             lat: pCoord.lat,
             lng: pCoord.lng,
             color: pColor,
             name: p.name,
-            isMe: p.id === this.net.myId,
+            isMe,
           });
         });
 
@@ -1201,7 +1202,7 @@ export class Game {
       initialDistance: this.raceInitialDist,
     });
 
-    const myIndex = Math.max(0, this.players.findIndex((p) => p.id === this.net.myId));
+    const myIndex = Math.max(0, this.players.findIndex((p) => p.id === this.net.myId || (this.meName && p.name && p.name.trim().toLowerCase() === this.meName.trim().toLowerCase())));
     const myColor = (CONFIG.PLAYER_COLORS && CONFIG.PLAYER_COLORS[myIndex % CONFIG.PLAYER_COLORS.length]) || '#38bdf8';
     this.map.updateRacePlayer(this.net.myId, {
       lat: Number(lat),
@@ -1257,22 +1258,25 @@ export class Game {
     const pId = data.id || fromPeerId;
     if (pId === this.net.myId) return;
 
+    // Si el nombre del paquete es mi propio nombre, ignorar (es mi propio eco reflejado del host)
+    if (data.name && this.meName && data.name.trim().toLowerCase() === this.meName.trim().toLowerCase()) return;
+
     // Si el jugador ya terminó la carrera, asegurar que su punto se quite del minimapa
-    if (this.raceFinishedPlayers && this.raceFinishedPlayers.some((f) => f.id === pId || f.name === data.name)) {
+    if (this.raceFinishedPlayers && this.raceFinishedPlayers.some((f) => f.id === pId || (data.name && f.name && f.name.trim().toLowerCase() === data.name.trim().toLowerCase()))) {
       if (this.map && typeof this.map.removeRacePlayer === 'function') {
         this.map.removeRacePlayer(pId, data.name);
       }
       return;
     }
 
-    const p = this.players.find((x) => x.id === pId || x.name === data.name);
+    const p = this.players.find((x) => x.id === pId || (data.name && x.name && x.name.trim().toLowerCase() === data.name.trim().toLowerCase()));
     if (p) {
       p._lastDistMeters = data.distMeters != null
         ? data.distMeters
         : (this.raceTargetCoord ? Math.round(haversineKm(data.lat, data.lng, this.raceTargetCoord.lat, this.raceTargetCoord.lng) * 1000) : null);
     }
 
-    const pIndex = Math.max(0, this.players.findIndex((x) => x.id === pId || x.name === data.name));
+    const pIndex = Math.max(0, this.players.findIndex((x) => x.id === pId || (data.name && x.name && x.name.trim().toLowerCase() === data.name.trim().toLowerCase())));
     const pColor = data.color || (CONFIG.PLAYER_COLORS && CONFIG.PLAYER_COLORS[pIndex % CONFIG.PLAYER_COLORS.length]) || '#fb7171';
 
     this.map.updateRacePlayer(pId, {
@@ -1815,7 +1819,7 @@ export class Game {
             this.raceInitialDist = raceRound.distanceMeters || this.raceDistanceSetting;
             this.raceCurrentDist = this.raceInitialDist;
 
-            const myIndex = Math.max(0, this.players.findIndex((p) => p.id === this.net.myId));
+            const myIndex = Math.max(0, this.players.findIndex((p) => p.id === this.net.myId || (this.meName && p.name && p.name.trim().toLowerCase() === this.meName.trim().toLowerCase())));
             const spawnIdx = (raceRound.spawnIndices && raceRound.spawnIndices.length > 0)
               ? raceRound.spawnIndices[myIndex % raceRound.spawnIndices.length]
               : raceRound.targetIndex;
@@ -1846,12 +1850,13 @@ export class Game {
                 : raceRound.targetIndex;
               const pCoord = this.coordenadas[pSpawnIdx];
               const pColor = (CONFIG.PLAYER_COLORS && CONFIG.PLAYER_COLORS[idx % CONFIG.PLAYER_COLORS.length]) || '#38bdf8';
+              const isMe = p.id === this.net.myId || (this.meName && p.name && p.name.trim().toLowerCase() === this.meName.trim().toLowerCase());
               this.map.updateRacePlayer(p.id, {
                 lat: pCoord.lat,
                 lng: pCoord.lng,
                 color: pColor,
                 name: p.name,
-                isMe: p.id === this.net.myId,
+                isMe,
               });
             });
 

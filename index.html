@@ -12,7 +12,7 @@
 
     <!-- Leaflet (minimapa) -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-    <link rel="stylesheet" href="style.css?v=1.8.5">
+    <link rel="stylesheet" href="style.css?v=1.8.6">
 </head>
 <body>
 
@@ -20,7 +20,7 @@
     <div id="ascii-earth" class="hidden"></div>
 
     <!-- Badge de versión (menús) -->
-    <div id="versionBadge" class="version-badge" title="Ver historial de versiones">BETA v1.8.5</div>
+    <div id="versionBadge" class="version-badge" title="Ver historial de versiones">BETA v1.8.6</div>
 
     <!-- ====================== PANTALLA: NOMBRE ====================== -->
     <div id="screen-name" class="screen">
@@ -607,11 +607,22 @@
                 <button type="button" class="btn-close-modal" id="changelogCloseBtn" aria-label="Cerrar">✕</button>
             </div>
             <div class="changelog-list" id="changelogList">
-                <!-- BETA v1.8.5 -->
+                <!-- BETA v1.8.6 -->
                 <div class="changelog-entry current">
                     <div class="changelog-title-row">
-                        <span class="changelog-version">BETA v1.8.5</span>
+                        <span class="changelog-version">BETA v1.8.6</span>
                         <span class="changelog-badge badge-current">Actual</span>
+                    </div>
+                    <ul class="changelog-list-items">
+                        <li><strong>Deduplicación Estricta de Marcadores en Minimapa:</strong> Resuelto el problema donde a veces aparecían puntos duplicados con el mismo nombre de jugador (o tu propio jugador duplicado en color rival). Ahora los marcadores se indexan canónicamente por nombre único de jugador, reciclando la chincheta existente y filtrando cualquier eco de paquetes de red del propio usuario.</li>
+                        <li><strong>Sincronización Bidireccional de Jugador Local ("Tú"):</strong> Garantizada la correcta identificación del jugador local tanto por ID de conexión como por nombre de usuario, evitando discrepancias tras transiciones de red.</li>
+                    </ul>
+                </div>
+
+                <!-- BETA v1.8.5 -->
+                <div class="changelog-entry">
+                    <div class="changelog-title-row">
+                        <span class="changelog-version">BETA v1.8.5</span>
                     </div>
                     <ul class="changelog-list-items">
                         <li><strong>Retirada del Punto de Jugador al Ganar:</strong> Cuando un jugador alcanza el objetivo y cruza la meta, su marcador/punto es retirado de inmediato del minimapa para evitar saturación y reflejar visualmente que ya completó su recorrido.</li>
@@ -891,6 +902,6 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
     <script src="js/keys.js"></script>
-    <script type="module" src="js/app.js?v=1.8.5"></script>
+    <script type="module" src="js/app.js?v=1.8.6"></script>
 </body>
 </html>

@@ -9,8 +9,8 @@
 //    exactamente igual y sin requerir servidores TURN adicionales ni VPS.
 // ============================================================================
 
-import { CONFIG } from './config.js?v=1.8.5';
-import { generateCode } from './utils.js?v=1.8.5';
+import { CONFIG } from './config.js?v=1.8.6';
+import { generateCode } from './utils.js?v=1.8.6';
 
 const API_URL = 'api.php';
 

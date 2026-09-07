@@ -142,8 +142,8 @@ $leaderboard = loadJson($leaderboardFile, ['5' => [], '7' => [], '10' => []]);
 switch ($action) {
     case 'version': {
         $vFile = __DIR__ . '/version.json';
-        $vData = loadJson($vFile, ['version' => '1.8.5']);
-        echo json_encode(['ok' => true, 'version' => $vData['version'] ?? '1.8.5']);
+        $vData = loadJson($vFile, ['version' => '1.8.6']);
+        echo json_encode(['ok' => true, 'version' => $vData['version'] ?? '1.8.6']);
         exit;
     }
 

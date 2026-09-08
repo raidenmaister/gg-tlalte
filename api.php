@@ -165,6 +165,7 @@ switch ($action) {
         $blurSeconds = intval($_POST['blurSeconds'] ?? 3);
         $raceDistance = intval($_POST['raceDistance'] ?? 1000);
         $raceSeconds = intval($_POST['raceSeconds'] ?? 150);
+        $flashlightMode = isset($_POST['flashlightMode']) ? intval($_POST['flashlightMode']) : ($gameMode === 'flashlight' ? 1 : 0);
         if ($id === '') {
             echo json_encode(['ok' => false, 'error' => 'id requerido']);
             exit;
@@ -197,6 +198,7 @@ switch ($action) {
             'count' => 1,
             'rounds' => $rounds,
             'gameMode' => $gameMode,
+            'flashlightMode' => $flashlightMode,
             'temporalSeconds' => $temporalSeconds,
             'tunnelSeconds' => $tunnelSeconds,
             'blurSeconds' => $blurSeconds,
@@ -254,6 +256,7 @@ switch ($action) {
             'count' => intval($room['count'] ?? 0),
             'status' => strval($room['status'] ?? 'waiting'),
             'gameMode' => strval($room['gameMode'] ?? 'normal'),
+            'flashlightMode' => intval($room['flashlightMode'] ?? ($room['gameMode'] === 'flashlight' ? 1 : 0)),
             'rounds' => intval($room['rounds'] ?? 5),
             'temporalSeconds' => intval($room['temporalSeconds'] ?? 3),
             'tunnelSeconds' => intval($room['tunnelSeconds'] ?? 3),
@@ -288,6 +291,7 @@ switch ($action) {
                 'count' => intval($room['count']),
                 'rounds' => intval($room['rounds'] ?? 5),
                 'gameMode' => strval($room['gameMode'] ?? 'normal'),
+                'flashlightMode' => intval($room['flashlightMode'] ?? ($room['gameMode'] === 'flashlight' ? 1 : 0)),
                 'temporalSeconds' => intval($room['temporalSeconds'] ?? 3),
                 'tunnelSeconds' => intval($room['tunnelSeconds'] ?? 3),
                 'blurSeconds' => intval($room['blurSeconds'] ?? 3),

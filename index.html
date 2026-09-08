@@ -12,7 +12,7 @@
 
     <!-- Leaflet (minimapa) -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-    <link rel="stylesheet" href="style.css?v=1.8.8">
+    <link rel="stylesheet" href="style.css?v=1.9">
 </head>
 <body>
 
@@ -20,7 +20,7 @@
     <div id="ascii-earth" class="hidden"></div>
 
     <!-- Badge de versión (menús) -->
-    <div id="versionBadge" class="version-badge" title="Ver historial de versiones">BETA v1.8.8</div>
+    <div id="versionBadge" class="version-badge" title="Ver historial de versiones">BETA v1.9</div>
 
     <!-- ====================== PANTALLA: NOMBRE ====================== -->
     <div id="screen-name" class="screen">
@@ -627,11 +627,35 @@
                 <button type="button" class="btn-close-modal" id="changelogCloseBtn" aria-label="Cerrar">✕</button>
             </div>
             <div class="changelog-list" id="changelogList">
-                <!-- BETA v1.8.8 -->
+                <!-- BETA v1.9 -->
                 <div class="changelog-entry current">
                     <div class="changelog-title-row">
-                        <span class="changelog-version">BETA v1.8.8 <span class="changelog-date">· 7 sep 2026</span></span>
+                        <span class="changelog-version">BETA v1.9 <span class="changelog-date">· 7 sep 2026</span></span>
                         <span class="changelog-badge badge-current">Actual</span>
+                    </div>
+                    <ul class="changelog-list-items">
+                        <li><strong>Pizca de Luz Garantizada en Reserva Crítica (&gt; 0%):</strong> Corregido el problema donde la linterna se extinguía o dejaba de alumbrar antes de tiempo al 2%. Mientras la batería conserve energía (&gt; 0%), se garantiza un haz focalizado visible (&ge; 50px de radio) con centro cristalino para que el jugador siempre disponga de una pizca de luz hasta el último segundo. La oscuridad total entra en vigor única y exclusivamente al llegar al 0%.</li>
+                        <li><strong>Sincronización Acumulativa en Tiempo Real del HUD:</strong> Corregido el cálculo del drenaje en el medidor de batería. Anteriormente, movimientos suaves o pequeños no superaban el umbral aislado de actualización, congelando el porcentaje mostrado en pantalla. Ahora el acumulador de consumo sincroniza con precisión continua hasta 1% y 0% exactos.</li>
+                        <li><strong>Transición Precisa al Agotamiento (0%):</strong> Al extinguirse por completo el 100% de la energía, el widget de batería pasa automáticamente al estado agotado (<code>depleted</code>) y la escena se sumerge en apagón total sin fugas.</li>
+                    </ul>
+                </div>
+
+                <!-- BETA v1.8.9 -->
+                <div class="changelog-entry">
+                    <div class="changelog-title-row">
+                        <span class="changelog-version">BETA v1.8.9 <span class="changelog-date">· 7 sep 2026</span></span>
+                    </div>
+                    <ul class="changelog-list-items">
+                        <li><strong>Oscuridad Total en Linterna Táctica (100% Negro Azabache):</strong> Corregido el problema visual donde la panorámica permanecía visible debajo de la niebla. La vista queda ahora sumergida en penumbra negra absoluta (<code>#000000</code>) sin filtración de imagen fuera del haz de luz, tanto en reposo como al arrastrar la cámara en 360°.</li>
+                        <li><strong>Haz de Luz Interactivo y Captura de Arrastre Fluido:</strong> El ratón o toque actúa como foco táctico que ilumina nítidamente el entorno. El haz sigue el cursor en tiempo real incluso al hacer clic y arrastrar para girar la vista 360°, consumiendo batería progresivamente al alumbrar.</li>
+                        <li><strong>Apagado Completo al 0% de Batería:</strong> Al agotarse la batería, la linterna se apaga por completo dejando la pantalla en total oscuridad.</li>
+                    </ul>
+                </div>
+
+                <!-- BETA v1.8.8 -->
+                <div class="changelog-entry">
+                    <div class="changelog-title-row">
+                        <span class="changelog-version">BETA v1.8.8 <span class="changelog-date">· 7 sep 2026</span></span>
                     </div>
                     <ul class="changelog-list-items">
                         <li><strong>Sistema Anti-Empalme y Anti-Colisión Dinámico en Minimapa (Smart Leader Lines):</strong> Eliminado por completo el solapamiento visual entre etiquetas de jugadores y la «📍 Ubicación real» en pantalla completa al terminar la ronda o partida. Las chinchetas físicas permanecen fijadas con exactitud milimétrica sobre las coordenadas reales mientras que las etiquetas informativas se desacoplan dinámicamente en una capa flotante sin superposición.</li>
@@ -949,6 +973,6 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
     <script src="js/keys.js"></script>
-    <script type="module" src="js/app.js?v=1.8.8"></script>
+    <script type="module" src="js/app.js?v=1.9"></script>
 </body>
 </html>

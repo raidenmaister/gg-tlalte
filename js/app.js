@@ -2,14 +2,14 @@
 // app.js — Punto de entrada. Coordina UI, red, visor panorámico y juego.
 // ============================================================================
 
-import { $, formatKm, formatNumber, clamp, escapeHtml, detectPotatoMode } from './utils.js?v=1.8.7';
-import { CONFIG } from './config.js?v=1.8.7';
-import { audio } from './audio.js?v=1.8.7';
-import { PanoramaViewer } from './panorama.js?v=1.8.7';
-import { Minimap } from './minimap.js?v=1.8.7';
-import { Network } from './net.js?v=1.8.7';
-import { Game } from './game.js?v=1.8.7';
-import { AsciiEarthBackground } from './ascii-earth.js?v=1.8.7';
+import { $, formatKm, formatNumber, clamp, escapeHtml, detectPotatoMode } from './utils.js?v=1.9';
+import { CONFIG } from './config.js?v=1.9';
+import { audio } from './audio.js?v=1.9';
+import { PanoramaViewer } from './panorama.js?v=1.9';
+import { Minimap } from './minimap.js?v=1.9';
+import { Network } from './net.js?v=1.9';
+import { Game } from './game.js?v=1.9';
+import { AsciiEarthBackground } from './ascii-earth.js?v=1.9';
 
 const PLAYER_KEY = 'ggtlalte:playerName';
 const ROOM_KEY = 'ggtlalte:activeRoom';
@@ -2576,11 +2576,11 @@ function wireGame() {
 
     const card = $('#flashlightHudCard');
     if (card) {
-      if (percent <= 0) {
+      if (percent <= 0 || rounded <= 0) {
         card.className = 'flashlight-hud-card depleted';
-      } else if (percent < 20) {
+      } else if (rounded < 20) {
         card.className = 'flashlight-hud-card danger';
-      } else if (percent < 50) {
+      } else if (rounded < 50) {
         card.className = 'flashlight-hud-card warning';
       } else {
         card.className = 'flashlight-hud-card';

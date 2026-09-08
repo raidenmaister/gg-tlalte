@@ -2,8 +2,8 @@
 // panorama.js — Visor panorámico 360° (Google Street View) + brújula.
 // ============================================================================
 
-import { CONFIG } from './config.js?v=1.8.7';
-import { detectPotatoMode } from './utils.js?v=1.8.7';
+import { CONFIG } from './config.js?v=1.9';
+import { detectPotatoMode } from './utils.js?v=1.9';
 
 let mapsPromise = null;
 
@@ -106,6 +106,7 @@ export class PanoramaViewer {
     this.isRace = false;
     this.isFlashlight = false;
     this.flashlightBattery = 100;
+    this._lastEmittedBattery = 100;
     this.flashlightPos = null;
     this._flashlightBoundHandler = null;
   }
@@ -788,7 +789,8 @@ export class PanoramaViewer {
 
   /**
    * Activa/desactiva el Modo Linterna Táctica (Niebla Nocturna 360°).
-   * Genera un haz de luz focalizado que sigue al cursor o dedo táctil.
+   * La escena completa permanece 100% en negro azabache (#000000) y solo se ilumina
+   * el haz circular focalizado siguiendo el puntero o toque táctil, incluso al arrastrar 360°.
    * La batería se consume ÚNICAMENTE al mover la luz; en reposo el consumo es 0%.
    */
   setFlashlightMode(enabled) {
@@ -796,12 +798,15 @@ export class PanoramaViewer {
     this._isFlashlightActive = false; // Solo consume batería cuando la ronda arranca (sin cortina)
     this._hasMovedOnce = false;
 
-    // Limpiar listener previo si existía
+    // Limpiar listeners previos usando captura
     if (this._flashlightBoundHandler) {
-      window.removeEventListener('pointermove', this._flashlightBoundHandler);
-      window.removeEventListener('pointerdown', this._flashlightBoundHandler);
-      window.removeEventListener('touchmove', this._flashlightBoundHandler);
-      window.removeEventListener('touchstart', this._flashlightBoundHandler);
+      const opts = { capture: true };
+      window.removeEventListener('pointermove', this._flashlightBoundHandler, opts);
+      window.removeEventListener('mousemove', this._flashlightBoundHandler, opts);
+      window.removeEventListener('pointerdown', this._flashlightBoundHandler, opts);
+      window.removeEventListener('mousedown', this._flashlightBoundHandler, opts);
+      window.removeEventListener('touchmove', this._flashlightBoundHandler, opts);
+      window.removeEventListener('touchstart', this._flashlightBoundHandler, opts);
       this._flashlightBoundHandler = null;
     }
 
@@ -819,6 +824,7 @@ export class PanoramaViewer {
 
     // Inicializar linterna al 100% de batería
     this.flashlightBattery = 100;
+    this._lastEmittedBattery = 100;
     const panoEl = document.getElementById(this.containerId) || document.body;
     const rect = panoEl.getBoundingClientRect();
     const initX = rect.width ? rect.left + rect.width / 2 : window.innerWidth / 2;
@@ -827,6 +833,7 @@ export class PanoramaViewer {
 
     if (overlay) {
       overlay.classList.remove('hidden');
+      overlay.style.background = '#000000';
       this._updateFlashlightOverlay(initX, initY);
     }
 
@@ -835,6 +842,7 @@ export class PanoramaViewer {
     }
 
     // Handler de movimiento táctico con consumo de batería por distancia
+    // Captura global prioritaria: funciona incluso al hacer clic y arrastrar la vista 360° en Google Maps
     this._flashlightBoundHandler = (e) => {
       if (!this.isFlashlight) return;
 
@@ -877,12 +885,15 @@ export class PanoramaViewer {
       if (dist > 1.5 && this.flashlightBattery > 0) {
         const drainPerPx = CONFIG.FLASHLIGHT_DRAIN_PER_PX || 0.0025;
         const drain = dist * drainPerPx;
-        const prev = this.flashlightBattery;
         this.flashlightBattery = Math.max(0, this.flashlightBattery - drain);
         this.flashlightPos = { x: clientX, y: clientY };
 
-        if (this.callbacks.onBatteryChange && Math.abs(prev - this.flashlightBattery) >= 0.2) {
-          this.callbacks.onBatteryChange(this.flashlightBattery);
+        if (this.callbacks.onBatteryChange) {
+          const diff = Math.abs((this._lastEmittedBattery ?? 100) - this.flashlightBattery);
+          if (diff >= 0.2 || this.flashlightBattery === 0) {
+            this._lastEmittedBattery = this.flashlightBattery;
+            this.callbacks.onBatteryChange(this.flashlightBattery);
+          }
         }
       } else {
         this.flashlightPos = { x: clientX, y: clientY };
@@ -891,10 +902,13 @@ export class PanoramaViewer {
       this._updateFlashlightOverlay(clientX, clientY);
     };
 
-    window.addEventListener('pointermove', this._flashlightBoundHandler, { passive: true });
-    window.addEventListener('pointerdown', this._flashlightBoundHandler, { passive: true });
-    window.addEventListener('touchmove', this._flashlightBoundHandler, { passive: true });
-    window.addEventListener('touchstart', this._flashlightBoundHandler, { passive: true });
+    const captureOpts = { capture: true, passive: true };
+    window.addEventListener('pointermove', this._flashlightBoundHandler, captureOpts);
+    window.addEventListener('mousemove', this._flashlightBoundHandler, captureOpts);
+    window.addEventListener('pointerdown', this._flashlightBoundHandler, captureOpts);
+    window.addEventListener('mousedown', this._flashlightBoundHandler, captureOpts);
+    window.addEventListener('touchmove', this._flashlightBoundHandler, captureOpts);
+    window.addEventListener('touchstart', this._flashlightBoundHandler, captureOpts);
   }
 
   /**
@@ -906,14 +920,20 @@ export class PanoramaViewer {
     if (this.isFlashlight) {
       const overlay = document.getElementById('panoFlashlightOverlay');
       if (overlay) overlay.classList.remove('hidden');
-      if (this.flashlightPos) {
-        this._updateFlashlightOverlay(this.flashlightPos.x, this.flashlightPos.y);
+      if (!this.flashlightPos) {
+        const panoEl = document.getElementById(this.containerId) || document.body;
+        const rect = panoEl.getBoundingClientRect();
+        const initX = rect.width ? rect.left + rect.width / 2 : window.innerWidth / 2;
+        const initY = rect.height ? rect.top + rect.height / 2 : window.innerHeight / 2;
+        this.flashlightPos = { x: initX, y: initY };
       }
+      this._updateFlashlightOverlay(this.flashlightPos.x, this.flashlightPos.y);
     }
   }
 
   /**
-   * Actualiza el gradiente radial del overlay de niebla según coordenadas y nivel de batería.
+   * Actualiza el gradiente radial del overlay de oscuridad según coordenadas y nivel de batería.
+   * La escena circundante es 100% negro azabache absoluto (#000000) sin ninguna fuga de luz.
    */
   _updateFlashlightOverlay(x, y) {
     const overlay = document.getElementById('panoFlashlightOverlay');
@@ -922,8 +942,8 @@ export class PanoramaViewer {
     const battery = this.flashlightBattery;
 
     if (battery <= 0) {
-      // Linterna completamente apagada: casi completa oscuridad, tenue punto rojo de emergencia
-      overlay.style.background = `radial-gradient(circle 8px at ${Math.round(x)}px ${Math.round(y)}px, rgba(239, 68, 68, 0.2) 0%, rgba(2, 4, 10, 0.995) 100%)`;
+      // Linterna completamente apagada: oscuridad absoluta 100% negra (#000000)
+      overlay.style.background = '#000000';
       return;
     }
 
@@ -932,22 +952,26 @@ export class PanoramaViewer {
 
     let r = maxR;
     if (battery < 20) {
-      // Reserva crítica (< 20%): radio reducido y micro-parpadeo sutil
+      // Reserva crítica (< 20%): radio que desciende suavemente hasta una pizca de luz garantizada
+      // En 2% o 1% aún hay un haz focalizado nítido perfectamente visible
       const t = Math.max(0, battery / 20);
       r = minR + (maxR * 0.65 - minR) * t;
-      if (Math.random() < 0.12) {
-        r *= (0.88 + Math.random() * 0.1);
+      if (Math.random() < 0.08) {
+        r *= 0.93; // Leve oscilación sutil sin oscurecer la escena
       }
     } else if (battery < 50) {
       const t = (battery - 20) / 30;
       r = (maxR * 0.65) + (maxR - maxR * 0.65) * t;
     }
 
-    r = Math.max(12, Math.round(r));
-    const innerClear = Math.round(r * 0.45);
-    const softEdge = Math.round(r * 0.88);
+    // Mientras battery > 0, garantizar siempre una pizca de luz visible y nítida (mínimo 50px de radio)
+    r = Math.max(50, Math.round(r));
+    const innerClear = Math.max(20, Math.round(r * 0.50));
+    const softEdge = Math.max(innerClear + 10, Math.round(r * 0.85));
 
-    overlay.style.background = `radial-gradient(circle ${r}px at ${Math.round(x)}px ${Math.round(y)}px, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.08) ${innerClear}px, rgba(2, 4, 10, 0.9) ${softEdge}px, rgba(2, 4, 10, 0.985) ${r}px, rgba(2, 4, 10, 0.995) 100%)`;
+    // Oscuridad absoluta (#000000 100% negro opaco) en toda la pantalla:
+    // Solamente se transparenta el haz circular de la linterna donde apunta el ratón/toque
+    overlay.style.background = `radial-gradient(circle ${r}px at ${Math.round(x)}px ${Math.round(y)}px, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0) ${innerClear}px, rgba(0, 0, 0, 0.75) ${softEdge}px, #000000 ${r}px, #000000 100%)`;
   }
 
   destroy() {

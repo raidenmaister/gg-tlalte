@@ -2,8 +2,8 @@
 // minimap.js — Minimapa interactivo Leaflet para adivinar y revelar.
 // ============================================================================
 
-import { CONFIG } from './config.js?v=1.8.8';
-import { greatCirclePoints } from './utils.js?v=1.8.8';
+import { CONFIG } from './config.js?v=1.9';
+import { greatCirclePoints } from './utils.js?v=1.9';
 
 const MARKER = {
   real: { color: '#f59e0b', size: 42, label: '📍 Ubicación real' },

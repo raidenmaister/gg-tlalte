@@ -13,7 +13,7 @@
 //   'toast'       {message, kind}
 // ============================================================================
 
-import { CONFIG, damageMultiplier, getNoGuessPenalty } from './config.js?v=1.8.7';
+import { CONFIG, damageMultiplier, getNoGuessPenalty } from './config.js?v=1.9';
 import {
   haversineKm,
   scoreForDistance,
@@ -27,7 +27,7 @@ import {
   pickVerifiedRaceRound,
   computeRaceScore,
   clamp,
-} from './utils.js?v=1.8.7';
+} from './utils.js?v=1.9';
 
 export class Game {
   constructor({ pano, map, net, audio }) {
@@ -996,6 +996,10 @@ export class Game {
     if (isFlashlight) {
       if (this.pano && typeof this.pano.setFlashlightMode === 'function') {
         this.pano.setFlashlightMode(true);
+        this.pano.callbacks.onBatteryChange = (percent) => {
+          this.flashlightBattery = percent;
+          this.emit('flashlightBattery', { percent });
+        };
         if (typeof this.pano.setFlashlightActive === 'function') {
           this.pano.setFlashlightActive(true);
         }
@@ -1783,19 +1787,6 @@ export class Game {
     }
     this._clearPrepare();
     this._clearHurry();
-    this._clearTemporal();
-    this._clearTunnelProgression();
-    if (this.pano && this.pano.setTunnelMode) {
-      this.pano.setTunnelMode(false);
-    }
-    this._clearBlurProgression();
-    if (this.pano && this.pano.setBlurMode) {
-      this.pano.setBlurMode(false);
-    }
-    if (this.pano && typeof this.pano.setFlashlightMode === 'function') {
-      this.pano.setFlashlightMode(false);
-    }
-    this.emit('flashlightEnd');
     if (this._syncTimeout) {
       clearTimeout(this._syncTimeout);
       this._syncTimeout = null;

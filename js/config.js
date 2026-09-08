@@ -4,7 +4,7 @@
 
 export const CONFIG = {
   // Versión oficial de la aplicación visible en menús
-  VERSION: 'BETA v1.8.7',
+  VERSION: 'BETA v1.8.8',
 
   // Fallback opcional de API Key (cliente). La key real se define en
   // js/keys.js (window.GG_GOOGLE_MAPS_API_KEY), que se mantiene local y NO se
@@ -122,7 +122,7 @@ export const CONFIG = {
   // Submodo Linterna Táctica (Niebla Nocturna 360°)
   FLASHLIGHT_MAX_RADIUS: 155,       // Radio máximo del haz en px (con batería alta)
   FLASHLIGHT_MIN_RADIUS: 65,        // Radio mínimo del haz en px antes de apagarse
-  FLASHLIGHT_DRAIN_PER_PX: 0.0072,  // Consumo por pixel de movimiento (~13,800 px para 100% de batería)
+  FLASHLIGHT_DRAIN_PER_PX: 0.0025,  // Consumo por pixel de movimiento (~40,000 px para 100% de batería, fluido y táctico)
   FLASHLIGHT_PERFECT_BONUS: 2000,   // Puntos extra por Perfect (<= 25m) con Linterna ("Búho Nocturno")
   FLASHLIGHT_PERFECT_HEAL: 1000,    // Curación HP extra en duelos con Linterna ("Búho Nocturno")
 

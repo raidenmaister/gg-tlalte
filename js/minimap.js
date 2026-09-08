@@ -2,8 +2,8 @@
 // minimap.js — Minimapa interactivo Leaflet para adivinar y revelar.
 // ============================================================================
 
-import { CONFIG } from './config.js?v=1.8.6';
-import { greatCirclePoints } from './utils.js?v=1.8.6';
+import { CONFIG } from './config.js?v=1.8.8';
+import { greatCirclePoints } from './utils.js?v=1.8.8';
 
 const MARKER = {
   real: { color: '#f59e0b', size: 42, label: '📍 Ubicación real' },
@@ -36,7 +36,49 @@ function makePin({ lat, lng, color, size, label }) {
   return L.marker([lat, lng], { icon }).bindPopup(label);
 }
 
-/** Pin de la ubicación real con etiqueta visible para distinguirlo, color dorado y mayor tamaño. */
+/** Chincheta anclada al suelo (su vértice toca con exactitud matemática la coordenada real). */
+function makeGroundPin({ lat, lng, color, size, isReal, zIndexOffset = 500 }) {
+  const tipY = size * 1.2071;
+  const icon = L.divIcon({
+    className: 'gg-pin gg-ground-pin' + (isReal ? ' gg-real-pin' : ''),
+    html: `<div class="gg-pin__pin ${isReal ? 'is-real' : ''}" style="--pin-color:${color}; width:${size}px; height:${size}px;"></div>`,
+    iconSize: [size, tipY],
+    iconAnchor: [size / 2, tipY],
+  });
+  return L.marker([lat, lng], { icon, interactive: true, zIndexOffset });
+}
+
+/** Crea el elemento DOM de la etiqueta flotante de la ubicación real. */
+function createRealLabelElement(label) {
+  const el = document.createElement('div');
+  el.className = 'gg-floating-label gg-player-pin__label gg-real-pin__label';
+  el.innerHTML = `<span class="gg-player-pin__name">${escapeHtml(label)}</span>`;
+  return el;
+}
+
+/** Crea el elemento DOM de la etiqueta flotante de un jugador (con nombre y daño/puntos). */
+function createPlayerLabelElement({ name, color, damage }) {
+  const el = document.createElement('div');
+  el.className = 'gg-floating-label gg-player-pin__label';
+  el.style.setProperty('--pin-color', color);
+  el.style.borderColor = color;
+  el.style.color = color;
+
+  const hasDamage = typeof damage === 'number';
+  const dmgBadge = hasDamage
+    ? (damage > 0
+        ? `<span class="gg-player-pin__dmg hit">-${damage} pts</span>`
+        : `<span class="gg-player-pin__dmg safe">⭐ 0 pts</span>`)
+    : '';
+
+  el.innerHTML = `
+    <span class="gg-player-pin__name">${escapeHtml(name)}</span>
+    ${dmgBadge}
+  `;
+  return el;
+}
+
+/** Pin de la ubicación real con etiqueta estática (fallback). */
 function makeRealPin({ lat, lng, color, size, label }) {
   const tipY = size * 1.2071;
   const labelH = 24;
@@ -50,7 +92,7 @@ function makeRealPin({ lat, lng, color, size, label }) {
   return L.marker([lat, lng], { icon, interactive: false, zIndexOffset: 1000 });
 }
 
-/** Pin de jugador con el nombre y puntos perdidos siempre visibles encima de la chincheta. */
+/** Pin de jugador con etiqueta estática (fallback). */
 function makePlayerPin({ lat, lng, color, size, label, damage }) {
   const tipY = size * 1.2071;
   const labelH = 28;
@@ -108,6 +150,14 @@ export class Minimap {
     this.streetLayer = null;
     this.satelliteLayer = null;
     this.currentLayerType = 'streets';
+
+    // Sistema anti-colisión dinámico (etiquetas flotantes y conectores SVG)
+    this.revealItems = [];
+    this.labelsOverlay = null;
+    this.svgOverlay = null;
+    this._layoutRaf = null;
+    this._boundOnMapChange = null;
+    this._hoveredItemId = null;
   }
 
   setMyColor(color) {
@@ -163,6 +213,8 @@ export class Minimap {
 
     this.revealLayer = L.featureGroup().addTo(this.map);
     this.raceLayer = L.featureGroup().addTo(this.map);
+
+    this._initCollisionOverlay(el);
 
     this.map.on('click', (e) => {
       if (this.isRaceMode) return; // En modo carrera no se colocan chinchetas
@@ -371,14 +423,301 @@ export class Minimap {
     return this.pick ? { ...this.pick } : null;
   }
 
-  /** Limpia marcadores y líneas (sin tocar el centro del mapa). */
+  /** Inicializa la capa DOM de etiquetas flotantes y el lienzo SVG de líneas conectoras. */
+  _initCollisionOverlay(containerEl) {
+    if (this.labelsOverlay) return;
+    this.labelsOverlay = document.createElement('div');
+    this.labelsOverlay.className = 'gg-labels-overlay';
+
+    this.svgOverlay = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    this.svgOverlay.setAttribute('class', 'gg-leaders-svg');
+    this.labelsOverlay.appendChild(this.svgOverlay);
+
+    containerEl.appendChild(this.labelsOverlay);
+
+    this._boundOnMapChange = () => this._scheduleLayoutUpdate();
+    this.map.on('move zoom viewreset resize', this._boundOnMapChange);
+    window.addEventListener('resize', this._boundOnMapChange);
+  }
+
+  /** Programa una actualización a 60 FPS para el cálculo de colisiones. */
+  _scheduleLayoutUpdate() {
+    if (this._layoutRaf) return;
+    this._layoutRaf = requestAnimationFrame(() => {
+      this._layoutRaf = null;
+      this._resolveCollisions();
+    });
+  }
+
+  /** Asocia interacciones bidireccionales de hover/touch entre etiqueta y chincheta. */
+  _bindItemInteractions(item) {
+    const onEnter = () => this._setHoveredItem(item.id);
+    const onLeave = () => this._setHoveredItem(null);
+
+    item.labelEl.addEventListener('mouseenter', onEnter);
+    item.labelEl.addEventListener('mouseleave', onLeave);
+    item.labelEl.addEventListener('touchstart', (e) => {
+      e.stopPropagation();
+      this._setHoveredItem(this._hoveredItemId === item.id ? null : item.id);
+    }, { passive: true });
+
+    requestAnimationFrame(() => {
+      const pinEl = item.marker && item.marker.getElement ? item.marker.getElement() : null;
+      if (pinEl) {
+        pinEl.addEventListener('mouseenter', onEnter);
+        pinEl.addEventListener('mouseleave', onLeave);
+        pinEl.addEventListener('touchstart', (e) => {
+          e.stopPropagation();
+          this._setHoveredItem(this._hoveredItemId === item.id ? null : item.id);
+        }, { passive: true });
+      }
+    });
+  }
+
+  /** Aplica el resaltado enfocado sobre el item objetivo (etiqueta, chincheta y líder SVG). */
+  _setHoveredItem(id) {
+    this._hoveredItemId = id;
+    this.revealItems.forEach((it) => {
+      const isTarget = it.id === id;
+      it.labelEl.classList.toggle('is-hovered', isTarget);
+      const pinEl = it.marker && it.marker.getElement ? it.marker.getElement() : null;
+      if (pinEl) {
+        const iconDiv = pinEl.querySelector('.gg-pin__pin');
+        if (iconDiv) iconDiv.classList.toggle('is-focused', isTarget);
+      }
+      if (this.svgOverlay) {
+        const leaderPath = this.svgOverlay.querySelector(`path[data-id="${it.id}"]`);
+        if (leaderPath) {
+          leaderPath.setAttribute('stroke-width', isTarget ? '3.5' : '2');
+          leaderPath.setAttribute('opacity', isTarget ? '1' : '0.85');
+        }
+      }
+      if (it.polyline) {
+        it.polyline.setStyle({
+          weight: isTarget ? 5 : 3,
+          opacity: isTarget ? 1 : 0.85,
+        });
+        if (isTarget && typeof it.polyline.bringToFront === 'function') {
+          it.polyline.bringToFront();
+        }
+      }
+    });
+  }
+
+  /** Algoritmo anti-colisión: calcula posiciones sin solapes, agrupa clústeres y dibuja líneas SVG. */
+  _resolveCollisions() {
+    if (!this.map || !this.labelsOverlay || !this.revealItems || this.revealItems.length === 0) {
+      if (this.svgOverlay) this.svgOverlay.innerHTML = '';
+      return;
+    }
+
+    const container = this.map.getContainer();
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+    if (width <= 0 || height <= 0) return;
+
+    const safePad = 12;
+    const padX = 10;
+    const padY = 6;
+
+    // 1. Proyectar coordenadas geográficas a puntos en pantalla y medir cajas
+    for (const item of this.revealItems) {
+      const pt = this.map.latLngToContainerPoint([item.lat, item.lng]);
+      item.pinX = pt.x;
+      item.pinY = pt.y;
+      const tipY = item.size * 1.2071;
+      item.pinHeadY = pt.y - tipY;
+
+      const rect = item.labelEl.getBoundingClientRect();
+      item.w = Math.max(rect.width || 0, 70);
+      item.h = Math.max(rect.height || 0, 26);
+
+      item.defaultX = pt.x - item.w / 2;
+      item.defaultY = item.pinHeadY - item.h - 6;
+      item.x = item.defaultX;
+      item.y = item.defaultY;
+      item.isDisplaced = false;
+    }
+
+    // 2. Detección de proximidad física de chinchetas (.is-cluster para halo de alto contraste)
+    const pinProximityThreshold = 18;
+    for (let i = 0; i < this.revealItems.length; i++) {
+      let isCluster = false;
+      for (let j = 0; j < this.revealItems.length; j++) {
+        if (i === j) continue;
+        const dx = this.revealItems[i].pinX - this.revealItems[j].pinX;
+        const dy = this.revealItems[i].pinY - this.revealItems[j].pinY;
+        if (Math.hypot(dx, dy) < pinProximityThreshold) {
+          isCluster = true;
+          break;
+        }
+      }
+      const pinEl = this.revealItems[i].marker && this.revealItems[i].marker.getElement ? this.revealItems[i].marker.getElement() : null;
+      if (pinEl) {
+        const iconDiv = pinEl.querySelector('.gg-pin__pin');
+        if (iconDiv) {
+          iconDiv.classList.toggle('is-cluster', isCluster);
+        }
+      }
+    }
+
+    // 3. Agrupación en clústeres de colisión
+    const n = this.revealItems.length;
+    const adj = Array.from({ length: n }, () => []);
+
+    function boxesOverlap(a, b) {
+      return !(
+        a.x + a.w + padX <= b.x ||
+        b.x + b.w + padX <= a.x ||
+        a.y + a.h + padY <= b.y ||
+        b.y + b.h + padY <= a.y
+      );
+    }
+
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        const a = this.revealItems[i];
+        const b = this.revealItems[j];
+        const pinDist = Math.hypot(a.pinX - b.pinX, a.pinY - b.pinY);
+        if (pinDist < 60 || boxesOverlap(a, b)) {
+          adj[i].push(j);
+          adj[j].push(i);
+        }
+      }
+    }
+
+    const visited = new Set();
+    const clusters = [];
+    for (let i = 0; i < n; i++) {
+      if (visited.has(i)) continue;
+      const cluster = [];
+      const queue = [i];
+      visited.add(i);
+      while (queue.length > 0) {
+        const curr = queue.shift();
+        cluster.push(this.revealItems[curr]);
+        for (const neighbor of adj[curr]) {
+          if (!visited.has(neighbor)) {
+            visited.add(neighbor);
+            queue.push(neighbor);
+          }
+        }
+      }
+      clusters.push(cluster);
+    }
+
+    // 4. Distribución no superpuesta por clúster (escalera vertical o por debajo de chinchetas)
+    for (const cluster of clusters) {
+      if (cluster.length === 1) {
+        const it = cluster[0];
+        it.x = Math.max(safePad, Math.min(width - it.w - safePad, it.x));
+        it.y = Math.max(safePad, Math.min(height - it.h - safePad, it.y));
+        it.isDisplaced = false;
+        continue;
+      }
+
+      // Ordenar: Ubicación real primero, luego de arriba a abajo por pinY
+      cluster.sort((a, b) => {
+        if (a.isReal && !b.isReal) return -1;
+        if (!a.isReal && b.isReal) return 1;
+        return a.pinY - b.pinY;
+      });
+
+      const minPinHeadY = Math.min(...cluster.map((it) => it.pinHeadY));
+      const maxPinTipY = Math.max(...cluster.map((it) => it.pinY));
+      const totalH = cluster.reduce((sum, it) => sum + it.h + 6, 0) - 6;
+
+      const spaceAbove = minPinHeadY - safePad - 8;
+      const spaceBelow = height - maxPinTipY - safePad - 8;
+
+      if (spaceAbove >= totalH || spaceAbove >= spaceBelow) {
+        // Apilar hacia arriba (ladder vertical)
+        let curY = minPinHeadY - 8;
+        for (let idx = cluster.length - 1; idx >= 0; idx--) {
+          const it = cluster[idx];
+          it.y = curY - it.h;
+          it.x = it.pinX - it.w / 2;
+          it.x = Math.max(safePad, Math.min(width - it.w - safePad, it.x));
+          it.y = Math.max(safePad, it.y);
+          it.isDisplaced = true;
+          curY = it.y - 6;
+        }
+      } else {
+        // Apilar hacia abajo (debajo de las chinchetas)
+        let curY = maxPinTipY + 12;
+        for (let idx = 0; idx < cluster.length; idx++) {
+          const it = cluster[idx];
+          it.y = curY;
+          it.x = it.pinX - it.w / 2;
+          it.x = Math.max(safePad, Math.min(width - it.w - safePad, it.x));
+          it.y = Math.min(height - it.h - safePad, it.y);
+          it.isDisplaced = true;
+          curY = it.y + it.h + 6;
+        }
+      }
+    }
+
+    // 5. Aplicar transformaciones CSS GPU-accelerated (translate3d)
+    for (const it of this.revealItems) {
+      it.labelEl.style.transform = `translate3d(${Math.round(it.x)}px, ${Math.round(it.y)}px, 0)`;
+    }
+
+    // 6. Generar líneas conectoras SVG (curvas Bézier cúbicas con puntos terminales)
+    let svgHtml = '';
+    for (const it of this.revealItems) {
+      const labelCenterX = it.x + it.w / 2;
+      const labelBottomY = it.y + it.h;
+      const labelTopY = it.y;
+      const isAbove = it.y < it.pinHeadY;
+
+      const dx = Math.abs(labelCenterX - it.pinX);
+      const dy = Math.abs(it.y - it.defaultY);
+
+      if (it.isDisplaced || dx > 12 || dy > 12) {
+        const startX = labelCenterX;
+        const startY = isAbove ? labelBottomY : labelTopY;
+        const endX = it.pinX;
+        const endY = isAbove ? it.pinHeadY + 3 : it.pinY + 3;
+
+        const midY = (startY + endY) / 2;
+        const d = `M ${startX} ${startY} C ${startX} ${midY}, ${endX} ${midY}, ${endX} ${endY}`;
+        const isTarget = it.id === this._hoveredItemId;
+        const strokeW = isTarget ? '3.5' : '2';
+        const opacity = isTarget ? '1' : '0.85';
+
+        svgHtml += `
+          <path class="gg-leader-line" data-id="${it.id}" d="${d}" stroke="${it.color}" stroke-width="${strokeW}" opacity="${opacity}" />
+          <circle class="gg-leader-dot" cx="${endX}" cy="${endY}" r="3.5" fill="${it.color}" stroke="#ffffff" stroke-width="1.5" />
+        `;
+      }
+    }
+
+    this.svgOverlay.innerHTML = svgHtml;
+  }
+
+  /** Limpia marcadores, líneas, etiquetas flotantes y elementos SVG. */
   clear() {
     this.pick = null;
     if (this.pickMarker) {
       this.map.removeLayer(this.pickMarker);
       this.pickMarker = null;
     }
-    this.revealLayer.clearLayers();
+    if (this.revealLayer) {
+      this.revealLayer.clearLayers();
+    }
+    this.revealItems = [];
+    if (this.labelsOverlay) {
+      const labels = this.labelsOverlay.querySelectorAll('.gg-floating-label');
+      labels.forEach((el) => el.remove());
+    }
+    if (this.svgOverlay) {
+      this.svgOverlay.innerHTML = '';
+    }
+    if (this._layoutRaf) {
+      cancelAnimationFrame(this._layoutRaf);
+      this._layoutRaf = null;
+    }
+    this._hoveredItemId = null;
   }
 
   /** Prepara el mapa para una nueva ronda (limpia y restablece vista). */
@@ -389,7 +728,7 @@ export class Minimap {
     });
   }
 
-  /** Revela la respuesta multijugador: ubicación real + pin por jugador. */
+  /** Revela la respuesta multijugador con sistema anti-colisión dinámico. */
   revealMulti(players, real) {
     this.clear();
     const bounds = [];
@@ -405,10 +744,33 @@ export class Minimap {
     const hasReal = !isNaN(realLat) && !isNaN(realLng);
 
     if (hasReal) {
-      this.revealLayer.addLayer(
-        makeRealPin({ lat: realLat, lng: realLng, ...MARKER.real })
-      );
+      const realMarker = makeGroundPin({
+        lat: realLat,
+        lng: realLng,
+        color: MARKER.real.color,
+        size: MARKER.real.size,
+        isReal: true,
+        zIndexOffset: 2000,
+      });
+      this.revealLayer.addLayer(realMarker);
       bounds.push([realLat, realLng]);
+
+      const realLabelEl = createRealLabelElement(MARKER.real.label);
+      this.labelsOverlay.appendChild(realLabelEl);
+
+      const realItem = {
+        id: 'real',
+        lat: realLat,
+        lng: realLng,
+        color: MARKER.real.color,
+        size: MARKER.real.size,
+        isReal: true,
+        marker: realMarker,
+        labelEl: realLabelEl,
+        polyline: null,
+      };
+      this.revealItems.push(realItem);
+      this._bindItemInteractions(realItem);
     }
 
     if (this.isRaceMode) {
@@ -428,72 +790,157 @@ export class Minimap {
       if (isNaN(lat) || isNaN(lng)) return;
 
       const color = colors[i % colors.length];
-      this.revealLayer.addLayer(
-        makePlayerPin({
-          lat,
-          lng,
-          color,
-          size: 30,
-          label: p.name,
-          damage: p.damage,
-        })
-      );
+      const size = 30;
+
+      const marker = makeGroundPin({
+        lat,
+        lng,
+        color,
+        size,
+        isReal: false,
+        zIndexOffset: 1000 + i,
+      });
+      this.revealLayer.addLayer(marker);
       bounds.push([lat, lng]);
+
+      let polyline = null;
       if (hasReal) {
         const pts = greatCirclePoints(realLat, realLng, lat, lng, 96);
-        this.revealLayer.addLayer(
-          L.polyline(pts, { color, weight: 3, opacity: 0.9, dashArray: '6 8' })
-        );
+        polyline = L.polyline(pts, {
+          color,
+          weight: 3,
+          opacity: 0.9,
+          dashArray: '6 8',
+        });
+        this.revealLayer.addLayer(polyline);
       }
+
+      const labelEl = createPlayerLabelElement({
+        name: p.name,
+        color,
+        damage: p.damage,
+      });
+      this.labelsOverlay.appendChild(labelEl);
+
+      const item = {
+        id: `player_${p.id || i}`,
+        lat,
+        lng,
+        color,
+        size,
+        isReal: false,
+        marker,
+        labelEl,
+        polyline,
+      };
+      this.revealItems.push(item);
+      this._bindItemInteractions(item);
     });
 
-    if (bounds.length) this._fitBounds(bounds);
+    if (bounds.length) {
+      this._fitBounds(bounds);
+    } else {
+      this._scheduleLayoutUpdate();
+    }
   }
 
-  /** Revela la respuesta: ubicación real + guesses + líneas geodésicas. */
+  /** Revela la respuesta: ubicación real + guesses + líneas geodésicas (anti-colisión). */
   reveal({ real, mine, opp }) {
     this.clear();
     const bounds = [];
 
-    if (real) {
-      this.revealLayer.addLayer(
-        makeRealPin({ lat: real.lat, lng: real.lng, ...MARKER.real })
-      );
-      bounds.push([real.lat, real.lng]);
-    }
-    if (mine) {
-      this.revealLayer.addLayer(
-        makePin({ lat: mine.lat, lng: mine.lng, ...MARKER.mine })
-      );
-      bounds.push([mine.lat, mine.lng]);
-    }
-    if (opp) {
-      this.revealLayer.addLayer(
-        makePin({ lat: opp.lat, lng: opp.lng, ...MARKER.opp })
-      );
-      bounds.push([opp.lat, opp.lng]);
+    const realLat = real ? Number(real.lat) : NaN;
+    const realLng = real ? Number(real.lng) : NaN;
+    const hasReal = !isNaN(realLat) && !isNaN(realLng);
+
+    if (hasReal) {
+      const realMarker = makeGroundPin({
+        lat: realLat,
+        lng: realLng,
+        color: MARKER.real.color,
+        size: MARKER.real.size,
+        isReal: true,
+        zIndexOffset: 2000,
+      });
+      this.revealLayer.addLayer(realMarker);
+      bounds.push([realLat, realLng]);
+
+      const realLabelEl = createRealLabelElement(MARKER.real.label);
+      this.labelsOverlay.appendChild(realLabelEl);
+
+      const realItem = {
+        id: 'real',
+        lat: realLat,
+        lng: realLng,
+        color: MARKER.real.color,
+        size: MARKER.real.size,
+        isReal: true,
+        marker: realMarker,
+        labelEl: realLabelEl,
+        polyline: null,
+      };
+      this.revealItems.push(realItem);
+      this._bindItemInteractions(realItem);
     }
 
-    const drawLine = (from, to, color, dash) => {
-      if (!from || !to) return;
-      const pts = greatCirclePoints(from.lat, from.lng, to.lat, to.lng, 96);
-      this.revealLayer.addLayer(
-        L.polyline(pts, {
+    const drawItem = (coord, config, id, isMine) => {
+      if (!coord) return;
+      const lat = Number(coord.lat);
+      const lng = Number(coord.lng);
+      if (isNaN(lat) || isNaN(lng)) return;
+
+      const color = (isMine && this.myColor) ? this.myColor : config.color;
+      const marker = makeGroundPin({
+        lat,
+        lng,
+        color,
+        size: config.size,
+        isReal: false,
+        zIndexOffset: isMine ? 1200 : 1100,
+      });
+      this.revealLayer.addLayer(marker);
+      bounds.push([lat, lng]);
+
+      let polyline = null;
+      if (hasReal) {
+        const pts = greatCirclePoints(realLat, realLng, lat, lng, 96);
+        polyline = L.polyline(pts, {
           color,
           weight: 3,
           opacity: 0.9,
-          dashArray: dash || null,
-        })
-      );
+          dashArray: '6 8',
+        });
+        this.revealLayer.addLayer(polyline);
+      }
+
+      const labelEl = createPlayerLabelElement({
+        name: config.label,
+        color,
+      });
+      this.labelsOverlay.appendChild(labelEl);
+
+      const item = {
+        id,
+        lat,
+        lng,
+        color,
+        size: config.size,
+        isReal: false,
+        marker,
+        labelEl,
+        polyline,
+      };
+      this.revealItems.push(item);
+      this._bindItemInteractions(item);
     };
 
-    if (real) {
-      drawLine(real, mine, '#2563eb', '6 8');
-      drawLine(real, opp, '#dc2626', '6 8');
-    }
+    drawItem(mine, MARKER.mine, 'mine', true);
+    drawItem(opp, MARKER.opp, 'opp', false);
 
     if (bounds.length) {
       this._fitBounds(bounds);
+    } else {
+      this._scheduleLayoutUpdate();
     }
   }
 
@@ -505,13 +952,14 @@ export class Minimap {
       this.map.invalidateSize();
       if (bounds.length === 1) {
         this.map.setView(bounds[0], 14, { animate: false });
-        return;
+      } else {
+        this.map.fitBounds(L.latLngBounds(bounds), {
+          padding: [60, 60],
+          maxZoom: 16,
+          animate: false,
+        });
       }
-      this.map.fitBounds(L.latLngBounds(bounds), {
-        padding: [60, 60],
-        maxZoom: 16,
-        animate: false,
-      });
+      this._scheduleLayoutUpdate();
     });
   }
 
@@ -534,7 +982,15 @@ export class Minimap {
       if (this.map.scrollWheelZoom) this.map.scrollWheelZoom.enable();
       if (this.map.boxZoom) this.map.boxZoom.enable();
       if (this.map.keyboard) this.map.keyboard.enable();
-      requestAnimationFrame(() => this.refreshSize());
+      requestAnimationFrame(() => {
+        this.refreshSize();
+        this._scheduleLayoutUpdate();
+      });
+    } else {
+      requestAnimationFrame(() => {
+        this.refreshSize();
+        this._scheduleLayoutUpdate();
+      });
     }
   }
 }

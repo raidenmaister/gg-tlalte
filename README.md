@@ -1,16 +1,21 @@
-# GG-TLALTE · GeoGuessr P2P (BETA v1.8.7)
+# GG-TLALTE · GeoGuessr P2P (BETA v1.8.8)
 
 Juego de adivinar ubicaciones con panorámicas 360° de Google Maps Street View, inspirado en GeoGuessr y ambientado en Tlaltenango de Sánchez Román, Zacatecas. Incluye modo solitario con leaderboard global por modos y partidas multijugador en duelo 1v1 y hasta 25 jugadores simultáneos.
 
 ## Características Principales
 
+- **Sistema Anti-Empalme y Anti-Colisión Dinámico en Minimapa (Smart Leader Lines)**:
+  - Al terminar la ronda o partida a pantalla completa, las chinchetas físicas de los jugadores y la «📍 Ubicación real» se mantienen en sus coordenadas reales exactas mientras que las etiquetas informativas (nombres, daño y puntos) se desacoplan dinámicamente en estantes verticales no superpuestos.
+  - Las etiquetas nunca se tapan entre sí ni cubren la meta.
+  - Líneas conectoras Bézier SVG dinámicas con los colores de cada jugador y puntos de anclaje de alto contraste que se ajustan suavemente con el zoom y paneo a 60 FPS.
+  - Micro-interacción bidireccional: al pasar el ratón o tocar una etiqueta o chincheta, se realza simultáneamente el conjunto completo (etiqueta, chincheta con halo brillante, línea conectora y trayectoria geodésica).
 - **Modos y Variantes de Juego (Solitario y Multijugador)**:
   - **Normal**: Exploración completa en 360° con variantes especializadas:
     - *Estándar*: Giro libre y zoom interactivo.
     - *Con Zoom*: Zoom ultra-telescópico progresivo que se aleja paso a paso a intervalos configurables (2s a 15s).
     - *Borroso (Desenfoque Progresivo)*: La panorámica inicia con un fuerte desenfoque óptico 360° que disminuye nivel a nivel. Acelerado por hardware para un giro y arrastre de imagen totalmente fluido a 60 FPS sin sobrecargar la GPU.
-    - *Carrera al Objetivo (Rally Equidistante)*: Carrera urbana en tiempo real donde todos inician a la misma distancia de la meta.
-    - *Linterna Táctica (Niebla Nocturna 360°)*: Todo el entorno está sumergido en penumbra y el jugador explora con un haz de luz focalizado que sigue el cursor o dedo táctil. La batería se consume únicamente al mover la luz (consumo 0% en reposo), disminuyendo su radio y parpadeando en reserva. ¡Adivinar a ≤ 25m otorga la insignia honorífica "🦉 ¡BÚHO NOCTURNO!" (+2,000 pts)!
+    - *Carrera al Objetivo (Rally Equidistante)*: Carrera urbana en tiempo real donde todos inician a la misma distancia de la meta con verificación vial de transitabilidad continua.
+    - *Linterna Táctica (Niebla Nocturna 360°)*: Todo el entorno está sumergido en penumbra y el jugador explora con un haz de luz focalizado que sigue el cursor o dedo táctil. La batería se congela al 100% durante la cortina ciega de 3s y solo se consume al mover la luz durante la ronda (consumo 0% en reposo), con calibración equilibrada y aviso crítico. ¡Adivinar a ≤ 25m otorga la insignia honorífica "🦉 ¡BÚHO NOCTURNO!" (+2,000 pts)!
   - **Estático**: Visión fija hacia adelante sin rotación (desafío puro de observación):
     - *Estándar*: Cámara fija bloqueada al frente.
     - *Con Zoom*: Cámara fija hacia adelante combinada con zoom ultra-telescópico progresivo.
@@ -42,7 +47,7 @@ Juego de adivinar ubicaciones con panorámicas 360° de Google Maps Street View,
 - **Leaderboard Global por Categorías y Modos**:
   - Clasificación en tiempo real filtrable por modo de juego (Normal, Zoom, Borroso, Estático, Temporal) y número de rondas (5, 7, 10 y 15).
 - **Historial Completo de Versiones**:
-  - Modal interactivo accesible desde el menú principal con el registro detallado de novedades y correcciones desde la versión inicial v1.0.0 hasta la v1.7.7.
+  - Modal interactivo accesible desde el menú principal con el registro detallado de novedades, fechas de lanzamiento y correcciones desde la versión inicial v1.0.0 hasta la v1.8.8.
 - **Backend PHP Ultraligero y Eficiente**:
   - Optimizado para hostings compartidos con límites estrictos de E/S: reducción del 95% de escrituras a disco durante partidas activas, persistencia local en JSON sin necesidad de MySQL.
 

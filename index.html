@@ -12,7 +12,7 @@
 
     <!-- Leaflet (minimapa) -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-    <link rel="stylesheet" href="style.css?v=1.8.7">
+    <link rel="stylesheet" href="style.css?v=1.8.8">
 </head>
 <body>
 
@@ -20,7 +20,7 @@
     <div id="ascii-earth" class="hidden"></div>
 
     <!-- Badge de versión (menús) -->
-    <div id="versionBadge" class="version-badge" title="Ver historial de versiones">BETA v1.8.7</div>
+    <div id="versionBadge" class="version-badge" title="Ver historial de versiones">BETA v1.8.8</div>
 
     <!-- ====================== PANTALLA: NOMBRE ====================== -->
     <div id="screen-name" class="screen">
@@ -627,11 +627,25 @@
                 <button type="button" class="btn-close-modal" id="changelogCloseBtn" aria-label="Cerrar">✕</button>
             </div>
             <div class="changelog-list" id="changelogList">
-                <!-- BETA v1.8.7 -->
+                <!-- BETA v1.8.8 -->
                 <div class="changelog-entry current">
                     <div class="changelog-title-row">
-                        <span class="changelog-version">BETA v1.8.7</span>
+                        <span class="changelog-version">BETA v1.8.8 <span class="changelog-date">· 7 sep 2026</span></span>
                         <span class="changelog-badge badge-current">Actual</span>
+                    </div>
+                    <ul class="changelog-list-items">
+                        <li><strong>Sistema Anti-Empalme y Anti-Colisión Dinámico en Minimapa (Smart Leader Lines):</strong> Eliminado por completo el solapamiento visual entre etiquetas de jugadores y la «📍 Ubicación real» en pantalla completa al terminar la ronda o partida. Las chinchetas físicas permanecen fijadas con exactitud milimétrica sobre las coordenadas reales mientras que las etiquetas informativas se desacoplan dinámicamente en una capa flotante sin superposición.</li>
+                        <li><strong>Distribución en Escalera y Detección de Clústeres:</strong> Algoritmo inteligente que detecta agrupaciones de conjeturas cercanas (&lt; 60px) y las organiza en estantes verticales legibles sin taparse jamás entre sí, respetando los límites seguros de pantalla en dispositivos móviles y de escritorio.</li>
+                        <li><strong>Líneas Conectoras Bézier SVG Inteligentes:</strong> Conectores curvos dinámicos generados en tiempo real con el color asignado a cada jugador (o dorado para la meta), con puntos de anclaje de alto contraste y transición suave al hacer zoom o paneo a 60 FPS.</li>
+                        <li><strong>Interacción y Foco Bidireccional:</strong> Al pasar el cursor o tocar cualquier etiqueta o chincheta, se realza simultáneamente el conjunto completo: etiqueta en primer plano, chincheta con halo brillante pulsante, línea conectora reforzada y trayectoria geodésica.</li>
+                        <li><strong>Perfeccionamiento y Calibración de Linterna Táctica:</strong> Solucionado el problema donde mover el ratón durante la cortina ciega de 3 segundos ("¡Prepárate!") agotaba prematuramente la batería. Ahora el consumo se congela al 100% durante el conteo y solo se drena al arrancar la ronda con un ritmo de exploración más fluido y equilibrado (<code>0.0025</code> px<sup>-1</sup>).</li>
+                    </ul>
+                </div>
+
+                <!-- BETA v1.8.7 -->
+                <div class="changelog-entry">
+                    <div class="changelog-title-row">
+                        <span class="changelog-version">BETA v1.8.7 <span class="changelog-date">· 7 sep 2026</span></span>
                     </div>
                     <ul class="changelog-list-items">
                         <li><strong>Nuevo Modo «Linterna Táctica» (Niebla Nocturna 360°):</strong> Disponible exclusivamente dentro de Modo Normal tanto en Solitario como en Multijugador. La escena panorámica queda sumergida en penumbra y el jugador explora con un haz de luz táctico que sigue el puntero o toque.</li>
@@ -644,7 +658,7 @@
                 <!-- BETA v1.8.6 -->
                 <div class="changelog-entry">
                     <div class="changelog-title-row">
-                        <span class="changelog-version">BETA v1.8.6</span>
+                        <span class="changelog-version">BETA v1.8.6 <span class="changelog-date">· 7 sep 2026</span></span>
                     </div>
                     <ul class="changelog-list-items">
                         <li><strong>Deduplicación Estricta de Marcadores en Minimapa:</strong> Resuelto el problema donde a veces aparecían puntos duplicados con el mismo nombre de jugador (o tu propio jugador duplicado en color rival). Ahora los marcadores se indexan canónicamente por nombre único de jugador, reciclando la chincheta existente y filtrando cualquier eco de paquetes de red del propio usuario.</li>
@@ -655,7 +669,7 @@
                 <!-- BETA v1.8.5 -->
                 <div class="changelog-entry">
                     <div class="changelog-title-row">
-                        <span class="changelog-version">BETA v1.8.5</span>
+                        <span class="changelog-version">BETA v1.8.5 <span class="changelog-date">· 7 sep 2026</span></span>
                     </div>
                     <ul class="changelog-list-items">
                         <li><strong>Retirada del Punto de Jugador al Ganar:</strong> Cuando un jugador alcanza el objetivo y cruza la meta, su marcador/punto es retirado de inmediato del minimapa para evitar saturación y reflejar visualmente que ya completó su recorrido.</li>
@@ -667,7 +681,7 @@
                 <!-- BETA v1.8.4 -->
                 <div class="changelog-entry">
                     <div class="changelog-title-row">
-                        <span class="changelog-version">BETA v1.8.4</span>
+                        <span class="changelog-version">BETA v1.8.4 <span class="changelog-date">· 7 sep 2026</span></span>
                     </div>
                     <ul class="changelog-list-items">
                         <li><strong>Corrección Crítica de Expulsión al Iniciar Partida:</strong> Resuelto el problema donde los invitados eran sacados de la partida al comenzar la ronda mientras cargaba el panorama. Se corrigió la validación de clientes activos ante transiciones tardías de WebRTC, evitando rechazos accidentales de conexión y bloqueando salidas indeseadas de la pantalla de juego.</li>
@@ -678,7 +692,7 @@
                 <!-- BETA v1.8.3 -->
                 <div class="changelog-entry">
                     <div class="changelog-title-row">
-                        <span class="changelog-version">BETA v1.8.3</span>
+                        <span class="changelog-version">BETA v1.8.3 <span class="changelog-date">· 7 sep 2026</span></span>
                     </div>
                     <ul class="changelog-list-items">
                         <li><strong>Verificación Bidireccional de Transitabilidad (Modo Carrera):</strong> Implementada validación en tiempo real antes de arrancar cada ronda mediante <code>StreetViewService</code> de Google Maps. Se verifica que tanto el punto misterioso objetivo como cada una de las posiciones de salida asignadas a los jugadores posean enlaces de calle contiguos activos (<code>links.length &ge; 1</code>).</li>
@@ -689,7 +703,7 @@
                 <!-- BETA v1.8.2 -->
                 <div class="changelog-entry">
                     <div class="changelog-title-row">
-                        <span class="changelog-version">BETA v1.8.2</span>
+                        <span class="changelog-version">BETA v1.8.2 <span class="changelog-date">· 7 sep 2026</span></span>
                     </div>
                     <ul class="changelog-list-items">
                         <li><strong>Corrección Integral de Responsividad y Desplazamiento Vertical:</strong> Solucionado el problema donde el título "Crear sala" y los botones inferiores quedaban cortados en pantallas con altura reducida. Ahora el scroll es completamente fluido de extremo a extremo sin recortes.</li>
@@ -701,7 +715,7 @@
                 <!-- BETA v1.7.8 -->
                 <div class="changelog-entry">
                     <div class="changelog-title-row">
-                        <span class="changelog-version">BETA v1.7.8</span>
+                        <span class="changelog-version">BETA v1.7.8 <span class="changelog-date">· 4 sep 2026</span></span>
                     </div>
                     <ul class="changelog-list-items">
                         <li><strong>Prevención de Salas Duplicadas por el Mismo Anfitrión:</strong> Corregido el bug donde un anfitrión podía figurar con múltiples salas públicas en la lista. Ahora el servidor purga automáticamente cualquier sala anterior del mismo creador al crear o listar, y el botón de creación bloquea pulsaciones repetidas.</li>
@@ -713,7 +727,7 @@
                 <!-- BETA v1.7.7 -->
                 <div class="changelog-entry">
                     <div class="changelog-title-row">
-                        <span class="changelog-version">BETA v1.7.7</span>
+                        <span class="changelog-version">BETA v1.7.7 <span class="changelog-date">· 4 sep 2026</span></span>
                     </div>
                     <ul class="changelog-list-items">
                         <li><strong>Corrección Visual en Botón de Historial de Versiones:</strong> Reparado el cierre de bloques CSS que provocaba que el botón del historial de versiones se renderizara sin estilos en el menú inferior. Restablecido el diseño cápsula translúcido con efecto vidrio y hover brillante.</li>
@@ -726,7 +740,7 @@
                 <!-- BETA v1.7.6 -->
                 <div class="changelog-entry">
                     <div class="changelog-title-row">
-                        <span class="changelog-version">BETA v1.7.6</span>
+                        <span class="changelog-version">BETA v1.7.6 <span class="changelog-date">· 4 sep 2026</span></span>
                         <span class="changelog-badge">Actualización</span>
                     </div>
                     <ul class="changelog-list-items">
@@ -738,7 +752,7 @@
                 <!-- BETA v1.7.5 -->
                 <div class="changelog-entry">
                     <div class="changelog-title-row">
-                        <span class="changelog-version">BETA v1.7.5</span>
+                        <span class="changelog-version">BETA v1.7.5 <span class="changelog-date">· 4 sep 2026</span></span>
                         <span class="changelog-badge">Parche</span>
                     </div>
                     <ul class="changelog-list-items">
@@ -750,7 +764,7 @@
                 <!-- BETA v1.7.4 -->
                 <div class="changelog-entry">
                     <div class="changelog-title-row">
-                        <span class="changelog-version">BETA v1.7.4</span>
+                        <span class="changelog-version">BETA v1.7.4 <span class="changelog-date">· 4 sep 2026</span></span>
                         <span class="changelog-badge">Parche</span>
                     </div>
                     <ul class="changelog-list-items">
@@ -761,7 +775,7 @@
                 <!-- BETA v1.7.3 -->
                 <div class="changelog-entry">
                     <div class="changelog-title-row">
-                        <span class="changelog-version">BETA v1.7.3</span>
+                        <span class="changelog-version">BETA v1.7.3 <span class="changelog-date">· 4 sep 2026</span></span>
                         <span class="changelog-badge">Parche</span>
                     </div>
                     <ul class="changelog-list-items">
@@ -773,7 +787,7 @@
                 <!-- BETA v1.7.2 -->
                 <div class="changelog-entry">
                     <div class="changelog-title-row">
-                        <span class="changelog-version">BETA v1.7.2</span>
+                        <span class="changelog-version">BETA v1.7.2 <span class="changelog-date">· 4 sep 2026</span></span>
                         <span class="changelog-badge">Rendimiento</span>
                     </div>
                     <ul class="changelog-list-items">
@@ -785,7 +799,7 @@
                 <!-- BETA v1.7.1 -->
                 <div class="changelog-entry">
                     <div class="changelog-title-row">
-                        <span class="changelog-version">BETA v1.7.1</span>
+                        <span class="changelog-version">BETA v1.7.1 <span class="changelog-date">· 4 sep 2026</span></span>
                         <span class="changelog-badge">Parche</span>
                     </div>
                     <ul class="changelog-list-items">
@@ -797,7 +811,7 @@
                 <!-- BETA v1.7.0 -->
                 <div class="changelog-entry">
                     <div class="changelog-title-row">
-                        <span class="changelog-version">BETA v1.7.0</span>
+                        <span class="changelog-version">BETA v1.7.0 <span class="changelog-date">· 4 sep 2026</span></span>
                         <span class="changelog-badge">Nuevo Modo</span>
                     </div>
                     <ul class="changelog-list-items">
@@ -813,7 +827,7 @@
                 <!-- BETA v1.6.3 -->
                 <div class="changelog-entry">
                     <div class="changelog-title-row">
-                        <span class="changelog-version">BETA v1.6.3</span>
+                        <span class="changelog-version">BETA v1.6.3 <span class="changelog-date">· 3 sep 2026</span></span>
                         <span class="changelog-badge">Actualización</span>
                     </div>
                     <ul class="changelog-list-items">
@@ -828,7 +842,7 @@
                 <!-- BETA v1.6.2 -->
                 <div class="changelog-entry">
                     <div class="changelog-title-row">
-                        <span class="changelog-version">BETA v1.6.2</span>
+                        <span class="changelog-version">BETA v1.6.2 <span class="changelog-date">· 3 sep 2026</span></span>
                         <span class="changelog-badge">Actualización</span>
                     </div>
                     <ul class="changelog-list-items">
@@ -843,7 +857,7 @@
                 <!-- BETA v1.6.1 -->
                 <div class="changelog-entry">
                     <div class="changelog-title-row">
-                        <span class="changelog-version">BETA v1.6.1</span>
+                        <span class="changelog-version">BETA v1.6.1 <span class="changelog-date">· 3 sep 2026</span></span>
                         <span class="changelog-badge">Actualización</span>
                     </div>
                     <ul class="changelog-list-items">
@@ -858,7 +872,7 @@
                 <!-- BETA v1.6.0 -->
                 <div class="changelog-entry">
                     <div class="changelog-title-row">
-                        <span class="changelog-version">BETA v1.6.0</span>
+                        <span class="changelog-version">BETA v1.6.0 <span class="changelog-date">· 3 sep 2026</span></span>
                         <span class="changelog-badge">Nuevo Modo</span>
                     </div>
                     <ul class="changelog-list-items">
@@ -872,7 +886,7 @@
                 <!-- BETA v1.5.0 - v1.5.6 -->
                 <div class="changelog-entry">
                     <div class="changelog-title-row">
-                        <span class="changelog-version">BETA v1.5.0 – v1.5.6</span>
+                        <span class="changelog-version">BETA v1.5.0 – v1.5.6 <span class="changelog-date">· 3 sep 2026</span></span>
                         <span class="changelog-badge">Mejoras de Red</span>
                     </div>
                     <ul class="changelog-list-items">
@@ -886,7 +900,7 @@
                 <!-- BETA v1.4.2 -->
                 <div class="changelog-entry">
                     <div class="changelog-title-row">
-                        <span class="changelog-version">BETA v1.4.2</span>
+                        <span class="changelog-version">BETA v1.4.2 <span class="changelog-date">· 2 sep 2026</span></span>
                         <span class="changelog-badge">Optimización</span>
                     </div>
                     <ul class="changelog-list-items">
@@ -899,7 +913,7 @@
                 <!-- BETA v1.2.0 - v1.4.0 -->
                 <div class="changelog-entry">
                     <div class="changelog-title-row">
-                        <span class="changelog-version">BETA v1.2.0 – v1.4.0</span>
+                        <span class="changelog-version">BETA v1.2.0 – v1.4.0 <span class="changelog-date">· 2 sep 2026</span></span>
                         <span class="changelog-badge">Mecánicas</span>
                     </div>
                     <ul class="changelog-list-items">
@@ -913,7 +927,7 @@
                 <!-- BETA v1.0.0 -->
                 <div class="changelog-entry">
                     <div class="changelog-title-row">
-                        <span class="changelog-version">BETA v1.0.0</span>
+                        <span class="changelog-version">BETA v1.0.0 <span class="changelog-date">· 2 sep 2026</span></span>
                         <span class="changelog-badge">Lanzamiento</span>
                     </div>
                     <ul class="changelog-list-items">
@@ -935,6 +949,6 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
     <script src="js/keys.js"></script>
-    <script type="module" src="js/app.js?v=1.8.7"></script>
+    <script type="module" src="js/app.js?v=1.8.8"></script>
 </body>
 </html>

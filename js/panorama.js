@@ -793,6 +793,8 @@ export class PanoramaViewer {
    */
   setFlashlightMode(enabled) {
     this.isFlashlight = !!enabled;
+    this._isFlashlightActive = false; // Solo consume batería cuando la ronda arranca (sin cortina)
+    this._hasMovedOnce = false;
 
     // Limpiar listener previo si existía
     if (this._flashlightBoundHandler) {
@@ -847,8 +849,22 @@ export class PanoramaViewer {
       }
       if (clientX === undefined || clientY === undefined) return;
 
-      if (!this.flashlightPos) {
+      // Si la cortina de preparación está activa o la ronda aún no ha arrancado:
+      // NO consumir batería bajo ninguna circunstancia. Solo actualizar posición del haz.
+      const blind = document.getElementById('panoBlind');
+      const isBlindActive = blind && !blind.classList.contains('hidden');
+
+      if (isBlindActive || !this._isFlashlightActive) {
         this.flashlightPos = { x: clientX, y: clientY };
+        this._hasMovedOnce = true;
+        this._updateFlashlightOverlay(clientX, clientY);
+        return;
+      }
+
+      // En el primer frame de movimiento activo, fijar posición sin drenar salto inicial desde el centro
+      if (!this._hasMovedOnce || !this.flashlightPos) {
+        this.flashlightPos = { x: clientX, y: clientY };
+        this._hasMovedOnce = true;
         this._updateFlashlightOverlay(clientX, clientY);
         return;
       }
@@ -859,7 +875,7 @@ export class PanoramaViewer {
 
       // Si no quitas la luz de un punto (distancia <= 1.5px), la batería NO se consume
       if (dist > 1.5 && this.flashlightBattery > 0) {
-        const drainPerPx = CONFIG.FLASHLIGHT_DRAIN_PER_PX || 0.0072;
+        const drainPerPx = CONFIG.FLASHLIGHT_DRAIN_PER_PX || 0.0025;
         const drain = dist * drainPerPx;
         const prev = this.flashlightBattery;
         this.flashlightBattery = Math.max(0, this.flashlightBattery - drain);
@@ -879,6 +895,21 @@ export class PanoramaViewer {
     window.addEventListener('pointerdown', this._flashlightBoundHandler, { passive: true });
     window.addEventListener('touchmove', this._flashlightBoundHandler, { passive: true });
     window.addEventListener('touchstart', this._flashlightBoundHandler, { passive: true });
+  }
+
+  /**
+   * Habilita o pausa el consumo de batería de la linterna (al abrir/cerrar cortina).
+   */
+  setFlashlightActive(active) {
+    this._isFlashlightActive = !!active;
+    this._hasMovedOnce = false;
+    if (this.isFlashlight) {
+      const overlay = document.getElementById('panoFlashlightOverlay');
+      if (overlay) overlay.classList.remove('hidden');
+      if (this.flashlightPos) {
+        this._updateFlashlightOverlay(this.flashlightPos.x, this.flashlightPos.y);
+      }
+    }
   }
 
   /**

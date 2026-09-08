@@ -1527,12 +1527,16 @@ async function hostStartGame() {
     setTimeout(() => pano.refresh(), 60);
     game.meName = meName;
 
-    const isRace = (currentMultiMode === 'normal' && multiNormalVariant === 'race');
-    const isFlashlight = (currentMultiMode === 'normal' && multiNormalVariant === 'flashlight');
+    const isRace = (currentMultiMode === 'normal' && multiNormalVariant === 'race') || net.gameMode === 'race';
+    const isFlashlight = (currentMultiMode === 'normal' && multiNormalVariant === 'flashlight') ||
+                         net.gameMode === 'flashlight' ||
+                         !!net.flashlightMode;
     const isZoom = (currentMultiMode === 'normal' && multiNormalVariant === 'zoom') ||
-                   (currentMultiMode === 'static' && multiStaticVariant === 'zoom');
+                   (currentMultiMode === 'static' && multiStaticVariant === 'zoom') ||
+                   net.gameMode === 'tunnel' || net.gameMode === 'static_tunnel' || !!net.zoomMode;
     const isBlur = (currentMultiMode === 'normal' && multiNormalVariant === 'blur') ||
-                   (currentMultiMode === 'static' && multiStaticVariant === 'blur');
+                   (currentMultiMode === 'static' && multiStaticVariant === 'blur') ||
+                   net.gameMode === 'blur' || net.gameMode === 'static_blur' || !!net.blurMode;
     let effectiveMode = currentMultiMode;
     if (isRace) effectiveMode = 'race';
     else if (isFlashlight) effectiveMode = 'flashlight';
@@ -1569,12 +1573,16 @@ function createRoom(isPublic = false) {
   const rounds = Number($('#roomRounds').value) || CONFIG.DUEL_ROUNDS;
   const limit = Number($('#roomLimit').value) || CONFIG.ROOM_MAX_PLAYERS;
 
-  const isRace = (currentMultiMode === 'normal' && multiNormalVariant === 'race');
-  const isFlashlight = (currentMultiMode === 'normal' && multiNormalVariant === 'flashlight');
+  const isRace = (currentMultiMode === 'normal' && multiNormalVariant === 'race') || net.gameMode === 'race';
+  const isFlashlight = (currentMultiMode === 'normal' && multiNormalVariant === 'flashlight') ||
+                       net.gameMode === 'flashlight' ||
+                       !!net.flashlightMode;
   const isZoom = (currentMultiMode === 'normal' && multiNormalVariant === 'zoom') ||
-                 (currentMultiMode === 'static' && multiStaticVariant === 'zoom');
+                 (currentMultiMode === 'static' && multiStaticVariant === 'zoom') ||
+                 net.gameMode === 'tunnel' || net.gameMode === 'static_tunnel' || !!net.zoomMode;
   const isBlur = (currentMultiMode === 'normal' && multiNormalVariant === 'blur') ||
-                 (currentMultiMode === 'static' && multiStaticVariant === 'blur');
+                 (currentMultiMode === 'static' && multiStaticVariant === 'blur') ||
+                 net.gameMode === 'blur' || net.gameMode === 'static_blur' || !!net.blurMode;
   let effectiveMode = currentMultiMode;
   if (isRace) effectiveMode = 'race';
   else if (isFlashlight) effectiveMode = 'flashlight';
@@ -2728,6 +2736,14 @@ function wireNet() {
   net.cb.onPlayers = (list, config) => {
     LOG('onPlayers', { list, config });
     players = list;
+    if (config) {
+      if (config.gameMode === 'flashlight' || config.flashlightMode) {
+        multiNormalVariant = 'flashlight';
+      }
+    }
+    if (net.gameMode === 'flashlight' || net.flashlightMode) {
+      multiNormalVariant = 'flashlight';
+    }
     persistActiveRoom();
     renderLobby();
   };

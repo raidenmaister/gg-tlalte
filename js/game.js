@@ -992,6 +992,17 @@ export class Game {
     this.map.setInteractive(true);
     this.emit('prepare', { seconds: null });
 
+    const isFlashlight = this.gameMode === 'flashlight' || this.flashlightMode;
+    if (isFlashlight) {
+      if (this.pano && typeof this.pano.setFlashlightMode === 'function') {
+        this.pano.setFlashlightMode(true);
+        if (typeof this.pano.setFlashlightActive === 'function') {
+          this.pano.setFlashlightActive(true);
+        }
+      }
+      this.emit('flashlightStart', { battery: 100 });
+    }
+
     if (this.isRaceMode) {
       this.pano.setRaceMode(true);
       this.pano.setStatic(false);
@@ -2238,6 +2249,11 @@ export class Game {
     }
     this._clearTimers();
     this.state = 'result';
+
+    if (this.pano && typeof this.pano.setFlashlightMode === 'function') {
+      this.pano.setFlashlightMode(false);
+    }
+    this.emit('flashlightEnd');
 
     const real = { lat: this.currentCoord.lat, lng: this.currentCoord.lng };
     const roundMult = damageMultiplier(this.currentRound);

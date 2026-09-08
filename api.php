@@ -83,7 +83,7 @@ if (!function_exists('cleanupRooms')) {
 /** Puntuación del leaderboard: prima la precisión y ajusta por velocidad. */
 if (!function_exists('leaderScore')) {
     function leaderScore($rounds, $points, $timeMs, $timeMaxSec, $mode = 'normal') {
-        $maxPerRound = in_array($mode, ['tunnel', 'static_tunnel', 'blur', 'static_blur'], true) ? 6500 : 5000;
+        $maxPerRound = in_array($mode, ['tunnel', 'static_tunnel', 'blur', 'static_blur', 'flashlight'], true) ? 7000 : 5000;
         $maxPoints = max(1, $rounds * $maxPerRound);
         $points = max(0, min(intval($points), $maxPoints));
         $timeMaxMs = max(1, intval($timeMaxSec) * 1000);
@@ -142,8 +142,8 @@ $leaderboard = loadJson($leaderboardFile, ['5' => [], '7' => [], '10' => []]);
 switch ($action) {
     case 'version': {
         $vFile = __DIR__ . '/version.json';
-        $vData = loadJson($vFile, ['version' => '1.8.6']);
-        echo json_encode(['ok' => true, 'version' => $vData['version'] ?? '1.8.6']);
+        $vData = loadJson($vFile, ['version' => '1.8.7']);
+        echo json_encode(['ok' => true, 'version' => $vData['version'] ?? '1.8.7']);
         exit;
     }
 
@@ -157,7 +157,7 @@ switch ($action) {
         $isPublic = isset($_POST['isPublic']) ? intval($_POST['isPublic']) : 1;
         $rounds = intval($_POST['rounds'] ?? 5);
         $gameMode = trim($_POST['gameMode'] ?? 'normal');
-        if (!in_array($gameMode, ['normal', 'static', 'temporal', 'tunnel', 'static_tunnel', 'blur', 'static_blur', 'race'], true)) {
+        if (!in_array($gameMode, ['normal', 'static', 'temporal', 'tunnel', 'static_tunnel', 'blur', 'static_blur', 'race', 'flashlight'], true)) {
             $gameMode = 'normal';
         }
         $temporalSeconds = intval($_POST['temporalSeconds'] ?? 3);
@@ -445,7 +445,7 @@ switch ($action) {
         }
 
         $gameMode = trim($_POST['gameMode'] ?? 'normal');
-        if (!in_array($gameMode, ['normal', 'static', 'temporal', 'tunnel', 'static_tunnel', 'blur', 'static_blur'], true)) {
+        if (!in_array($gameMode, ['normal', 'static', 'temporal', 'tunnel', 'static_tunnel', 'blur', 'static_blur', 'race', 'flashlight'], true)) {
             $gameMode = 'normal';
         }
         $timeMax = soloTimeMax($rounds, $gameMode);
@@ -499,7 +499,7 @@ switch ($action) {
         $rounds = intval($_GET['rounds'] ?? $_POST['rounds'] ?? 5);
         if (!in_array($rounds, [5, 7, 10, 15], true)) $rounds = 5;
         $gameMode = trim($_GET['mode'] ?? $_POST['mode'] ?? 'normal');
-        if (!in_array($gameMode, ['normal', 'static', 'temporal', 'tunnel', 'static_tunnel', 'blur', 'static_blur'], true)) {
+        if (!in_array($gameMode, ['normal', 'static', 'temporal', 'tunnel', 'static_tunnel', 'blur', 'static_blur', 'race', 'flashlight'], true)) {
             $gameMode = 'normal';
         }
         $key = $gameMode . '_' . $rounds;

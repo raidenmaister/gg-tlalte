@@ -2,14 +2,14 @@
 // app.js — Punto de entrada. Coordina UI, red, visor panorámico y juego.
 // ============================================================================
 
-import { $, formatKm, formatNumber, clamp, escapeHtml, detectPotatoMode } from './utils.js?v=1.8.6';
-import { CONFIG } from './config.js?v=1.8.6';
-import { audio } from './audio.js?v=1.8.6';
-import { PanoramaViewer } from './panorama.js?v=1.8.6';
-import { Minimap } from './minimap.js?v=1.8.6';
-import { Network } from './net.js?v=1.8.6';
-import { Game } from './game.js?v=1.8.6';
-import { AsciiEarthBackground } from './ascii-earth.js?v=1.8.6';
+import { $, formatKm, formatNumber, clamp, escapeHtml, detectPotatoMode } from './utils.js?v=1.8.7';
+import { CONFIG } from './config.js?v=1.8.7';
+import { audio } from './audio.js?v=1.8.7';
+import { PanoramaViewer } from './panorama.js?v=1.8.7';
+import { Minimap } from './minimap.js?v=1.8.7';
+import { Network } from './net.js?v=1.8.7';
+import { Game } from './game.js?v=1.8.7';
+import { AsciiEarthBackground } from './ascii-earth.js?v=1.8.7';
 
 const PLAYER_KEY = 'ggtlalte:playerName';
 const ROOM_KEY = 'ggtlalte:activeRoom';
@@ -578,6 +578,9 @@ function renderResult(result) {
         : '';
       rows.push(statRow('⭐ ¡PERFECT!', `≤ 25m${phaseStr}`));
     }
+    if (result.owlBonus) {
+      rows.push(`<div class="stat-row stat-owl"><span class="stat-label">🦉 Búho Nocturno</span><span class="stat-value">+2,000 pts</span></div>`);
+    }
     if (result.perfectStreak >= 2) {
       rows.push(`<div class="stat-row stat-streak"><span class="stat-label">🔥 Racha Perfects</span><span class="stat-value">x${result.perfectStreak}</span></div>`);
     }
@@ -612,12 +615,15 @@ function renderResult(result) {
       const streakBadge = (p.perfectStreak && p.perfectStreak >= 2)
         ? `<span class="res-streak-badge">🔥 x${p.perfectStreak}</span>`
         : '';
+      const owlBadge = p.owlBonus
+        ? `<span class="res-owl-badge">🦉 Búho Nocturno</span>`
+        : '';
       return `
         <div class="res-multi-row">
           <div class="res-multi-info">
             <div class="res-multi-name" style="color:${color};">
               <span class="res-color-dot" style="background:${color};"></span>
-              ${escapeHtml(p.name)} ${p.isPerfect ? '⭐' : ''} ${streakBadge}
+              ${escapeHtml(p.name)} ${p.isPerfect ? '⭐' : ''} ${streakBadge} ${owlBadge}
             </div>
             <div class="res-multi-meta">
               ${p.guess ? `+${formatNumber(p.score)} pts · ${p.distance != null ? formatKm(p.distance) : ''}` : '<span class="res-no-guess">⚠️ No adivinó a tiempo</span>'}
@@ -722,6 +728,8 @@ function resetGuessUI() {
   if (blurBanner) blurBanner.classList.add('hidden');
   const raceHud = $('#raceHud');
   if (raceHud) raceHud.classList.add('hidden');
+  const flashlightHud = $('#flashlightHud');
+  if (flashlightHud) flashlightHud.classList.add('hidden');
   const raceArrivalBanner = $('#raceArrivalBanner');
   if (raceArrivalBanner) raceArrivalBanner.classList.add('hidden');
   document.body.classList.remove('is-race-mode');
@@ -739,6 +747,7 @@ function resetGameUI() {
     pano.setStatic(false);
     if (typeof pano.setTunnelMode === 'function') pano.setTunnelMode(false);
     if (typeof pano.setBlurMode === 'function') pano.setBlurMode(false);
+    if (typeof pano.setFlashlightMode === 'function') pano.setFlashlightMode(false);
   }
   const hudTop = $('.hud-top');
   if (hudTop) hudTop.classList.remove('over-map');
@@ -860,6 +869,7 @@ function renderLobby() {
     else if (net.gameMode === 'static_tunnel') modeText = `Estático con Zoom (${net.tunnelSeconds || 3}s)`;
     else if (net.gameMode === 'blur') modeText = `Normal Borroso (${net.blurSeconds || 3}s)`;
     else if (net.gameMode === 'static_blur') modeText = `Estático Borroso (${net.blurSeconds || 3}s)`;
+    else if (net.gameMode === 'flashlight' || net.flashlightMode) modeText = 'Linterna Táctica (Normal)';
     roundsInfo.textContent = `${modeText} · ${net.rounds || CONFIG.DUEL_ROUNDS} rondas`;
   }
 
@@ -1285,6 +1295,8 @@ function renderPublicList(rooms) {
     } else if (room.gameMode === 'blur') {
       const secs = Number(room.blurSeconds) || 3;
       modeLabel = `🎮 Normal + 🌫️ Borroso (${secs}s)`;
+    } else if (room.gameMode === 'flashlight') {
+      modeLabel = '🔦 Linterna Táctica (Normal)';
     } else if (room.gameMode === 'static') {
       modeLabel = '🛑 Estático';
     } else if (room.gameMode === 'temporal') {
@@ -1469,13 +1481,15 @@ async function startSolo(rounds = soloRounds) {
                    (currentSoloMode === 'static' && soloStaticVariant === 'zoom');
     const isBlur = (currentSoloMode === 'normal' && soloNormalVariant === 'blur') ||
                    (currentSoloMode === 'static' && soloStaticVariant === 'blur');
+    const isFlashlight = (currentSoloMode === 'normal' && soloNormalVariant === 'flashlight');
     let effectiveMode = currentSoloMode;
-    if (currentSoloMode === 'normal' && isZoom) effectiveMode = 'tunnel';
-    if (currentSoloMode === 'static' && isZoom) effectiveMode = 'static_tunnel';
-    if (currentSoloMode === 'normal' && isBlur) effectiveMode = 'blur';
-    if (currentSoloMode === 'static' && isBlur) effectiveMode = 'static_blur';
+    if (isFlashlight) effectiveMode = 'flashlight';
+    else if (currentSoloMode === 'normal' && isZoom) effectiveMode = 'tunnel';
+    else if (currentSoloMode === 'static' && isZoom) effectiveMode = 'static_tunnel';
+    else if (currentSoloMode === 'normal' && isBlur) effectiveMode = 'blur';
+    else if (currentSoloMode === 'static' && isBlur) effectiveMode = 'static_blur';
 
-    game.startSolo(rounds, effectiveMode, currentSoloTemporalSecs, currentSoloTunnelSecs, isZoom, currentSoloBlurSecs, isBlur);
+    game.startSolo(rounds, effectiveMode, currentSoloTemporalSecs, currentSoloTunnelSecs, isZoom, currentSoloBlurSecs, isBlur, isFlashlight);
   } catch (err) {
     showError('Error al cargar: ' + err.message);
     showScreen('menu');
@@ -1514,12 +1528,14 @@ async function hostStartGame() {
     game.meName = meName;
 
     const isRace = (currentMultiMode === 'normal' && multiNormalVariant === 'race');
+    const isFlashlight = (currentMultiMode === 'normal' && multiNormalVariant === 'flashlight');
     const isZoom = (currentMultiMode === 'normal' && multiNormalVariant === 'zoom') ||
                    (currentMultiMode === 'static' && multiStaticVariant === 'zoom');
     const isBlur = (currentMultiMode === 'normal' && multiNormalVariant === 'blur') ||
                    (currentMultiMode === 'static' && multiStaticVariant === 'blur');
     let effectiveMode = currentMultiMode;
     if (isRace) effectiveMode = 'race';
+    else if (isFlashlight) effectiveMode = 'flashlight';
     else if (currentMultiMode === 'normal' && isZoom) effectiveMode = 'tunnel';
     else if (currentMultiMode === 'static' && isZoom) effectiveMode = 'static_tunnel';
     else if (currentMultiMode === 'normal' && isBlur) effectiveMode = 'blur';
@@ -1533,7 +1549,8 @@ async function hostStartGame() {
       currentMultiBlurSecs,
       isBlur,
       currentMultiRaceDist,
-      currentMultiRaceSecs
+      currentMultiRaceSecs,
+      isFlashlight
     );
   } catch (err) {
     net.updateRoomStatus('waiting');
@@ -1553,24 +1570,27 @@ function createRoom(isPublic = false) {
   const limit = Number($('#roomLimit').value) || CONFIG.ROOM_MAX_PLAYERS;
 
   const isRace = (currentMultiMode === 'normal' && multiNormalVariant === 'race');
+  const isFlashlight = (currentMultiMode === 'normal' && multiNormalVariant === 'flashlight');
   const isZoom = (currentMultiMode === 'normal' && multiNormalVariant === 'zoom') ||
                  (currentMultiMode === 'static' && multiStaticVariant === 'zoom');
   const isBlur = (currentMultiMode === 'normal' && multiNormalVariant === 'blur') ||
                  (currentMultiMode === 'static' && multiStaticVariant === 'blur');
   let effectiveMode = currentMultiMode;
   if (isRace) effectiveMode = 'race';
+  else if (isFlashlight) effectiveMode = 'flashlight';
   else if (currentMultiMode === 'normal' && isZoom) effectiveMode = 'tunnel';
   else if (currentMultiMode === 'static' && isZoom) effectiveMode = 'static_tunnel';
   else if (currentMultiMode === 'normal' && isBlur) effectiveMode = 'blur';
   else if (currentMultiMode === 'static' && isBlur) effectiveMode = 'static_blur';
 
-  LOG('createRoom', { isPublic, meName, rounds, limit, effectiveMode, isZoom, isBlur, currentMultiTemporalSecs, currentMultiTunnelSecs, currentMultiBlurSecs, currentMultiRaceDist, currentMultiRaceSecs });
+  LOG('createRoom', { isPublic, meName, rounds, limit, effectiveMode, isZoom, isBlur, isFlashlight, currentMultiTemporalSecs, currentMultiTunnelSecs, currentMultiBlurSecs, currentMultiRaceDist, currentMultiRaceSecs });
   net.createRoom(meName, isPublic, {
     rounds,
     limit,
     gameMode: effectiveMode,
     zoomMode: isZoom,
     blurMode: isBlur,
+    flashlightMode: isFlashlight,
     temporalSeconds: currentMultiTemporalSecs,
     tunnelSeconds: currentMultiTunnelSecs,
     blurSeconds: currentMultiBlurSecs,
@@ -1597,6 +1617,7 @@ function persistActiveRoom() {
     tunnelSeconds: net.tunnelSeconds,
     blurSeconds: net.blurSeconds,
     blurMode: net.blurMode,
+    flashlightMode: net.flashlightMode,
     raceDistance: net.raceDistance,
     raceSeconds: net.raceSeconds,
   }));
@@ -1793,7 +1814,9 @@ function wire() {
     const descEl = $('#soloModeDesc');
     if (descEl) {
       if (currentSoloMode === 'normal') {
-        if (isNormalZoom) {
+        if (soloNormalVariant === 'flashlight') {
+          descEl.textContent = 'Modo Linterna Táctica: Vista sumergida en penumbra. Tu linterna ilumina donde apuntas, pero consume batería al moverla. ¡Ahorra energía!';
+        } else if (isNormalZoom) {
           descEl.textContent = 'Modo Normal con Zoom: Mueve la vista 360°, pero la imagen inicia con zoom telescópico y se aleja paso a paso.';
         } else if (isNormalBlur) {
           descEl.textContent = 'Modo Normal Borroso: Mueve la vista 360° sin zoom. La imagen inicia 100% desenfocada y se aclara por etapas.';
@@ -1953,7 +1976,9 @@ function wire() {
     const descEl = $('#multiModeDesc');
     if (descEl) {
       if (currentMultiMode === 'normal') {
-        if (isRace) {
+        if (multiNormalVariant === 'flashlight') {
+          descEl.textContent = 'Modo Linterna Táctica: Todos juegan en niebla nocturna con su propia linterna táctica. La batería se agota al alumbrar y explorar.';
+        } else if (isRace) {
           descEl.textContent = 'Modo Carrera al Objetivo: Todos aparecen a la misma distancia del objetivo. ¡Avanza por las calles con la brújula para llegar primero!';
         } else if (isNormalZoom) {
           descEl.textContent = 'Modo Normal con Zoom: Todos juegan con vista 360° y zoom sincronizado que se aleja al mismo tiempo.';
@@ -2516,6 +2541,48 @@ function wireGame() {
         countdown.textContent = `${secs.toFixed(1)}s`;
       }
     }
+  });
+
+  game.on('flashlightStart', () => {
+    const hud = $('#flashlightHud');
+    if (hud) hud.classList.remove('hidden');
+    const card = $('#flashlightHudCard');
+    if (card) card.className = 'flashlight-hud-card';
+    const percentEl = $('#flashlightPercent');
+    if (percentEl) percentEl.textContent = '100%';
+    const fillEl = $('#flashlightBarFill');
+    if (fillEl) fillEl.style.width = '100%';
+  });
+
+  game.on('flashlightBattery', (data) => {
+    const hud = $('#flashlightHud');
+    if (hud) hud.classList.remove('hidden');
+    const percent = Math.max(0, Math.min(100, data ? data.percent : 100));
+    const rounded = Math.round(percent);
+
+    const percentEl = $('#flashlightPercent');
+    if (percentEl) percentEl.textContent = `${rounded}%`;
+
+    const fillEl = $('#flashlightBarFill');
+    if (fillEl) fillEl.style.width = `${percent}%`;
+
+    const card = $('#flashlightHudCard');
+    if (card) {
+      if (percent <= 0) {
+        card.className = 'flashlight-hud-card depleted';
+      } else if (percent < 20) {
+        card.className = 'flashlight-hud-card danger';
+      } else if (percent < 50) {
+        card.className = 'flashlight-hud-card warning';
+      } else {
+        card.className = 'flashlight-hud-card';
+      }
+    }
+  });
+
+  game.on('flashlightEnd', () => {
+    const hud = $('#flashlightHud');
+    if (hud) hud.classList.add('hidden');
   });
 
   game.on('raceStart', (data) => {

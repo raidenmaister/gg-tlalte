@@ -4,7 +4,7 @@
 
 export const CONFIG = {
   // Versión oficial de la aplicación visible en menús
-  VERSION: 'BETA v1.8.6',
+  VERSION: 'BETA v1.8.7',
 
   // Fallback opcional de API Key (cliente). La key real se define en
   // js/keys.js (window.GG_GOOGLE_MAPS_API_KEY), que se mantiene local y NO se
@@ -84,6 +84,7 @@ export const CONFIG = {
     normal_zoom: { desc: 'Giro 360° con visión inicial ultra-telescópica que se aleja con el tiempo. ¡Hasta 6,500 pts en zoom máximo!' },
     normal_blur: { desc: 'Giro 360° sin zoom manual. Inicia 100% borroso y se enfoca 20% en 5 fases. ¡Haz Perfect para curar HP y acumular rachas!' },
     normal_race: { desc: 'Carrera al Objetivo: Todos inician a la misma distancia de la meta. Desplázate por las calles en 360° siguiendo la brújula y la distancia. ¡Gana el primero en llegar!' },
+    normal_flashlight: { desc: 'Niebla Nocturna 360°: Vista sumergida en penumbra. Usa tu linterna táctica para explorar. ¡La batería solo se gasta al mover la luz! Consigue Perfect para ganar la insignia Búho Nocturno.' },
     static_standard: { desc: 'Cámara fija, sin rotación ni movimiento. Desafío puro de reconocimiento visual.' },
     static_zoom: { desc: 'Cámara fija con zoom ultra-telescópico inicial que se aleja con el tiempo. ¡Identifica el lugar antes de que retroceda!' },
     static_blur: { desc: 'Cámara fija sin rotación ni zoom. Inicia 100% borroso y se enfoca 20% en 5 fases. ¡Haz Perfect para curar HP y acumular rachas!' },
@@ -117,6 +118,13 @@ export const CONFIG = {
   RACE_BASE_SCORES: [5000, 3500, 2500, 1800, 1200], // 1º, 2º, 3º, 4º, 5º+
   RACE_MAX_TIME_BONUS: 1500,     // Puntos extra máximos por velocidad
   RACE_HURRY_COUNTDOWN: 30,      // Segundos de prisa cuando el primer jugador cruza la meta
+
+  // Submodo Linterna Táctica (Niebla Nocturna 360°)
+  FLASHLIGHT_MAX_RADIUS: 155,       // Radio máximo del haz en px (con batería alta)
+  FLASHLIGHT_MIN_RADIUS: 65,        // Radio mínimo del haz en px antes de apagarse
+  FLASHLIGHT_DRAIN_PER_PX: 0.0072,  // Consumo por pixel de movimiento (~13,800 px para 100% de batería)
+  FLASHLIGHT_PERFECT_BONUS: 2000,   // Puntos extra por Perfect (<= 25m) con Linterna ("Búho Nocturno")
+  FLASHLIGHT_PERFECT_HEAL: 1000,    // Curación HP extra en duelos con Linterna ("Búho Nocturno")
 
   // 25 colores únicos y contrastantes para hasta 25 jugadores simultáneos
   PLAYER_COLORS: [

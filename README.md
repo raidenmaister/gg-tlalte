@@ -1,14 +1,16 @@
-# GG-TLALTE · GeoGuessr P2P (BETA v1.8.6)
+# GG-TLALTE · GeoGuessr P2P (BETA v1.8.7)
 
 Juego de adivinar ubicaciones con panorámicas 360° de Google Maps Street View, inspirado en GeoGuessr y ambientado en Tlaltenango de Sánchez Román, Zacatecas. Incluye modo solitario con leaderboard global por modos y partidas multijugador en duelo 1v1 y hasta 25 jugadores simultáneos.
 
 ## Características Principales
 
 - **Modos y Variantes de Juego (Solitario y Multijugador)**:
-  - **Normal**: Exploración completa en 360° con tres variantes disponibles:
+  - **Normal**: Exploración completa en 360° con variantes especializadas:
     - *Estándar*: Giro libre y zoom interactivo.
     - *Con Zoom*: Zoom ultra-telescópico progresivo que se aleja paso a paso a intervalos configurables (2s a 15s).
     - *Borroso (Desenfoque Progresivo)*: La panorámica inicia con un fuerte desenfoque óptico 360° que disminuye nivel a nivel. Acelerado por hardware para un giro y arrastre de imagen totalmente fluido a 60 FPS sin sobrecargar la GPU.
+    - *Carrera al Objetivo (Rally Equidistante)*: Carrera urbana en tiempo real donde todos inician a la misma distancia de la meta.
+    - *Linterna Táctica (Niebla Nocturna 360°)*: Todo el entorno está sumergido en penumbra y el jugador explora con un haz de luz focalizado que sigue el cursor o dedo táctil. La batería se consume únicamente al mover la luz (consumo 0% en reposo), disminuyendo su radio y parpadeando en reserva. ¡Adivinar a ≤ 25m otorga la insignia honorífica "🦉 ¡BÚHO NOCTURNO!" (+2,000 pts)!
   - **Estático**: Visión fija hacia adelante sin rotación (desafío puro de observación):
     - *Estándar*: Cámara fija bloqueada al frente.
     - *Con Zoom*: Cámara fija hacia adelante combinada con zoom ultra-telescópico progresivo.

@@ -12,7 +12,7 @@
 
     <!-- Leaflet (minimapa) -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-    <link rel="stylesheet" href="style.css?v=1.8.6">
+    <link rel="stylesheet" href="style.css?v=1.8.7">
 </head>
 <body>
 
@@ -20,7 +20,7 @@
     <div id="ascii-earth" class="hidden"></div>
 
     <!-- Badge de versión (menús) -->
-    <div id="versionBadge" class="version-badge" title="Ver historial de versiones">BETA v1.8.6</div>
+    <div id="versionBadge" class="version-badge" title="Ver historial de versiones">BETA v1.8.7</div>
 
     <!-- ====================== PANTALLA: NOMBRE ====================== -->
     <div id="screen-name" class="screen">
@@ -98,6 +98,7 @@
                         <button type="button" class="submode-tab active" data-variant="standard">Normal</button>
                         <button type="button" class="submode-tab" data-variant="zoom">🔍 Zoom</button>
                         <button type="button" class="submode-tab" data-variant="blur">🌫️ Borroso</button>
+                        <button type="button" class="submode-tab" data-variant="flashlight">🔦 Linterna</button>
                     </div>
                 </div>
 
@@ -234,6 +235,7 @@
                         <button type="button" class="submode-tab" data-variant="zoom">🔍 Zoom</button>
                         <button type="button" class="submode-tab" data-variant="blur">🌫️ Borroso</button>
                         <button type="button" class="submode-tab" data-variant="race">🏁 Carrera</button>
+                        <button type="button" class="submode-tab" data-variant="flashlight">🔦 Linterna</button>
                     </div>
                 </div>
 
@@ -440,6 +442,8 @@
         <div id="panoBlurOverlay" class="pano-blur-overlay hidden"></div>
         <!-- Capa física de bloqueo para modos estático y temporal -->
         <div id="panoStaticOverlay" class="pano-static-overlay hidden"></div>
+        <!-- Capa de niebla nocturna y haz de luz para Linterna Táctica -->
+        <div id="panoFlashlightOverlay" class="pano-flashlight-overlay hidden"></div>
         <!-- Cortina visual para sincronización anti-trampas y modo temporal -->
         <div class="pano-blind hidden" id="panoBlind">
             <div class="blind-content">
@@ -470,6 +474,22 @@
                     </div>
                 </div>
                 <div class="race-status-tag hidden" id="raceStatusTag">¡META ALCANZADA!</div>
+            </div>
+
+            <!-- HUD de Linterna Táctica: Indicador de batería reactivo -->
+            <div class="flashlight-hud hidden" id="flashlightHud">
+                <div class="flashlight-hud-card" id="flashlightHudCard">
+                    <span class="flashlight-icon" id="flashlightIcon">🔦</span>
+                    <div class="flashlight-info">
+                        <div class="flashlight-label-row">
+                            <span class="flashlight-label">BATERÍA</span>
+                            <span class="flashlight-percent" id="flashlightPercent">100%</span>
+                        </div>
+                        <div class="flashlight-bar-track">
+                            <div class="flashlight-bar-fill" id="flashlightBarFill" style="width: 100%;"></div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <div class="hud-right">
@@ -607,11 +627,24 @@
                 <button type="button" class="btn-close-modal" id="changelogCloseBtn" aria-label="Cerrar">✕</button>
             </div>
             <div class="changelog-list" id="changelogList">
-                <!-- BETA v1.8.6 -->
+                <!-- BETA v1.8.7 -->
                 <div class="changelog-entry current">
                     <div class="changelog-title-row">
-                        <span class="changelog-version">BETA v1.8.6</span>
+                        <span class="changelog-version">BETA v1.8.7</span>
                         <span class="changelog-badge badge-current">Actual</span>
+                    </div>
+                    <ul class="changelog-list-items">
+                        <li><strong>Nuevo Modo «Linterna Táctica» (Niebla Nocturna 360°):</strong> Disponible exclusivamente dentro de Modo Normal tanto en Solitario como en Multijugador. La escena panorámica queda sumergida en penumbra y el jugador explora con un haz de luz táctico que sigue el puntero o toque.</li>
+                        <li><strong>Gestión Realista de Batería:</strong> La linterna cuenta con 100% de batería al inicio de cada ronda. La energía se agota únicamente al mover y explorar con la luz; si dejas la luz quieta en un punto para analizar la escena, ¡la batería no se consume! Al llegar a reserva (< 20%), el haz se reduce y parpadea sutilmente; al 0%, la linterna se apaga por completo.</li>
+                        <li><strong>HUD de Batería Responsivo:</strong> Nuevo widget en pantalla con porcentaje en tiempo real, barra animada y transiciones cromáticas (verde &rarr; ámbar &rarr; rojo crítico).</li>
+                        <li><strong>Insignia «Búho Nocturno»:</strong> Los jugadores que consigan un Perfect (&le; 25m) jugando a oscuras con la linterna reciben la insignia honorífica "🦉 ¡BÚHO NOCTURNO!" con una bonificación de +2,000 puntos (y +1,000 HP en duelos).</li>
+                    </ul>
+                </div>
+
+                <!-- BETA v1.8.6 -->
+                <div class="changelog-entry">
+                    <div class="changelog-title-row">
+                        <span class="changelog-version">BETA v1.8.6</span>
                     </div>
                     <ul class="changelog-list-items">
                         <li><strong>Deduplicación Estricta de Marcadores en Minimapa:</strong> Resuelto el problema donde a veces aparecían puntos duplicados con el mismo nombre de jugador (o tu propio jugador duplicado en color rival). Ahora los marcadores se indexan canónicamente por nombre único de jugador, reciclando la chincheta existente y filtrando cualquier eco de paquetes de red del propio usuario.</li>
@@ -902,6 +935,6 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
     <script src="js/keys.js"></script>
-    <script type="module" src="js/app.js?v=1.8.6"></script>
+    <script type="module" src="js/app.js?v=1.8.7"></script>
 </body>
 </html>

@@ -2,8 +2,8 @@
 // panorama.js — Visor panorámico 360° (Google Street View) + brújula.
 // ============================================================================
 
-import { CONFIG } from './config.js?v=1.8.6';
-import { detectPotatoMode } from './utils.js?v=1.8.6';
+import { CONFIG } from './config.js?v=1.8.7';
+import { detectPotatoMode } from './utils.js?v=1.8.7';
 
 let mapsPromise = null;
 
@@ -104,6 +104,10 @@ export class PanoramaViewer {
     this.isPotato = detectPotatoMode();
     this.isBlur = false;
     this.isRace = false;
+    this.isFlashlight = false;
+    this.flashlightBattery = 100;
+    this.flashlightPos = null;
+    this._flashlightBoundHandler = null;
   }
 
   async init() {
@@ -782,7 +786,141 @@ export class PanoramaViewer {
     }
   }
 
+  /**
+   * Activa/desactiva el Modo Linterna Táctica (Niebla Nocturna 360°).
+   * Genera un haz de luz focalizado que sigue al cursor o dedo táctil.
+   * La batería se consume ÚNICAMENTE al mover la luz; en reposo el consumo es 0%.
+   */
+  setFlashlightMode(enabled) {
+    this.isFlashlight = !!enabled;
+
+    // Limpiar listener previo si existía
+    if (this._flashlightBoundHandler) {
+      window.removeEventListener('pointermove', this._flashlightBoundHandler);
+      window.removeEventListener('pointerdown', this._flashlightBoundHandler);
+      window.removeEventListener('touchmove', this._flashlightBoundHandler);
+      window.removeEventListener('touchstart', this._flashlightBoundHandler);
+      this._flashlightBoundHandler = null;
+    }
+
+    const overlay = document.getElementById('panoFlashlightOverlay');
+
+    if (!enabled) {
+      if (overlay) {
+        overlay.classList.add('hidden');
+        overlay.style.removeProperty('background');
+      }
+      this.flashlightBattery = 100;
+      this.flashlightPos = null;
+      return;
+    }
+
+    // Inicializar linterna al 100% de batería
+    this.flashlightBattery = 100;
+    const panoEl = document.getElementById(this.containerId) || document.body;
+    const rect = panoEl.getBoundingClientRect();
+    const initX = rect.width ? rect.left + rect.width / 2 : window.innerWidth / 2;
+    const initY = rect.height ? rect.top + rect.height / 2 : window.innerHeight / 2;
+    this.flashlightPos = { x: initX, y: initY };
+
+    if (overlay) {
+      overlay.classList.remove('hidden');
+      this._updateFlashlightOverlay(initX, initY);
+    }
+
+    if (this.callbacks.onBatteryChange) {
+      this.callbacks.onBatteryChange(100);
+    }
+
+    // Handler de movimiento táctico con consumo de batería por distancia
+    this._flashlightBoundHandler = (e) => {
+      if (!this.isFlashlight) return;
+
+      let clientX = e.clientX;
+      let clientY = e.clientY;
+      if (e.touches && e.touches.length > 0) {
+        clientX = e.touches[0].clientX;
+        clientY = e.touches[0].clientY;
+      } else if (clientX === undefined && e.changedTouches && e.changedTouches.length > 0) {
+        clientX = e.changedTouches[0].clientX;
+        clientY = e.changedTouches[0].clientY;
+      }
+      if (clientX === undefined || clientY === undefined) return;
+
+      if (!this.flashlightPos) {
+        this.flashlightPos = { x: clientX, y: clientY };
+        this._updateFlashlightOverlay(clientX, clientY);
+        return;
+      }
+
+      const dx = clientX - this.flashlightPos.x;
+      const dy = clientY - this.flashlightPos.y;
+      const dist = Math.hypot(dx, dy);
+
+      // Si no quitas la luz de un punto (distancia <= 1.5px), la batería NO se consume
+      if (dist > 1.5 && this.flashlightBattery > 0) {
+        const drainPerPx = CONFIG.FLASHLIGHT_DRAIN_PER_PX || 0.0072;
+        const drain = dist * drainPerPx;
+        const prev = this.flashlightBattery;
+        this.flashlightBattery = Math.max(0, this.flashlightBattery - drain);
+        this.flashlightPos = { x: clientX, y: clientY };
+
+        if (this.callbacks.onBatteryChange && Math.abs(prev - this.flashlightBattery) >= 0.2) {
+          this.callbacks.onBatteryChange(this.flashlightBattery);
+        }
+      } else {
+        this.flashlightPos = { x: clientX, y: clientY };
+      }
+
+      this._updateFlashlightOverlay(clientX, clientY);
+    };
+
+    window.addEventListener('pointermove', this._flashlightBoundHandler, { passive: true });
+    window.addEventListener('pointerdown', this._flashlightBoundHandler, { passive: true });
+    window.addEventListener('touchmove', this._flashlightBoundHandler, { passive: true });
+    window.addEventListener('touchstart', this._flashlightBoundHandler, { passive: true });
+  }
+
+  /**
+   * Actualiza el gradiente radial del overlay de niebla según coordenadas y nivel de batería.
+   */
+  _updateFlashlightOverlay(x, y) {
+    const overlay = document.getElementById('panoFlashlightOverlay');
+    if (!overlay) return;
+
+    const battery = this.flashlightBattery;
+
+    if (battery <= 0) {
+      // Linterna completamente apagada: casi completa oscuridad, tenue punto rojo de emergencia
+      overlay.style.background = `radial-gradient(circle 8px at ${Math.round(x)}px ${Math.round(y)}px, rgba(239, 68, 68, 0.2) 0%, rgba(2, 4, 10, 0.995) 100%)`;
+      return;
+    }
+
+    const maxR = CONFIG.FLASHLIGHT_MAX_RADIUS || 155;
+    const minR = CONFIG.FLASHLIGHT_MIN_RADIUS || 65;
+
+    let r = maxR;
+    if (battery < 20) {
+      // Reserva crítica (< 20%): radio reducido y micro-parpadeo sutil
+      const t = Math.max(0, battery / 20);
+      r = minR + (maxR * 0.65 - minR) * t;
+      if (Math.random() < 0.12) {
+        r *= (0.88 + Math.random() * 0.1);
+      }
+    } else if (battery < 50) {
+      const t = (battery - 20) / 30;
+      r = (maxR * 0.65) + (maxR - maxR * 0.65) * t;
+    }
+
+    r = Math.max(12, Math.round(r));
+    const innerClear = Math.round(r * 0.45);
+    const softEdge = Math.round(r * 0.88);
+
+    overlay.style.background = `radial-gradient(circle ${r}px at ${Math.round(x)}px ${Math.round(y)}px, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.08) ${innerClear}px, rgba(2, 4, 10, 0.9) ${softEdge}px, rgba(2, 4, 10, 0.985) ${r}px, rgba(2, 4, 10, 0.995) 100%)`;
+  }
+
   destroy() {
+    this.setFlashlightMode(false);
     if (this.panorama) {
       try {
         this.panorama.setVisible(false);

@@ -13,7 +13,7 @@
 //   'toast'       {message, kind}
 // ============================================================================
 
-import { CONFIG, damageMultiplier, getNoGuessPenalty } from './config.js?v=1.8.6';
+import { CONFIG, damageMultiplier, getNoGuessPenalty } from './config.js?v=1.8.7';
 import {
   haversineKm,
   scoreForDistance,
@@ -27,7 +27,7 @@ import {
   pickVerifiedRaceRound,
   computeRaceScore,
   clamp,
-} from './utils.js?v=1.8.6';
+} from './utils.js?v=1.8.7';
 
 export class Game {
   constructor({ pano, map, net, audio }) {
@@ -47,6 +47,8 @@ export class Game {
     this.gameMode = 'normal'; // 'normal' | 'static' | 'temporal' | 'tunnel' | 'static_tunnel' | 'blur' | 'static_blur'
     this.zoomMode = false;
     this.blurMode = false;
+    this.flashlightMode = false;
+    this.flashlightBattery = 100;
     this.temporalSeconds = CONFIG.DEFAULT_TEMPORAL_SECONDS || 3;
     this.tunnelSeconds = CONFIG.DEFAULT_TUNNEL_SECONDS || 3;
     this.blurSeconds = CONFIG.DEFAULT_BLUR_SECONDS || 3;
@@ -152,7 +154,7 @@ export class Game {
   /* ------------------------------------------------------------------ */
   /* Inicio de partidas                                                  */
   /* ------------------------------------------------------------------ */
-  startSolo(rounds = CONFIG.SOLO_ROUNDS, gameMode = 'normal', temporalSeconds = CONFIG.DEFAULT_TEMPORAL_SECONDS, tunnelSeconds = CONFIG.DEFAULT_TUNNEL_SECONDS, zoomMode = false, blurSeconds = CONFIG.DEFAULT_BLUR_SECONDS, blurMode = false) {
+  startSolo(rounds = CONFIG.SOLO_ROUNDS, gameMode = 'normal', temporalSeconds = CONFIG.DEFAULT_TEMPORAL_SECONDS, tunnelSeconds = CONFIG.DEFAULT_TUNNEL_SECONDS, zoomMode = false, blurSeconds = CONFIG.DEFAULT_BLUR_SECONDS, blurMode = false, flashlightMode = false) {
     const mode = CONFIG.SOLO_MODES[rounds] || CONFIG.SOLO_MODES[CONFIG.SOLO_ROUNDS];
     this._reset();
     this.mode = 'solo';
@@ -160,6 +162,7 @@ export class Game {
     this.gameMode = gameMode || 'normal';
     this.zoomMode = !!zoomMode || this.gameMode === 'tunnel' || this.gameMode === 'static_tunnel';
     this.blurMode = !!blurMode || this.gameMode === 'blur' || this.gameMode === 'static_blur';
+    this.flashlightMode = !!flashlightMode || this.gameMode === 'flashlight';
     this.temporalSeconds = Number(temporalSeconds) || CONFIG.DEFAULT_TEMPORAL_SECONDS;
     this.tunnelSeconds = Number(tunnelSeconds) || CONFIG.DEFAULT_TUNNEL_SECONDS;
     this.blurSeconds = Number(blurSeconds) || CONFIG.DEFAULT_BLUR_SECONDS;
@@ -180,7 +183,7 @@ export class Game {
   }
 
   /** Host: inicia la partida y envía la semilla/orden a los invitados. */
-  async hostStart(gameMode = 'normal', temporalSeconds = CONFIG.DEFAULT_TEMPORAL_SECONDS, tunnelSeconds = CONFIG.DEFAULT_TUNNEL_SECONDS, zoomMode = false, blurSeconds = CONFIG.DEFAULT_BLUR_SECONDS, blurMode = false, raceDistance = null, raceSeconds = null) {
+  async hostStart(gameMode = 'normal', temporalSeconds = CONFIG.DEFAULT_TEMPORAL_SECONDS, tunnelSeconds = CONFIG.DEFAULT_TUNNEL_SECONDS, zoomMode = false, blurSeconds = CONFIG.DEFAULT_BLUR_SECONDS, blurMode = false, raceDistance = null, raceSeconds = null, flashlightMode = false) {
     this._reset();
     this.mode = 'multi';
     this.role = 'host';
@@ -188,6 +191,7 @@ export class Game {
     this.isRaceMode = (this.gameMode === 'race');
     this.zoomMode = !!zoomMode || this.gameMode === 'tunnel' || this.gameMode === 'static_tunnel';
     this.blurMode = !!blurMode || this.gameMode === 'blur' || this.gameMode === 'static_blur';
+    this.flashlightMode = !!flashlightMode || this.gameMode === 'flashlight';
     this.temporalSeconds = Number(temporalSeconds) || CONFIG.DEFAULT_TEMPORAL_SECONDS;
     this.tunnelSeconds = Number(tunnelSeconds) || CONFIG.DEFAULT_TUNNEL_SECONDS;
     this.blurSeconds = Number(blurSeconds) || CONFIG.DEFAULT_BLUR_SECONDS;
@@ -251,6 +255,7 @@ export class Game {
       raceRoundsData: this.raceRoundsData,
       zoomMode: this.zoomMode,
       blurMode: this.blurMode,
+      flashlightMode: this.flashlightMode,
       temporalSeconds: this.temporalSeconds,
       tunnelSeconds: this.tunnelSeconds,
       blurSeconds: this.blurSeconds,
@@ -279,6 +284,7 @@ export class Game {
     this.raceRoundsData = data.raceRoundsData || [];
     this.zoomMode = !!data.zoomMode || this.gameMode === 'tunnel' || this.gameMode === 'static_tunnel';
     this.blurMode = !!data.blurMode || this.gameMode === 'blur' || this.gameMode === 'static_blur';
+    this.flashlightMode = !!data.flashlightMode || this.gameMode === 'flashlight';
     this.temporalSeconds = Number(data.temporalSeconds) || CONFIG.DEFAULT_TEMPORAL_SECONDS;
     this.tunnelSeconds = Number(data.tunnelSeconds) || CONFIG.DEFAULT_TUNNEL_SECONDS;
     this.blurSeconds = Number(data.blurSeconds) || CONFIG.DEFAULT_BLUR_SECONDS;
@@ -407,6 +413,9 @@ export class Game {
       this.pano.setStatic(false);
       this.pano.setTunnelMode(false);
       this.pano.setBlurMode(false);
+      if (typeof this.pano.setFlashlightMode === 'function') {
+        this.pano.setFlashlightMode(false);
+      }
       if (typeof this.pano.setRaceMode === 'function') {
         this.pano.setRaceMode(false);
       }
@@ -561,12 +570,30 @@ export class Game {
     const isStatic = this.gameMode === 'static' || this.gameMode === 'static_tunnel' || this.gameMode === 'static_blur' || (this.gameMode === 'static' && (this.zoomMode || this.blurMode));
     const isBlur = this.gameMode === 'blur' || this.gameMode === 'static_blur' || this.blurMode;
     const isTunnel = this.gameMode === 'tunnel' || this.gameMode === 'static_tunnel' || this.zoomMode;
+    const isFlashlight = this.gameMode === 'flashlight' || this.flashlightMode;
 
     if (isBlur) {
       this.pano.setBlurMode(true);
     } else if (isTunnel) {
       this.pano.setTunnelMode(true);
     }
+
+    if (isFlashlight) {
+      if (this.pano && typeof this.pano.setFlashlightMode === 'function') {
+        this.pano.setFlashlightMode(true);
+        this.pano.callbacks.onBatteryChange = (percent) => {
+          this.flashlightBattery = percent;
+          this.emit('flashlightBattery', { percent });
+        };
+      }
+      this.emit('flashlightStart', { battery: 100 });
+    } else {
+      if (this.pano && typeof this.pano.setFlashlightMode === 'function') {
+        this.pano.setFlashlightMode(false);
+      }
+      this.emit('flashlightEnd');
+    }
+
     this.pano.setStatic(isStatic || this.gameMode === 'temporal');
     this.map.reset();
 
@@ -623,6 +650,7 @@ export class Game {
         gameMode: this.gameMode,
         zoomMode: this.zoomMode,
         blurMode: this.blurMode,
+        flashlightMode: this.flashlightMode,
         temporalSeconds: this.temporalSeconds,
         tunnelSeconds: this.tunnelSeconds,
         blurSeconds: this.blurSeconds,
@@ -1068,7 +1096,11 @@ export class Game {
       this.pano.setStatic(false);
       this.pano.setTunnelMode(false);
       this.pano.setBlurMode(false);
+      if (typeof this.pano.setFlashlightMode === 'function') {
+        this.pano.setFlashlightMode(false);
+      }
     }
+    this.emit('flashlightEnd');
     this.emit('temporalBlind', { active: false });
 
     // Descontar únicamente el tiempo jugado en la ronda activa (pausa el reloj durante los resultados)
@@ -1080,7 +1112,9 @@ export class Game {
     const { distance, score: baseScore } = this._score(guess);
     let score = baseScore;
     const isBlur = this.gameMode === 'blur' || this.gameMode === 'static_blur' || this.blurMode;
+    const isFlashlight = this.gameMode === 'flashlight' || this.flashlightMode;
     const isPerfect = distance != null && distance <= CONFIG.PERFECT_DISTANCE;
+    let owlBonus = false;
 
     if (isBlur) {
       if (isPerfect) {
@@ -1091,6 +1125,9 @@ export class Game {
       } else {
         this.soloPerfectStreak = 0;
       }
+    } else if (isFlashlight && isPerfect) {
+      score += (CONFIG.FLASHLIGHT_PERFECT_BONUS || 2000);
+      owlBonus = true;
     }
 
     this.scores.me += score;
@@ -1107,6 +1144,8 @@ export class Game {
       myTotalScore: this.scores.me,
       names: { me: this.meName, opp: null },
       isPerfect,
+      owlBonus,
+      flashlightMode: isFlashlight,
       perfectStreak: this.soloPerfectStreak || 0,
       blurPhase: (guess && guess.blurPhase !== undefined) ? guess.blurPhase : 1,
     };
@@ -1742,6 +1781,10 @@ export class Game {
     if (this.pano && this.pano.setBlurMode) {
       this.pano.setBlurMode(false);
     }
+    if (this.pano && typeof this.pano.setFlashlightMode === 'function') {
+      this.pano.setFlashlightMode(false);
+    }
+    this.emit('flashlightEnd');
     if (this._syncTimeout) {
       clearTimeout(this._syncTimeout);
       this._syncTimeout = null;
@@ -1901,6 +1944,7 @@ export class Game {
         this.gameMode = data.gameMode || 'normal';
         this.zoomMode = !!data.zoomMode || this.gameMode === 'tunnel' || this.gameMode === 'static_tunnel';
         this.blurMode = !!data.blurMode || this.gameMode === 'blur' || this.gameMode === 'static_blur';
+        this.flashlightMode = !!data.flashlightMode || this.gameMode === 'flashlight';
         this.temporalSeconds = Number(data.temporalSeconds) || CONFIG.DEFAULT_TEMPORAL_SECONDS;
         this.tunnelSeconds = Number(data.tunnelSeconds) || CONFIG.DEFAULT_TUNNEL_SECONDS;
         this.blurSeconds = Number(data.blurSeconds) || CONFIG.DEFAULT_BLUR_SECONDS;
@@ -1917,12 +1961,30 @@ export class Game {
         const isStatic = this.gameMode === 'static' || this.gameMode === 'static_tunnel' || this.gameMode === 'static_blur' || (this.gameMode === 'static' && (this.zoomMode || this.blurMode));
         const isBlur = this.gameMode === 'blur' || this.gameMode === 'static_blur' || this.blurMode;
         const isTunnel = this.gameMode === 'tunnel' || this.gameMode === 'static_tunnel' || this.zoomMode;
+        const isFlashlight = this.gameMode === 'flashlight' || this.flashlightMode;
 
         if (isBlur) {
           this.pano.setBlurMode(true);
         } else if (isTunnel) {
           this.pano.setTunnelMode(true);
         }
+
+        if (isFlashlight) {
+          if (this.pano && typeof this.pano.setFlashlightMode === 'function') {
+            this.pano.setFlashlightMode(true);
+            this.pano.callbacks.onBatteryChange = (percent) => {
+              this.flashlightBattery = percent;
+              this.emit('flashlightBattery', { percent });
+            };
+          }
+          this.emit('flashlightStart', { battery: 100 });
+        } else {
+          if (this.pano && typeof this.pano.setFlashlightMode === 'function') {
+            this.pano.setFlashlightMode(false);
+          }
+          this.emit('flashlightEnd');
+        }
+
         this.pano.setStatic(isStatic);
 
         if (data.players && Array.isArray(data.players)) {
@@ -2194,6 +2256,9 @@ export class Game {
       let damage = 0;
       let healed = 0;
 
+      const isFlashlight = this.gameMode === 'flashlight' || this.flashlightMode;
+      let owlBonus = false;
+
       if (isBlur) {
         if (isPerfect) {
           // PERFECT en modo borroso: sumarle puntos extra y curación de vida
@@ -2225,6 +2290,23 @@ export class Game {
           p.hp = Math.max(0, p.hp - damage);
           healed = 0;
         }
+      } else if (isFlashlight) {
+        if (p.guess == null) {
+          damage = penalty;
+        } else if (info.score < CONFIG.BASE_SCORE) {
+          const scoreDeficit = (CONFIG.BASE_SCORE - info.score) / CONFIG.BASE_SCORE;
+          damage = Math.round(scoreDeficit * penalty);
+        }
+        damage = Math.round(damage * roundMult);
+        p.hp = clamp(p.hp - damage, 0, CONFIG.MAX_HP);
+
+        if (isPerfect) {
+          owlBonus = true;
+          info.score += (CONFIG.FLASHLIGHT_PERFECT_BONUS || 2000);
+          healed = (CONFIG.FLASHLIGHT_PERFECT_HEAL || 1000);
+          damage = 0;
+          p.hp = p.hp + healed;
+        }
       } else {
         if (p.guess == null) {
           damage = penalty;
@@ -2249,6 +2331,8 @@ export class Game {
         damage,
         healed,
         isPerfect,
+        owlBonus,
+        flashlightMode: isFlashlight,
         perfectStreak: p.perfectStreak || 0,
       };
     });

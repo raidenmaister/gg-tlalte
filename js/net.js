@@ -9,8 +9,8 @@
 //    exactamente igual y sin requerir servidores TURN adicionales ni VPS.
 // ============================================================================
 
-import { CONFIG } from './config.js?v=1.8.6';
-import { generateCode } from './utils.js?v=1.8.6';
+import { CONFIG } from './config.js?v=1.8.7';
+import { generateCode } from './utils.js?v=1.8.7';
 
 const API_URL = 'api.php';
 
@@ -45,6 +45,7 @@ export class Network {
     this.gameMode = 'normal';
     this.zoomMode = false;
     this.blurMode = false;
+    this.flashlightMode = false;
     this.temporalSeconds = CONFIG.DEFAULT_TEMPORAL_SECONDS || 3;
     this.tunnelSeconds = CONFIG.DEFAULT_TUNNEL_SECONDS || 3;
     this.blurSeconds = CONFIG.DEFAULT_BLUR_SECONDS || 3;
@@ -131,6 +132,7 @@ export class Network {
       if (config.gameMode) this.gameMode = config.gameMode;
       if (config.zoomMode !== undefined) this.zoomMode = !!config.zoomMode;
       if (config.blurMode !== undefined) this.blurMode = !!config.blurMode;
+      if (config.flashlightMode !== undefined) this.flashlightMode = !!config.flashlightMode;
       if (config.temporalSeconds) this.temporalSeconds = config.temporalSeconds;
       if (config.tunnelSeconds) this.tunnelSeconds = config.tunnelSeconds;
       if (config.blurSeconds) this.blurSeconds = config.blurSeconds;
@@ -306,6 +308,7 @@ export class Network {
       gameMode: this.gameMode || 'normal',
       zoomMode: this.zoomMode ? 1 : 0,
       blurMode: this.blurMode ? 1 : 0,
+      flashlightMode: this.flashlightMode ? 1 : 0,
       temporalSeconds: this.temporalSeconds || CONFIG.DEFAULT_TEMPORAL_SECONDS,
       tunnelSeconds: this.tunnelSeconds || CONFIG.DEFAULT_TUNNEL_SECONDS,
       blurSeconds: this.blurSeconds || CONFIG.DEFAULT_BLUR_SECONDS,
@@ -651,6 +654,7 @@ export class Network {
     this.gameMode = opts.gameMode || 'normal';
     this.zoomMode = !!opts.zoomMode;
     this.blurMode = !!opts.blurMode;
+    this.flashlightMode = !!opts.flashlightMode || this.gameMode === 'flashlight';
     this.temporalSeconds = Number(opts.temporalSeconds) || CONFIG.DEFAULT_TEMPORAL_SECONDS;
     this.tunnelSeconds = Number(opts.tunnelSeconds) || CONFIG.DEFAULT_TUNNEL_SECONDS;
     this.blurSeconds = Number(opts.blurSeconds) || CONFIG.DEFAULT_BLUR_SECONDS;
@@ -928,6 +932,7 @@ export class Network {
       gameMode: this.gameMode || 'normal',
       zoomMode: this.zoomMode,
       blurMode: this.blurMode,
+      flashlightMode: this.flashlightMode,
       temporalSeconds: this.temporalSeconds || CONFIG.DEFAULT_TEMPORAL_SECONDS,
       tunnelSeconds: this.tunnelSeconds || CONFIG.DEFAULT_TUNNEL_SECONDS,
       blurSeconds: this.blurSeconds || CONFIG.DEFAULT_BLUR_SECONDS,

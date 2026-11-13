@@ -13,7 +13,7 @@
 //   'toast'       {message, kind}
 // ============================================================================
 
-import { CONFIG, damageMultiplier, getNoGuessPenalty } from './config.js?v=1.9';
+import { CONFIG, damageMultiplier, getNoGuessPenalty } from './config.js?v=1.0.0';
 import {
   haversineKm,
   scoreForDistance,
@@ -27,7 +27,9 @@ import {
   pickVerifiedRaceRound,
   computeRaceScore,
   clamp,
-} from './utils.js?v=1.9';
+} from './utils.js?v=1.0.0';
+import { secureApi, identity } from './secure.js?v=1.0.0';
+import { satView } from './satview.js?v=1.0.0';
 
 export class Game {
   constructor({ pano, map, net, audio }) {
@@ -119,6 +121,18 @@ export class Game {
     this._pendingRoundResult = null;
     this._pendingGameOver = null;
     this._forfeitTimer = null;
+
+    // Partidas validadas por el servidor (solitario) y modo «Ojo de Halcón»
+    this.soloToken = null;
+    this.satToken = null;
+    this.satRotation = 0;
+    this._satReveal = null;
+    this._satRevealing = false;
+  }
+
+  /** Modo «Ojo de Halcón»: vista satelital con zoom máximo y sin brújula. */
+  get isSatellite() {
+    return this.gameMode === 'satellite';
   }
 
   /* ------------------------------------------------------------------ */
@@ -154,7 +168,7 @@ export class Game {
   /* ------------------------------------------------------------------ */
   /* Inicio de partidas                                                  */
   /* ------------------------------------------------------------------ */
-  startSolo(rounds = CONFIG.SOLO_ROUNDS, gameMode = 'normal', temporalSeconds = CONFIG.DEFAULT_TEMPORAL_SECONDS, tunnelSeconds = CONFIG.DEFAULT_TUNNEL_SECONDS, zoomMode = false, blurSeconds = CONFIG.DEFAULT_BLUR_SECONDS, blurMode = false, flashlightMode = false) {
+  async startSolo(rounds = CONFIG.SOLO_ROUNDS, gameMode = 'normal', temporalSeconds = CONFIG.DEFAULT_TEMPORAL_SECONDS, tunnelSeconds = CONFIG.DEFAULT_TUNNEL_SECONDS, zoomMode = false, blurSeconds = CONFIG.DEFAULT_BLUR_SECONDS, blurMode = false, flashlightMode = false, opts = {}) {
     const mode = CONFIG.SOLO_MODES[rounds] || CONFIG.SOLO_MODES[CONFIG.SOLO_ROUNDS];
     this._reset();
     this.mode = 'solo';
@@ -169,7 +183,7 @@ export class Game {
     this.soloPerfectStreak = 0;
     this.rounds = mode.rounds;
     let totalSecs = mode.totalSeconds;
-    if (this.zoomMode || this.blurMode) {
+    if (this.zoomMode || this.blurMode || this.gameMode === 'satellite') {
       totalSecs += (CONFIG.SOLO_BONUS_SECONDS_ZOOM_BLUR || 60);
     }
     this.soloTotalSeconds = totalSecs;
@@ -177,8 +191,24 @@ export class Game {
     this.soloStartTime = 0;
     this.soloRoundStartTime = 0;
     this.soloTotalPlayedMs = 0;
-    // Selección aleatoria garantizando al menos 161m entre TODOS los panos de la partida
-    this.locations = pickSeparatedIndices(this.coordenadas, this.rounds, CONFIG.MIN_LOCATION_SEPARATION_KM || 0.161);
+
+    // El servidor elige las ubicaciones (≥161 m entre sí) y las entrega una a una.
+    identity.name = this.meName;
+    const res = await secureApi.soloStart({
+      rounds: this.rounds,
+      gameMode: this.gameMode,
+      tunnelSeconds: this.tunnelSeconds,
+      blurSeconds: this.blurSeconds,
+      daily: !!opts.daily,
+    });
+    if (!res || !res.ok || !res.token) {
+      throw new Error((res && res.error) || 'No se pudo iniciar la partida en el servidor');
+    }
+    this.soloToken = res.token;
+    this.dailyDate = res.daily || null;
+    if (res.tunnelSeconds) this.tunnelSeconds = Number(res.tunnelSeconds);
+    if (res.blurSeconds) this.blurSeconds = Number(res.blurSeconds);
+    this.locations = new Array(this.rounds).fill(-1);
     this._beginRound(1);
   }
 
@@ -237,6 +267,16 @@ export class Game {
         this.raceRoundsData.push(raceRound);
       }
       this.locations = this.raceRoundsData.map((rd) => rd.targetIndex);
+    } else if (this.isSatellite) {
+      // Ojo de Halcón: el servidor guarda las ubicaciones; nadie (ni el anfitrión) las conoce
+      // hasta que la ronda se cierra.
+      identity.name = this.meName;
+      const res = await secureApi.roomSatStart(this.rounds, this.players.map((p) => p.name));
+      if (!res || !res.ok || !res.token) {
+        throw new Error((res && res.error) || 'No se pudo preparar la partida satelital');
+      }
+      this.satToken = res.token;
+      this.locations = new Array(this.rounds).fill(-1);
     } else {
       // Selección aleatoria garantizando al menos 161m entre TODOS los panos de la partida
       this.locations = pickSeparatedIndices(this.coordenadas, this.rounds, CONFIG.MIN_LOCATION_SEPARATION_KM || 0.161);
@@ -259,6 +299,7 @@ export class Game {
       temporalSeconds: this.temporalSeconds,
       tunnelSeconds: this.tunnelSeconds,
       blurSeconds: this.blurSeconds,
+      satToken: this.satToken,
       players: this.players.map((p) => ({ id: p.id, name: p.name })),
     });
 
@@ -290,6 +331,7 @@ export class Game {
     this.blurSeconds = Number(data.blurSeconds) || CONFIG.DEFAULT_BLUR_SECONDS;
     this.rounds = data.rounds || CONFIG.DUEL_ROUNDS;
     this.locations = data.locations || [];
+    this.satToken = data.satToken || null;
     this.players = (data.players || []).map((p) => ({
       id: p.id,
       name: p.name,
@@ -371,6 +413,13 @@ export class Game {
     this._panoReadyPeers = new Set();
     this.currentRound = 0;
     this.locations = [];
+    this.soloToken = null;
+    this.dailyDate = null;
+    this.satToken = null;
+    this._satReveal = null;
+    this._satRevealing = false;
+    this._soloConfirming = false;
+    satView.hide();
     this.myGuess = null;
     this.players = [];
     this.scores = { me: 0 };
@@ -554,6 +603,16 @@ export class Game {
       }
     }
 
+    this._satReveal = null;
+    if (this.mode === 'solo') {
+      this._beginSoloRound(round);
+      return;
+    }
+    if (this.isSatellite) {
+      this._beginSatRoundHost(round);
+      return;
+    }
+
     const idx = this.locations[round - 1];
     const coord = this.coordenadas[idx];
     this.currentCoord = coord;
@@ -676,6 +735,194 @@ export class Game {
         this._triggerSyncStart(round);
       }, 1200);
     }
+  }
+
+  /** Pasos comunes al preparar una ronda (minimapa, color de chincheta, HUD). */
+  _prepRoundCommon() {
+    this.map.reset();
+    if (this.mode === 'solo') {
+      this.map.setMyColor(CONFIG.PLAYER_COLORS[0]);
+    } else {
+      const myIndex = this.players.findIndex((p) => p.id === this.net.myId);
+      this.map.setMyColor(CONFIG.PLAYER_COLORS[myIndex >= 0 ? myIndex % CONFIG.PLAYER_COLORS.length : 0]);
+    }
+    this.map.setInteractive(true);
+    this.emit('waiting', { waiting: false });
+    this.emit('confirm', { enabled: false });
+    this.emit('temporalBlind', { active: false });
+    this.emit('temporalTimer', { seconds: null });
+    this._emitHud();
+  }
+
+  /**
+   * Solitario validado por el servidor: pide la ronda (sólo el pano_id o la imagen satelital,
+   * nunca las coordenadas) y arranca el reloj cuando la vista está lista.
+   */
+  async _beginSoloRound(round) {
+    const token = this.soloToken;
+    const stale = () => this.state !== 'playing' || this.currentRound !== round || this.soloToken !== token || this._over;
+    const isSat = this.isSatellite;
+    this.currentCoord = null;
+    this.pano.setBlind(true, 'Ronda ' + round, isSat ? 'Preparando vista satelital…' : 'Cargando ubicación en alta definición…', true);
+
+    const isStatic = this.gameMode === 'static' || this.gameMode === 'static_tunnel' || this.gameMode === 'static_blur';
+    const isBlur = this.gameMode === 'blur' || this.gameMode === 'static_blur' || this.blurMode;
+    const isTunnel = this.gameMode === 'tunnel' || this.gameMode === 'static_tunnel' || this.zoomMode;
+    const isFlashlight = this.gameMode === 'flashlight' || this.flashlightMode;
+
+    if (typeof this.pano.setFlashlightMode === 'function') this.pano.setFlashlightMode(false);
+    this.emit('flashlightEnd');
+    this._prepRoundCommon();
+
+    const data = await secureApi.soloRound(token, round);
+    if (stale()) return;
+    if (!data || !data.ok) {
+      this.emit('toast', { message: 'Error del servidor: ' + ((data && data.error) || 'sin conexión'), kind: 'error' });
+      this._endSoloGame('error');
+      return;
+    }
+
+    if (isSat) {
+      this.satRotation = Math.floor(Math.random() * 360);
+      try {
+        await satView.load(secureApi.satImageUrl(token, round), this.satRotation);
+      } catch (err) {
+        if (stale()) return;
+        this.emit('toast', { message: (err && err.message) || 'No se pudo cargar la vista satelital', kind: 'error' });
+        this._endSoloGame('error');
+        return;
+      }
+      if (stale()) return;
+      this.pano.setBlind(false);
+      this._startSoloRoundTimer(round);
+      return;
+    }
+
+    satView.hide();
+    this.roundHeading = Math.floor(Math.random() * 360);
+    this.pano.currentCoord = null;
+    this.pano.setPano(data.pano, this.roundHeading, 0, null);
+    if (isBlur) this.pano.setBlurMode(true);
+    else if (isTunnel) this.pano.setTunnelMode(true);
+    if (isFlashlight && typeof this.pano.setFlashlightMode === 'function') {
+      this.pano.setFlashlightMode(true);
+      this.pano.callbacks.onBatteryChange = (percent) => {
+        this.flashlightBattery = percent;
+        this.emit('flashlightBattery', { percent });
+      };
+      this.emit('flashlightStart', { battery: 100 });
+    }
+    this.pano.setStatic(isStatic || this.gameMode === 'temporal');
+
+    this.pano.waitForReady(2500)
+      .catch(() => {})
+      .then(() => {
+        if (stale()) return;
+        this.pano.refresh();
+        this.pano.setBlind(false);
+        this._startSoloRoundTimer(round);
+        if (this.gameMode === 'temporal') {
+          this._startTemporalCountdown(this.temporalSeconds);
+        } else if (isTunnel) {
+          this._startTunnelProgression(this.tunnelSeconds);
+        } else if (isBlur) {
+          this._startBlurProgression(this.blurSeconds);
+        }
+      });
+  }
+
+  /** Anfitrión (Ojo de Halcón): todos cargan la misma imagen servida por el backend. */
+  _beginSatRoundHost(round) {
+    this.currentCoord = null;
+    this.satRotation = Math.floor(Math.random() * 360);
+    this.pano.setBlind(true, 'Ronda ' + round, 'Preparando vista satelital…', true);
+    if (typeof this.pano.setFlashlightMode === 'function') this.pano.setFlashlightMode(false);
+    this.emit('flashlightEnd');
+    this._prepRoundCommon();
+
+    if (this.net && typeof this.net.setAwaitingGuesses === 'function') {
+      this.net.setAwaitingGuesses(true);
+    }
+    this._panoReadyPeers = new Set();
+    if (this._syncTimeout) clearTimeout(this._syncTimeout);
+
+    this.net.broadcast({
+      type: 'roundStart',
+      round,
+      gameMode: 'satellite',
+      satToken: this.satToken,
+      satRotation: this.satRotation,
+      players: this.players.map((p) => ({
+        id: p.id,
+        name: p.name,
+        hp: typeof p.hp === 'number' && !isNaN(p.hp) ? p.hp : CONFIG.MAX_HP,
+        score: p.score || 0,
+        perfectStreak: p.perfectStreak || 0,
+      })),
+    });
+
+    satView.load(secureApi.satImageUrl(this.satToken, round), this.satRotation)
+      .catch((err) => this.emit('toast', { message: (err && err.message) || 'No se pudo cargar la vista satelital', kind: 'error' }))
+      .then(() => {
+        this._panoReadyPeers.add(this.net.myId);
+        this._checkAllPanoReady(round);
+      });
+
+    // La primera carga compone la imagen en el servidor: margen más amplio que en Street View.
+    this._syncTimeout = setTimeout(() => {
+      this._triggerSyncStart(round);
+    }, 7000);
+  }
+
+  /** Anfitrión (Ojo de Halcón): cierra la ronda en el servidor y recibe la ubicación real. */
+  _resolveMultiRound() {
+    if (!this.isSatellite) {
+      this._resolveMultiRoundNow();
+      return;
+    }
+    if (this._resolved || this._satRevealing) return;
+    const round = this.currentRound;
+    if (this._satReveal && this._satReveal.round === round) {
+      this._applySatReveal(this._satReveal);
+      this._resolveMultiRoundNow();
+      return;
+    }
+    this._satRevealing = true;
+    identity.name = this.meName;
+    secureApi.satReveal(this.satToken, round).then((res) => {
+      this._satRevealing = false;
+      if (this.currentRound !== round || this._resolved || this._over) return;
+      if (!res || !res.ok || !res.real) {
+        this.emit('toast', { message: 'No se pudo cerrar la ronda en el servidor: ' + ((res && res.error) || 'sin conexión'), kind: 'error' });
+        this._endGame('error');
+        return;
+      }
+      this._satReveal = res;
+      this._applySatReveal(res);
+      this._resolveMultiRoundNow();
+    });
+  }
+
+  /** Las chinchetas registradas en el servidor mandan sobre las recibidas por P2P. */
+  _applySatReveal(res) {
+    this.currentCoord = { lat: Number(res.real.lat), lng: Number(res.real.lng) };
+    const key = (n) => (n || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const serverGuesses = res.guesses || {};
+    this.players.forEach((p) => {
+      const g = serverGuesses[key(p.name)];
+      if (g && g.lat != null && g.lng != null) {
+        p.guess = { ...(p.guess || {}), lat: Number(g.lat), lng: Number(g.lng) };
+        p.guessed = true;
+      }
+    });
+  }
+
+  /** Solitario: registra el resultado final en el leaderboard (calculado por el servidor). */
+  async finishSoloSession(clientTimeMs) {
+    const token = this._finishedSoloToken;
+    if (!token) return { ok: false, error: 'No hay partida que registrar' };
+    this._finishedSoloToken = null;
+    return secureApi.soloFinish(token, Math.max(0, Math.round(clientTimeMs || 0)));
   }
 
   /** Host: comprueba si todos los jugadores reportaron imagen lista para dar la salida al unísono. */
@@ -1096,12 +1343,15 @@ export class Game {
     this._multiConfirm();
   }
 
-  _soloConfirm() {
-    if (this.state === 'result' || this._over) return;
+  async _soloConfirm() {
+    if (this.state !== 'playing' || this._over || this._soloConfirming) return;
     this._ensureMyGuess();
-    const currentStep = this.currentZoomStep;
-    const currentBlur = this.currentBlurPhase;
-    const guess = this.myGuess ? { ...this.myGuess, zoomStep: currentStep, blurPhase: currentBlur } : null;
+    const round = this.currentRound;
+    const token = this.soloToken;
+    const guess = this.myGuess
+      ? { lat: Number(this.myGuess.lat), lng: Number(this.myGuess.lng), zoomStep: this.currentZoomStep, blurPhase: this.currentBlurPhase }
+      : null;
+    this._soloConfirming = true;
     this._clearTimers();
     this._clearTemporal();
     this._clearTunnelProgression();
@@ -1123,50 +1373,43 @@ export class Game {
     this.soloRemainingSeconds = Math.max(0, this.soloRemainingSeconds - elapsedSec);
     this.soloTotalPlayedMs += Math.round(elapsedSec * 1000);
     this.emit('timer', { seconds: Math.ceil(this.soloRemainingSeconds), danger: false });
+    this.emit('confirm', { enabled: false });
+    this.audio.confirm();
 
-    const { distance, score: baseScore } = this._score(guess);
-    let score = baseScore;
-    const isBlur = this.gameMode === 'blur' || this.gameMode === 'static_blur' || this.blurMode;
-    const isFlashlight = this.gameMode === 'flashlight' || this.flashlightMode;
-    const isPerfect = distance != null && distance <= CONFIG.PERFECT_DISTANCE;
-    let owlBonus = false;
-
-    if (isBlur) {
-      if (isPerfect) {
-        this.soloPerfectStreak = (this.soloPerfectStreak || 0) + 1;
-        const streak = this.soloPerfectStreak;
-        const streakBonus = Math.max(0, streak - 1) * 750;
-        score += streakBonus;
-      } else {
-        this.soloPerfectStreak = 0;
-      }
-    } else if (isFlashlight && isPerfect) {
-      score += (CONFIG.FLASHLIGHT_PERFECT_BONUS || 2000);
-      owlBonus = true;
+    // El servidor calcula distancia, puntos y bonificaciones; el cliente sólo envía la chincheta.
+    const res = await secureApi.soloGuess(token, round, guess);
+    this._soloConfirming = false;
+    if (this.soloToken !== token || this.currentRound !== round || this._over) return;
+    if (!res || !res.ok || !res.real) {
+      this.emit('toast', { message: 'No se pudo validar tu chincheta: ' + ((res && res.error) || 'sin conexión'), kind: 'error' });
+      this._endSoloGame('error');
+      return;
     }
 
-    this.scores.me += score;
+    const isFlashlight = this.gameMode === 'flashlight' || this.flashlightMode;
+    this.scores.me = Number(res.total) || 0;
+    this.soloPerfectStreak = Number(res.perfectStreak) || 0;
+    this.currentCoord = { lat: Number(res.real.lat), lng: Number(res.real.lng) };
 
     const result = {
       mode: 'solo',
       gameMode: this.gameMode,
-      round: this.currentRound,
+      round,
       total: this.rounds,
-      real: { lat: this.currentCoord.lat, lng: this.currentCoord.lng },
+      real: this.currentCoord,
       mine: guess,
-      myScore: score,
-      myDistanceKm: distance,
+      myScore: Number(res.score) || 0,
+      myDistanceKm: res.distanceKm != null ? Number(res.distanceKm) : null,
       myTotalScore: this.scores.me,
       names: { me: this.meName, opp: null },
-      isPerfect,
-      owlBonus,
+      isPerfect: !!res.isPerfect,
+      owlBonus: !!res.owlBonus,
       flashlightMode: isFlashlight,
-      perfectStreak: this.soloPerfectStreak || 0,
-      blurPhase: (guess && guess.blurPhase !== undefined) ? guess.blurPhase : 1,
+      perfectStreak: this.soloPerfectStreak,
+      blurPhase: guess ? guess.blurPhase : 1,
+      overTime: !!res.overTime,
     };
 
-    this.audio.confirm();
-    this.emit('confirm', { enabled: false });
     this.emit('waiting', { waiting: false });
     this.state = 'result';
     this.emit('result', result);
@@ -1182,6 +1425,20 @@ export class Game {
   }
 
   _submitGuess(guess) {
+    if (this.isSatellite && guess && !guess._satLocked && this.satToken) {
+      const round = this.currentRound;
+      this.emit('confirm', { enabled: false });
+      this.emit('waiting', { waiting: true });
+      identity.name = this.meName;
+      secureApi.satGuess(this.satToken, round, guess)
+        .catch(() => null)
+        .then(() => {
+          if (this.currentRound !== round || this._over) return;
+          guess._satLocked = true;
+          this._submitGuess(guess);
+        });
+      return;
+    }
     const currentStep = (guess && guess.zoomStep) ? guess.zoomStep : this.currentZoomStep;
     const currentBlur = (guess && guess.blurPhase !== undefined) ? guess.blurPhase : this.currentBlurPhase;
     const norm = (s) => (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
@@ -1700,14 +1957,17 @@ export class Game {
       mode: 'multi',
       gameMode: this.gameMode,
       temporalSeconds: this.temporalSeconds,
+      satToken: this.satToken,
       players: this.players.map((p) => ({ id: p.id, name: p.name, hp: p.hp, score: p.score })),
     });
 
     // 2. Enviar inmediatamente el roundStart de la ronda actual
     setTimeout(() => {
-      if (!this.currentCoord) return;
+      if (!this.currentCoord && !this.isSatellite) return;
       this.net.sendTo(peerId, {
         type: 'roundStart',
+        satToken: this.satToken,
+        satRotation: this.satRotation,
         round: this.currentRound,
         total: this.rounds,
         locationIndex: this.locations ? this.locations[this.currentRound - 1] : null,
@@ -2010,15 +2270,27 @@ export class Game {
           });
         }
 
-        const coord = (data.locationIndex != null && this.coordenadas && this.coordenadas[data.locationIndex])
-          || data.coord
-          || this.currentCoord;
-        this.currentCoord = coord;
+        let satReady = null;
+        if (this.isSatellite) {
+          // Ojo de Halcón: el invitado sólo recibe un token y la imagen; nunca coordenadas.
+          this.currentCoord = null;
+          if (data.satToken) this.satToken = data.satToken;
+          this.satRotation = Number(data.satRotation) || 0;
+          this.pano.setBlind(true, 'Ronda ' + data.round, 'Preparando vista satelital…', true);
+          satReady = satView.load(secureApi.satImageUrl(this.satToken, data.round), this.satRotation)
+            .catch((err) => this.emit('toast', { message: (err && err.message) || 'No se pudo cargar la vista satelital', kind: 'error' }));
+        } else {
+          satView.hide();
+          const coord = (data.locationIndex != null && this.coordenadas && this.coordenadas[data.locationIndex])
+            || data.coord
+            || this.currentCoord;
+          this.currentCoord = coord;
 
-        // Cortina de carga activa ANTES de emitir HUD para evitar destello de StreetView al colapsar el minimapa
-        this.pano.setBlind(true, 'Ronda ' + data.round, 'Cargando ubicación en alta definición…', true);
-        if (coord) {
-          this.pano.setPano(coord.pano_id, this.roundHeading, 0, coord);
+          // Cortina de carga activa ANTES de emitir HUD para evitar destello de StreetView al colapsar el minimapa
+          this.pano.setBlind(true, 'Ronda ' + data.round, 'Cargando ubicación en alta definición…', true);
+          if (coord) {
+            this.pano.setPano(coord.pano_id, this.roundHeading, 0, coord);
+          }
         }
 
         // Failsafe de seguridad para invitados: si syncStart se pierde o demora por red, nunca quedar con pantalla negra
@@ -2030,7 +2302,7 @@ export class Game {
             this.pano.setBlind(false);
             this._activateRound(data.round);
           }
-        }, 3600);
+        }, this.isSatellite ? 9000 : 3600);
 
         this.pano.setStatic(isStatic || this.gameMode === 'temporal');
         this.map.reset();
@@ -2044,7 +2316,7 @@ export class Game {
         this.emit('temporalTimer', { seconds: null });
         this._emitHud();
 
-        this.pano.waitForReady(2500)
+        (satReady || this.pano.waitForReady(2500))
           .catch(() => {})
           .then(() => {
             if (this.state !== 'playing' || this.currentRound !== data.round) return;
@@ -2137,6 +2409,12 @@ export class Game {
             }
           : null;
 
+        if (this._resolved || this._satRevealing || this.state === 'result') {
+          // La ronda ya se cerró y la ubicación real pudo verse: una chincheta tardía sería trampa.
+          console.warn('GG-TLALTE: Chincheta tardía ignorada (ronda ya resuelta):', p ? p.name : fromPeerId);
+          break;
+        }
+
         if (p && (!p.guessed || p.guess == null)) {
           p.guessed = true;
           p.guess = parsedGuess;
@@ -2152,15 +2430,6 @@ export class Game {
         } else if (!this._resolved && !this._hurryActive) {
           // El primer jugador en adivinar dispara el contador de 15s para los demás con su nombre
           this._startHurry(p ? p.name : 'Un rival');
-        } else if (this._resolved && this.state === 'result' && p && p.guess == null && parsedGuess) {
-          // Rescate de conjetura tardía si llegó durante la pantalla de resultados y el jugador fue penalizado como AFK
-          if (this._lastResolvedAt && (Date.now() - this._lastResolvedAt) < 4000) {
-            console.log('GG-TLALTE: Rescatando conjetura tardía para anular AFK:', p.name);
-            p.guess = parsedGuess;
-            p.guessed = true;
-            this._resolved = false;
-            this._resolveMultiRound();
-          }
         }
         break;
       }
@@ -2222,6 +2491,11 @@ export class Game {
       score = scoreForDistanceBlur(d, guess.blurPhase !== undefined ? guess.blurPhase : 1);
     } else if (isTunnel) {
       score = scoreForDistanceTunnel(d, guess.zoomStep || 1);
+    } else if (this.isSatellite) {
+      // Mismo cálculo que el servidor (api.php · SAT_DECAY_KM)
+      score = d <= CONFIG.PERFECT_DISTANCE
+        ? CONFIG.BASE_SCORE
+        : clamp(Math.floor(CONFIG.BASE_SCORE * Math.exp(-d / (CONFIG.SATELLITE_SCORE_DISTANCE || 3.5))), 0, CONFIG.BASE_SCORE);
     } else {
       score = scoreForDistance(d);
     }
@@ -2231,7 +2505,7 @@ export class Game {
   /* ------------------------------------------------------------------ */
   /* Resolución de ronda (multijugador, host autoritativo)               */
   /* ------------------------------------------------------------------ */
-  _resolveMultiRound() {
+  _resolveMultiRoundNow() {
     if (this._resolved) return;
     this._resolved = true;
     this._lastResolvedAt = Date.now();
@@ -2281,8 +2555,8 @@ export class Game {
           const streakScoreBonus = Math.max(0, streak - 1) * 750;
           info.score += streakScoreBonus;
 
-          // No importa si la vida pasa de 5,000 puntos:
-          p.hp = p.hp + healed;
+          // No importa si la vida se cura, nunca sobrepasar el tope máximo de vida (5,000 HP):
+          p.hp = clamp(p.hp + healed, 0, CONFIG.MAX_HP);
           damage = 0;
         } else {
           // Más allá de los 25m: reinicia racha y resta puntos normalmente
@@ -2312,7 +2586,8 @@ export class Game {
           info.score += (CONFIG.FLASHLIGHT_PERFECT_BONUS || 2000);
           healed = (CONFIG.FLASHLIGHT_PERFECT_HEAL || 1000);
           damage = 0;
-          p.hp = p.hp + healed;
+          // Limitar la vida estrictamente al tope de 5,000 HP para evitar jugadores con 6,000 HP
+          p.hp = clamp(p.hp + healed, 0, CONFIG.MAX_HP);
         }
       } else {
         if (p.guess == null) {
@@ -2507,6 +2782,7 @@ export class Game {
   _endGame(reason) {
     this._over = true;
     this.state = 'gameover';
+    this._hostStarted = false;
     this._clearTimers();
 
     let ranked;
@@ -2546,6 +2822,7 @@ export class Game {
   _onGameOver(neutral) {
     this._over = true;
     this.state = 'gameover';
+    this._hostStarted = false;
     this._clearTimers();
     const result = this._adaptGameOver(neutral);
     if (result.won) this.audio.victory();
@@ -2612,9 +2889,16 @@ export class Game {
     this._beginRound(this.currentRound + 1);
   }
 
-  _endSoloGame() {
+  _endSoloGame(reason = 'done') {
+    if (this._over && this.state === 'gameover') return;
+    const aborted = reason === 'error';
     this._over = true;
     this.state = 'gameover';
+    // Una partida cortada por un error del servidor no se registra en el leaderboard.
+    this._finishedSoloToken = aborted ? null : this.soloToken;
+    this.soloToken = null;
+    this._soloConfirming = false;
+    satView.hide();
     this._clearTimers();
     this._clearTemporal();
     this._clearTunnelProgression();
@@ -2639,8 +2923,10 @@ export class Game {
       names: { me: this.meName, opp: null },
       timeMs: Math.max(0, Math.round(elapsed)),
       timedOut: this.soloTimedOut,
+      aborted,
+      daily: this.dailyDate || null,
     });
-    this.audio.victory();
+    if (!aborted) this.audio.victory();
   }
 
   /** Cancela cualquier partida en curso (salida de sala, etc.). */
@@ -2663,8 +2949,13 @@ export class Game {
     }
     this.state = 'idle';
     this._over = false;
+    this._hostStarted = false;
     this.mode = 'solo';
     this.role = 'solo';
+    this.soloToken = null;
+    this.satToken = null;
+    this._soloConfirming = false;
+    satView.hide();
   }
 
   /** Restaura manualmente la vista panorámica si el jugador sufre pantalla negra. */
@@ -2674,7 +2965,9 @@ export class Game {
       clearTimeout(this._guestBlindFailsafe);
       this._guestBlindFailsafe = null;
     }
-    if (this.pano) {
+    if (this.isSatellite) {
+      satView.show();
+    } else if (this.pano) {
       this.pano.recover(this.currentCoord);
     }
     if (this.state === 'playing') {

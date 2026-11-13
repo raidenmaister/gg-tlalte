@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <meta name="referrer" content="same-origin">
+    <title>GG-TLALTE · Panel de administración</title>
+    <link rel="icon" href="icons/favicon-32.png">
+    <style>
+        :root {
+            --bg: #0b0d16; --panel: #141828; --panel-2: #1b2033; --border: rgba(255,255,255,.09); --border-2: rgba(255,255,255,.16);
+            --text: #eef0f6; --muted: #98a0b8; --accent: #e94560; --blue: #38bdf8; --green: #34d399; --amber: #fbbf24; --red: #f87171;
+            --font: 'Segoe UI', Inter, system-ui, -apple-system, sans-serif;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 15px; min-height: 100%; }
+        button, input, select, textarea { font: inherit; color: inherit; }
+        button { cursor: pointer; border: none; background: none; }
+        .hidden { display: none !important; }
+        a { color: var(--blue); }
+
+        /* Login */
+        .login-wrap { min-height: 100vh; display: grid; place-items: center; padding: 16px; }
+        .login-card { width: 100%; max-width: 380px; background: var(--panel); border: 1px solid var(--border-2); border-radius: 16px; padding: 28px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+        .login-card h1 { font-size: 1.3rem; text-align: center; }
+        .login-card p { color: var(--muted); font-size: .85rem; text-align: center; }
+        .brand { color: var(--accent); font-weight: 900; letter-spacing: .1em; text-align: center; font-size: .8rem; }
+
+        input, select, textarea { width: 100%; padding: 10px 12px; border-radius: 10px; background: #0c0f1b; border: 1px solid var(--border-2); outline: none; }
+        input:focus, select:focus, textarea:focus { border-color: var(--blue); }
+        textarea { min-height: 80px; resize: vertical; }
+        label { font-size: .8rem; color: var(--muted); display: block; margin-bottom: 4px; }
+
+        .btn { padding: 9px 14px; border-radius: 10px; border: 1px solid var(--border-2); background: var(--panel-2); font-weight: 600; font-size: .88rem; transition: background .15s, border-color .15s; white-space: nowrap; }
+        .btn:hover { border-color: var(--blue); }
+        .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+        .btn-primary:hover { filter: brightness(1.1); border-color: var(--accent); }
+        .btn-danger { color: var(--red); border-color: rgba(248,113,113,.5); }
+        .btn-danger:hover { background: rgba(248,113,113,.12); border-color: var(--red); }
+        .btn-sm { padding: 5px 9px; font-size: .78rem; border-radius: 8px; }
+        .btn:disabled { opacity: .5; cursor: not-allowed; }
+
+        /* Layout */
+        .app { display: grid; grid-template-columns: 230px 1fr; min-height: 100vh; }
+        .side { background: var(--panel); border-right: 1px solid var(--border); padding: 18px 12px; display: flex; flex-direction: column; gap: 4px; position: sticky; top: 0; height: 100vh; }
+        .side .brand { text-align: left; padding: 0 10px 14px; }
+        .nav-btn { text-align: left; padding: 10px 12px; border-radius: 10px; color: var(--muted); font-weight: 600; display: flex; gap: 10px; align-items: center; }
+        .nav-btn:hover { background: var(--panel-2); color: var(--text); }
+        .nav-btn.active { background: rgba(233,69,96,.15); color: #fff; box-shadow: inset 3px 0 0 var(--accent); }
+        .side-foot { margin-top: auto; display: flex; flex-direction: column; gap: 6px; padding: 10px; font-size: .78rem; color: var(--muted); }
+        main { padding: 24px clamp(14px, 3vw, 36px); min-width: 0; }
+        .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
+        .topbar h2 { font-size: 1.35rem; }
+        .menu-toggle { display: none; }
+
+        .card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 16px; margin-bottom: 16px; }
+        .card h3 { font-size: 1rem; margin-bottom: 12px; }
+        .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+        .kpi { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; }
+        .kpi .v { font-size: 1.6rem; font-weight: 800; margin-top: 4px; }
+        .kpi .l { font-size: .78rem; color: var(--muted); }
+        .kpi .s { font-size: .75rem; color: var(--muted); margin-top: 2px; }
+        .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; }
+        .row > * { flex: 1 1 160px; }
+        .row > .btn { flex: 0 0 auto; }
+
+        .table-wrap { overflow-x: auto; border-radius: 10px; border: 1px solid var(--border); }
+        table { width: 100%; border-collapse: collapse; font-size: .86rem; }
+        th, td { padding: 9px 10px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: middle; }
+        th { background: var(--panel-2); color: var(--muted); font-weight: 600; font-size: .76rem; text-transform: uppercase; letter-spacing: .04em; position: sticky; top: 0; }
+        tr:hover td { background: rgba(255,255,255,.02); }
+        td.num { text-align: right; font-variant-numeric: tabular-nums; }
+        .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+        .tag { display: inline-block; padding: 2px 7px; border-radius: 7px; font-size: .72rem; font-weight: 700; background: rgba(255,255,255,.08); }
+        .tag-red { background: rgba(248,113,113,.18); color: #fecaca; }
+        .tag-green { background: rgba(52,211,153,.16); color: #a7f3d0; }
+        .tag-amber { background: rgba(251,191,36,.18); color: #fde68a; }
+        .tag-blue { background: rgba(56,189,248,.16); color: #bae6fd; }
+        .muted { color: var(--muted); }
+        .empty { color: var(--muted); padding: 18px; text-align: center; }
+        .log { font-family: Consolas, 'Courier New', monospace; font-size: .78rem; background: #0a0c16; border: 1px solid var(--border); border-radius: 10px; padding: 10px; max-height: 420px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+        .switch { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; }
+        .switch input { width: auto; }
+
+        /* Modal */
+        .modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: grid; place-items: center; padding: 16px; z-index: 50; }
+        .modal-box { width: 100%; max-width: 900px; max-height: 90vh; overflow: auto; background: var(--panel); border: 1px solid var(--border-2); border-radius: 16px; padding: 20px; }
+        .modal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; gap: 10px; }
+        .code-box { font-family: Consolas, monospace; font-size: 1.3rem; font-weight: 800; letter-spacing: .12em; color: var(--amber); background: #0a0c16; border: 1px dashed var(--amber); padding: 10px; border-radius: 10px; text-align: center; user-select: all; }
+
+        #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(20px); opacity: 0; background: var(--panel-2); border: 1px solid var(--border-2); padding: 10px 16px; border-radius: 10px; transition: all .25s; z-index: 99; max-width: 90vw; }
+        #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+        #toast.error { border-color: var(--red); color: #fecaca; }
+        #toast.success { border-color: var(--green); color: #a7f3d0; }
+
+        @media (max-width: 860px) {
+            .app { grid-template-columns: 1fr; }
+            .side { position: fixed; left: 0; top: 0; z-index: 40; width: 250px; transform: translateX(-100%); transition: transform .2s; }
+            .side.open { transform: none; box-shadow: 20px 0 60px rgba(0,0,0,.6); }
+            .menu-toggle { display: inline-flex; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Inicio de sesión -->
+    <div class="login-wrap" id="loginView">
+        <form class="login-card" id="loginForm" autocomplete="on">
+            <div class="brand">GG-TLALTE</div>
+            <h1>Panel de administración</h1>
+            <p>Acceso restringido. Los intentos fallidos se registran.</p>
+            <div><label for="lUser">Usuario</label><input id="lUser" autocomplete="username" required></div>
+            <div><label for="lPass">Contraseña</label><input id="lPass" type="password" autocomplete="current-password" required></div>
+            <button class="btn btn-primary" type="submit" id="lBtn">Entrar</button>
+            <a href="./" class="muted" style="text-align:center;font-size:.8rem">← Volver al juego</a>
+        </form>
+    </div>
+
+    <!-- Panel -->
+    <div class="app hidden" id="appView">
+        <aside class="side" id="side">
+            <div class="brand">GG-TLALTE · ADMIN</div>
+            <button class="nav-btn active" data-tab="dashboard">📊 Resumen</button>
+            <button class="nav-btn" data-tab="users">👥 Jugadores</button>
+            <button class="nav-btn" data-tab="leaderboards">🏆 Leaderboards</button>
+            <button class="nav-btn" data-tab="daily">📅 Reto diario</button>
+            <button class="nav-btn" data-tab="rooms">🏠 Salas</button>
+            <button class="nav-btn" data-tab="sessions">🎮 Partidas</button>
+            <button class="nav-btn" data-tab="settings">📣 Avisos y mantenimiento</button>
+            <button class="nav-btn" data-tab="logs">📜 Registros</button>
+            <button class="nav-btn" data-tab="security">🔐 Seguridad y respaldo</button>
+            <div class="side-foot">
+                <span>Sesión: <strong id="whoami">—</strong></span>
+                <button class="btn btn-sm" id="logoutBtn">Cerrar sesión</button>
+                <a href="./" target="_blank" rel="noopener">Abrir el juego ↗</a>
+            </div>
+        </aside>
+        <main>
+            <div class="topbar">
+                <div style="display:flex;gap:10px;align-items:center">
+                    <button class="btn menu-toggle" id="menuToggle" aria-label="Menú">☰</button>
+                    <h2 id="tabTitle">Resumen</h2>
+                </div>
+                <button class="btn" id="refreshBtn">↻ Actualizar</button>
+            </div>
+
+            <!-- Resumen -->
+            <section data-pane="dashboard">
+                <div class="grid" id="kpis"></div>
+                <div class="card" style="margin-top:16px">
+                    <h3>Estado del sitio</h3>
+                    <div id="siteState" class="muted">Cargando…</div>
+                </div>
+            </section>
+
+            <!-- Jugadores -->
+            <section data-pane="users" class="hidden">
+                <div class="card">
+                    <div class="row">
+                        <div><label>Buscar</label><input id="uSearch" placeholder="Nombre del jugador"></div>
+                        <div><label>Filtro</label><select id="uFilter"><option value="all">Todos</option><option value="banned">Suspendidos</option><option value="nopass">Sin contraseña</option></select></div>
+                        <div><label>Orden</label><select id="uSort"><option value="seen">Última vez visto</option><option value="games">Más partidas</option><option value="created">Más nuevos</option><option value="name">Nombre</option></select></div>
+                        <button class="btn btn-primary" id="uSearchBtn">Buscar</button>
+                    </div>
+                </div>
+                <p class="muted" id="uCount" style="margin-bottom:8px"></p>
+                <div class="table-wrap"><table>
+                    <thead><tr><th>Jugador</th><th>Estado</th><th class="num">Partidas</th><th>Dispositivos</th><th>Registrado</th><th>Visto</th><th></th></tr></thead>
+                    <tbody id="uBody"></tbody>
+                </table></div>
+            </section>
+
+            <!-- Leaderboards -->
+            <section data-pane="leaderboards" class="hidden">
+                <div class="card">
+                    <div class="row">
+                        <div><label>Modo</label><select id="lbMode"></select></div>
+                        <div><label>Rondas</label><select id="lbRounds"><option>5</option><option>7</option><option>10</option><option>15</option></select></div>
+                        <button class="btn btn-primary" id="lbLoad">Ver</button>
+                        <button class="btn btn-danger" id="lbReset">Reiniciar esta categoría</button>
+                        <button class="btn btn-danger" id="lbResetAll">Reiniciar TODO</button>
+                    </div>
+                </div>
+                <div class="table-wrap"><table>
+                    <thead><tr><th>#</th><th>Jugador</th><th class="num">Puntaje</th><th class="num">Puntos</th><th class="num">Tiempo</th><th class="num">Partidas</th><th>Fecha</th><th></th></tr></thead>
+                    <tbody id="lbBody"></tbody>
+                </table></div>
+            </section>
+
+            <!-- Reto diario -->
+            <section data-pane="daily" class="hidden">
+                <div class="card">
+                    <h3>Próximos 7 días</h3>
+                    <div class="table-wrap"><table>
+                        <thead><tr><th>Fecha</th><th>Modo</th><th>Cambiar modo</th></tr></thead>
+                        <tbody id="dUpcoming"></tbody>
+                    </table></div>
+                </div>
+                <div class="card">
+                    <h3>Retos jugados</h3>
+                    <div class="table-wrap"><table>
+                        <thead><tr><th>Fecha</th><th>Modo</th><th class="num">Empezaron</th><th class="num">Terminaron</th><th>1.er lugar</th><th></th></tr></thead>
+                        <tbody id="dDays"></tbody>
+                    </table></div>
+                </div>
+                <div class="card hidden" id="dDetailCard">
+                    <h3 id="dDetailTitle">Detalle</h3>
+                    <div class="table-wrap"><table>
+                        <thead><tr><th>#</th><th>Jugador</th><th class="num">Puntaje</th><th class="num">Puntos</th><th class="num">Tiempo</th><th class="num">Perfects</th><th></th></tr></thead>
+                        <tbody id="dDetailBody"></tbody>
+                    </table></div>
+                    <p class="muted" id="dUnfinished" style="margin-top:10px"></p>
+                </div>
+            </section>
+
+            <!-- Salas -->
+            <section data-pane="rooms" class="hidden">
+                <div class="table-wrap"><table>
+                    <thead><tr><th>Sala</th><th>Anfitrión</th><th>Modo</th><th>Estado</th><th class="num">Jugadores</th><th>Tipo</th><th>Actividad</th><th></th></tr></thead>
+                    <tbody id="rBody"></tbody>
+                </table></div>
+            </section>
+
+            <!-- Partidas -->
+            <section data-pane="sessions" class="hidden">
+                <div class="card"><label class="switch"><input type="checkbox" id="sOnlySus"> Mostrar sólo partidas con señales sospechosas (perfects en menos de 5 s)</label></div>
+                <div class="table-wrap"><table>
+                    <thead><tr><th>Inicio</th><th>Tipo</th><th>Jugador</th><th>Modo</th><th class="num">Ronda</th><th class="num">Puntos</th><th>Estado</th><th>Señales</th><th>IP</th></tr></thead>
+                    <tbody id="sBody"></tbody>
+                </table></div>
+            </section>
+
+            <!-- Ajustes -->
+            <section data-pane="settings" class="hidden">
+                <div class="card">
+                    <h3>📣 Aviso en el menú principal</h3>
+                    <label for="annText">Texto (vacío = sin aviso). Lo ven todos los jugadores al abrir el menú.</label>
+                    <textarea id="annText" maxlength="300" placeholder="Ej.: ¡Este sábado torneo de Ojo de Halcón a las 8 pm!"></textarea>
+                    <div style="margin-top:10px"><button class="btn btn-primary" id="annSave">Guardar aviso</button></div>
+                </div>
+                <div class="card">
+                    <h3>🛠️ Modo mantenimiento</h3>
+                    <p class="muted" style="margin-bottom:10px">Mientras esté activo nadie puede empezar partidas nuevas ni crear salas (las que están en curso continúan).</p>
+                    <label class="switch" style="margin-bottom:10px"><input type="checkbox" id="mntOn"> Activar mantenimiento</label>
+                    <label for="mntMsg">Mensaje para los jugadores</label>
+                    <input id="mntMsg" maxlength="300">
+                    <div style="margin-top:10px"><button class="btn btn-primary" id="mntSave">Guardar</button></div>
+                </div>
+            </section>
+
+            <!-- Registros -->
+            <section data-pane="logs" class="hidden">
+                <div class="card"><h3>🛡️ Seguridad (inicios de sesión fallidos, partidas marcadas)</h3><div class="log" id="logSecurity"></div></div>
+                <div class="card"><h3>📝 Acciones del panel (auditoría)</h3><div class="log" id="logAudit"></div></div>
+                <div class="card"><h3>🛰️ Errores de imagen satelital</h3><div class="log" id="logSat"></div></div>
+            </section>
+
+            <!-- Seguridad -->
+            <section data-pane="security" class="hidden">
+                <div class="card">
+                    <h3>🔑 Cambiar usuario y contraseña del panel</h3>
+                    <div class="row">
+                        <div><label>Contraseña actual</label><input type="password" id="pwCur" autocomplete="current-password"></div>
+                        <div><label>Nuevo usuario</label><input id="pwUser" autocomplete="username"></div>
+                        <div><label>Nueva contraseña (mín. 10)</label><input type="password" id="pwNew" autocomplete="new-password"></div>
+                        <button class="btn btn-primary" id="pwSave">Guardar</button>
+                    </div>
+                </div>
+                <div class="card">
+                    <h3>💾 Respaldo</h3>
+                    <p class="muted" style="margin-bottom:10px">Descarga un archivo JSON con jugadores (sin contraseñas), leaderboards, retos diarios y ajustes.</p>
+                    <button class="btn" id="exportBtn">Descargar respaldo</button>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Ficha de jugador -->
+    <div class="modal hidden" id="userModal">
+        <div class="modal-box">
+            <div class="modal-head"><h3 id="umTitle">Jugador</h3><button class="btn btn-sm" id="umClose">✕ Cerrar</button></div>
+            <div id="umBody"></div>
+        </div>
+    </div>
+
+    <div id="toast"></div>
+    <script src="js/admin.js?v=1.0.0"></script>
+</body>
+</html>

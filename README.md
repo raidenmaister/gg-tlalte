@@ -1,8 +1,26 @@
-# GG-TLALTE · GeoGuessr P2P (BETA v1.8.8)
+# GG-TLALTE · GeoGuessr P2P (v1.0.0)
 
 Juego de adivinar ubicaciones con panorámicas 360° de Google Maps Street View, inspirado en GeoGuessr y ambientado en Tlaltenango de Sánchez Román, Zacatecas. Incluye modo solitario con leaderboard global por modos y partidas multijugador en duelo 1v1 y hasta 25 jugadores simultáneos.
 
 ## Características Principales
+
+- **Versión 1.0.0 (lanzamiento oficial, fuera de beta)**:
+  - **📅 Reto diario**: 10 imágenes iguales para todos, con un modo distinto cada día; un intento por jugador y clasificación por día (hora de Tlaltenango).
+  - **👤 Perfil del jugador**: estadísticas, mejores marcas por modo e historial de partidas (solitario, reto diario y multijugador). Los perfiles son públicos desde el leaderboard.
+  - **🔐 Cuenta en varios dispositivos**: contraseña opcional y código de recuperación de un solo uso para entrar desde otro celular o PC.
+  - **📲 App instalable (PWA)**: manifiesto, íconos y service worker (`sw.js`); botón «Instalar app» en el menú. Requiere HTTPS en el hosting.
+  - **🛠️ Panel de administración** (`administracion.html` + `admin-api.php`): inicio de sesión con contraseña cifrada (bcrypt), sesión con CSRF y límite de intentos. Gestiona jugadores, leaderboards, retos diarios, salas, partidas sospechosas, avisos, modo mantenimiento, registros y respaldos. Las credenciales iniciales se generan en `config/admin.php` (sólo el hash; no se sube a GitHub).
+  - **Ojo de Halcón 60/40**: 60% de las imágenes dentro de la ciudad (≤ 2 km del centro) y 40% fuera.
+
+- **Nuevo modo «🛰️ Ojo de Halcón» (v2.1.0, Solitario y Multijugador)**:
+  - Una foto satelital con zoom máximo cubre toda la pantalla, girada a un ángulo aleatorio y sin brújula. El jugador abre el minimapa y pone la chincheta donde cree que está el centro de la imagen; al final el minimapa a pantalla completa revela cuánto acertó cada uno.
+  - La imagen la compone el servidor (`api.php`, proxy de teselas con GD): las coordenadas nunca llegan al navegador antes de fijar la chincheta. En multijugador sólo el anfitrión puede cerrar la ronda y, al hacerlo, pierde su turno si aún no había adivinado.
+  - Leaderboard propio y +1 minuto de tiempo en solitario.
+  - Banco pre-generado (`satpool/`, bloqueado) con más de 1,600 vistas de **todo el municipio**: cabecera, rancherías, caminos rurales, campo y sierra. Se regenera con `satpool-puntos.mjs` (reparte puntos con datos de OpenStreetMap) y `generar_satpool.php build K N` / `merge` (herramientas locales que no se suben al hosting).
+- **Seguridad y anti-trampas (v2.1.0)**:
+  - Partidas en solitario validadas por el servidor: el servidor elige las ubicaciones, entrega una ronda a la vez (sólo el `pano_id`), calcula distancia, puntos, bonificaciones y tiempo. El endpoint antiguo `save-score` quedó deshabilitado.
+  - Cada nombre está protegido por una clave secreta generada en el dispositivo (`localStorage`), límites de peticiones por IP, detección de patrones automatizados (perfects en < 5 s) y rondas imposiblemente rápidas valen 0.
+  - Datos persistentes en `data/` (bloqueado por `.htaccess`) con escrituras atómicas y bloqueo exclusivo (`flock`) para no perder puntajes por concurrencia.
 
 - **Sistema Anti-Empalme y Anti-Colisión Dinámico en Minimapa (Smart Leader Lines)**:
   - Al terminar la ronda o partida a pantalla completa, las chinchetas físicas de los jugadores y la «📍 Ubicación real» se mantienen en sus coordenadas reales exactas mientras que las etiquetas informativas (nombres, daño y puntos) se desacoplan dinámicamente en estantes verticales no superpuestos.
@@ -47,7 +65,7 @@ Juego de adivinar ubicaciones con panorámicas 360° de Google Maps Street View,
 - **Leaderboard Global por Categorías y Modos**:
   - Clasificación en tiempo real filtrable por modo de juego (Normal, Zoom, Borroso, Estático, Temporal) y número de rondas (5, 7, 10 y 15).
 - **Historial Completo de Versiones**:
-  - Modal interactivo accesible desde el menú principal con el registro detallado de novedades, fechas de lanzamiento y correcciones desde la versión inicial v1.0.0 hasta la v1.8.8.
+  - Modal interactivo accesible desde el menú principal con el registro detallado de novedades, fechas de lanzamiento y correcciones desde la primera BETA hasta el lanzamiento oficial v1.0.0.
 - **Backend PHP Ultraligero y Eficiente**:
   - Optimizado para hostings compartidos con límites estrictos de E/S: reducción del 95% de escrituras a disco durante partidas activas, persistencia local en JSON sin necesidad de MySQL.
 
@@ -57,18 +75,29 @@ Juego de adivinar ubicaciones con panorámicas 360° de Google Maps Street View,
 gg-tlalte/
 ├── index.html               # Estructura HTML, modales, HUD y vistas
 ├── style.css                # Estilos, diseño responsivo y efectos visuales
-├── api.php                  # Backend PHP (salas, leaderboard, relay P2P y optimización E/S)
+├── api.php                  # Backend PHP (salas, sesiones seguras, cuentas, perfil, reto diario, leaderboard, relay P2P)
+├── admin-api.php            # API del panel de administración (requiere inicio de sesión)
+├── administracion.html      # Panel de administración
+├── manifest.webmanifest     # App instalable (PWA)
+├── sw.js                    # Service worker
+├── icons/                   # Íconos de la app
+├── config/                  # (bloqueado) credenciales del panel: sólo hash, fuera de git
+├── data/                    # (sólo servidor, bloqueado) usuarios, leaderboard, sesiones e imágenes satelitales
 ├── version.json             # Control de versiones del cliente
 ├── coordenadas_validas.json # Banco de ubicaciones 360° validadas en Tlaltenango
 └── js/
     ├── app.js               # Orquestador principal, eventos de UI, chat y menús
-    ├── ascii-earth.js       # Fondo animado de la Tierra en ASCII
+    ├── menu-pano.js         # Fondo panorámico 360° ambiental de Tlaltenango con rotación y transiciones
     ├── audio.js             # Efectos de sonido y sintetizador procedural (Web Audio API)
     ├── config.js            # Constantes, servidores STUN/TURN y configuración
     ├── game.js              # Máquina de estados del juego (solo y multi, duelos y rondas)
     ├── minimap.js           # Minimapa interactivo con Leaflet y capas satelitales
     ├── net.js               # Capa de red híbrida WebRTC / PeerJS / HTTP relay
     ├── panorama.js          # Visor Street View, gestión de zoom y blur progresivo
+    ├── satview.js           # Visor satelital del modo «Ojo de Halcón»
+    ├── secure.js            # Identidad del jugador (clave del dispositivo) y API de partidas validadas
+    ├── features.js          # Reto diario, perfil, inicio de sesión en otros dispositivos e instalación
+    ├── admin.js             # Lógica del panel de administración
     └── utils.js             # Cálculos geodésicos (Haversine) y fórmulas de puntaje
 ```
 

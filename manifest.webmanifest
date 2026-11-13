@@ -1,0 +1,21 @@
+{
+  "name": "GG-TLALTE · Adivina el lugar",
+  "short_name": "GG-TLALTE",
+  "description": "Adivina en qué parte de Tlaltenango de Sánchez Román fue tomada cada imagen. Solitario, multijugador, reto diario y modo satelital.",
+  "lang": "es-MX",
+  "start_url": "./index.html?app=1",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0a0a14",
+  "theme_color": "#0a0a14",
+  "categories": ["games", "entertainment"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Reto diario", "short_name": "Reto", "url": "./index.html?app=1#reto", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

@@ -2,8 +2,8 @@
 // minimap.js — Minimapa interactivo Leaflet para adivinar y revelar.
 // ============================================================================
 
-import { CONFIG } from './config.js?v=1.9';
-import { greatCirclePoints } from './utils.js?v=1.9';
+import { CONFIG } from './config.js?v=1.0.0';
+import { greatCirclePoints } from './utils.js?v=1.0.0';
 
 const MARKER = {
   real: { color: '#f59e0b', size: 42, label: '📍 Ubicación real' },
@@ -72,7 +72,7 @@ function createPlayerLabelElement({ name, color, damage }) {
     : '';
 
   el.innerHTML = `
-    <span class="gg-player-pin__name">${escapeHtml(name)}</span>
+    <span class="gg-player-pin__name" title="${escapeHtml(name)}">${escapeHtml(name)}</span>
     ${dmgBadge}
   `;
   return el;
@@ -84,7 +84,7 @@ function makeRealPin({ lat, lng, color, size, label }) {
   const labelH = 24;
   const icon = L.divIcon({
     className: 'gg-player-pin gg-real-pin',
-    html: `<div class="gg-player-pin__label gg-real-pin__label">${escapeHtml(label)}</div>
+    html: `<div class="gg-player-pin__label gg-real-pin__label" title="${escapeHtml(label)}">${escapeHtml(label)}</div>
       <div class="gg-pin__pin" style="--pin-color:${color}; width:${size}px; height:${size}px;"></div>`,
     iconSize: [size, tipY + labelH],
     iconAnchor: [size / 2, tipY + labelH],
@@ -106,7 +106,7 @@ function makePlayerPin({ lat, lng, color, size, label, damage }) {
   const icon = L.divIcon({
     className: 'gg-player-pin',
     html: `<div class="gg-player-pin__label" style="--pin-color:${color}; border-color:${color}; color:${color};">
-        <span class="gg-player-pin__name">${escapeHtml(label)}</span>
+        <span class="gg-player-pin__name" title="${escapeHtml(label)}">${escapeHtml(label)}</span>
         ${dmgBadge}
       </div>
       <div class="gg-pin__pin" style="--pin-color:${color}; width:${size}px; height:${size}px;"></div>`,
@@ -169,10 +169,11 @@ export class Minimap {
       throw new Error('Leaflet no está disponible. Revisa la carga del CDN.');
     }
     const el = document.getElementById(this.containerId);
-    // Bounding box de Tlaltenango y alrededores para evitar que el mapa se aleje o se pierda
+    // Todo el municipio de Tlaltenango (límite OSM 21.63–21.92 N, 103.43–103.07 O) con margen,
+    // para que en Ojo de Halcón se pueda poner la chincheta en cualquier rincón del municipio.
     const TLALTE_BOUNDS = L.latLngBounds(
-      [21.65, -103.45], // Sur-Oeste
-      [21.90, -103.15]  // Nor-Este
+      [21.58, -103.49], // Sur-Oeste
+      [21.97, -103.01]  // Nor-Este
     );
 
     this.map = L.map(el, {
@@ -181,7 +182,7 @@ export class Minimap {
       zoomControl: true,
       attributionControl: true,
       worldCopyJump: false,
-      minZoom: 12,
+      minZoom: 11,
       maxZoom: 19,
       maxBounds: TLALTE_BOUNDS,
       maxBoundsViscosity: 0.85,
@@ -354,9 +355,46 @@ export class Minimap {
     }
   }
 
+  /** Cambia la capa visible sin tocar la preferencia guardada del jugador. */
+  _showLayer(type) {
+    if (!this.map || !this.streetLayer || !this.satelliteLayer) return;
+    if (type === this.currentLayerType) return;
+    if (type === 'satellite') {
+      this.map.removeLayer(this.streetLayer);
+      this.satelliteLayer.addTo(this.map);
+    } else {
+      this.map.removeLayer(this.satelliteLayer);
+      this.streetLayer.addTo(this.map);
+    }
+    this.currentLayerType = type;
+    if (this.revealLayer && this.map.hasLayer(this.revealLayer)) this.revealLayer.bringToFront();
+    if (this.raceLayer && this.map.hasLayer(this.raceLayer)) this.raceLayer.bringToFront();
+  }
+
+  /**
+   * Ojo de Halcón: el minimapa queda fijo en la capa de calles (comparar con la capa
+   * satelital sería trampa). Al salir del modo se restaura la preferencia del jugador.
+   */
+  setSatelliteLocked(locked) {
+    locked = !!locked;
+    if (locked === !!this.satelliteLocked) return;
+    this.satelliteLocked = locked;
+    if (locked) {
+      this._showLayer('streets');
+    } else {
+      let saved = 'streets';
+      try {
+        saved = localStorage.getItem('gg_map_layer') || 'streets';
+      } catch (e) {}
+      this._showLayer(saved === 'satellite' ? 'satellite' : 'streets');
+    }
+    if (typeof this.onLayerChange === 'function') this.onLayerChange();
+  }
+
   /** Conmuta entre capa estándar (OpenStreetMap) y capa satelital (Google Hybrid). */
   toggleLayer() {
     if (!this.map || !this.streetLayer || !this.satelliteLayer) return this.currentLayerType;
+    if (this.satelliteLocked) return this.currentLayerType;
     if (this.currentLayerType === 'streets') {
       this.map.removeLayer(this.streetLayer);
       this.satelliteLayer.addTo(this.map);

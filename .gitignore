@@ -27,3 +27,13 @@ package-lock.json
 LOG.txt
 .DS_Store
 Thumbs.db
+
+# Datos persistentes del servidor
+data/
+.claude/
+generar_satpool.php
+satpool/
+satpool-puntos.mjs
+satpool-candidatos.json
+config/admin.php
+ADMIN-CREDENCIALES.txt

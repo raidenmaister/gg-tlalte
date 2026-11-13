@@ -2,8 +2,8 @@
 // panorama.js — Visor panorámico 360° (Google Street View) + brújula.
 // ============================================================================
 
-import { CONFIG } from './config.js?v=1.9';
-import { detectPotatoMode } from './utils.js?v=1.9';
+import { CONFIG } from './config.js?v=1.0.0';
+import { detectPotatoMode } from './utils.js?v=1.0.0';
 
 let mapsPromise = null;
 
@@ -73,7 +73,7 @@ export function loadGoogleMaps() {
     const script = document.createElement('script');
     script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(
       key
-    )}&v=weekly&loading=async&callback=${cbName}`;
+    )}&v=weekly&loading=async&libraries=streetView&callback=${cbName}`;
     script.async = true;
     script.onerror = () => {
       delete window[cbName];
@@ -186,6 +186,16 @@ export class PanoramaViewer {
       if (this.callbacks.onStatusChange) this.callbacks.onStatusChange(this.status);
     });
 
+    this.panorama.addListener('zoom_changed', () => {
+      if (this.isFlashlight) {
+        try {
+          if (this.panorama.getZoom() !== 0) {
+            this.panorama.setZoom(0);
+          }
+        } catch (e) {}
+      }
+    });
+
     // Recuperación ante pérdida de contexto WebGL
     el.addEventListener('webglcontextlost', (e) => {
       e.preventDefault();
@@ -196,7 +206,7 @@ export class PanoramaViewer {
 
     // Evitar cualquier scroll por rueda o gestos en la ventana o contenedor
     el.addEventListener('wheel', (e) => {
-      if (this.isTunnel || this.isStatic || this.isBlur) {
+      if (this.isTunnel || this.isStatic || this.isBlur || this.isFlashlight) {
         e.preventDefault();
       }
     }, { passive: false });
@@ -279,7 +289,7 @@ export class PanoramaViewer {
       }
 
       const zoomKeys = ['+', '-', '=', '_', 'PageUp', 'PageDown'];
-      if ((this.isTunnel || this.isBlur || this.isStatic) && (zoomKeys.includes(e.key) || zoomKeys.includes(e.code))) {
+      if ((this.isTunnel || this.isBlur || this.isStatic || this.isFlashlight) && (zoomKeys.includes(e.key) || zoomKeys.includes(e.code))) {
         e.preventDefault();
         e.stopPropagation();
       }
@@ -453,6 +463,11 @@ export class PanoramaViewer {
     this.refresh();
     this.panorama.setPano(panoId);
     this.panorama.setPov({ heading, pitch });
+    if (this.isFlashlight) {
+      try {
+        this.panorama.setZoom(0);
+      } catch (e) {}
+    }
   }
 
   /**
@@ -572,7 +587,7 @@ export class PanoramaViewer {
     if (this.panorama) {
       this.panorama.setOptions({
         clickToGo: false,
-        scrollwheel: false,
+        scrollwheel: !this.isStatic && !this.isTunnel && !this.isBlur && !this.isFlashlight,
         disableDoubleClickZoom: !!enabled,
         gestureHandling: enabled ? 'none' : (this.isTunnel ? 'greedy' : 'greedy'),
       });
@@ -641,7 +656,7 @@ export class PanoramaViewer {
     } else {
       this.panorama.setOptions({
         clickToGo: false,
-        scrollwheel: !this.isStatic,
+        scrollwheel: !this.isStatic && !this.isTunnel && !this.isBlur && !this.isFlashlight,
         disableDoubleClickZoom: !!this.isStatic,
         gestureHandling: this.isStatic ? 'none' : 'greedy',
       });
@@ -691,7 +706,7 @@ export class PanoramaViewer {
       this.setBlurLevel(0);
       this.panorama.setOptions({
         clickToGo: false,
-        scrollwheel: !this.isStatic,
+        scrollwheel: !this.isStatic && !this.isTunnel && !this.isBlur && !this.isFlashlight,
         disableDoubleClickZoom: !!this.isStatic,
         gestureHandling: this.isStatic ? 'none' : 'greedy',
       });
@@ -819,7 +834,31 @@ export class PanoramaViewer {
       }
       this.flashlightBattery = 100;
       this.flashlightPos = null;
+      if (this.panorama && !this.isTunnel && !this.isBlur) {
+        this.panorama.setOptions({
+          clickToGo: false,
+          scrollwheel: !this.isStatic && !this.isTunnel && !this.isBlur && !this.isFlashlight,
+          disableDoubleClickZoom: !!this.isStatic,
+          gestureHandling: this.isStatic ? 'none' : 'greedy',
+        });
+        try {
+          this.panorama.setZoom(0);
+        } catch (e) {}
+      }
       return;
+    }
+
+    // Bloquear completamente el zoom en modo linterna táctica
+    if (this.panorama) {
+      this.panorama.setOptions({
+        clickToGo: false,
+        scrollwheel: false,
+        disableDoubleClickZoom: true,
+        gestureHandling: this.isStatic ? 'none' : 'greedy',
+      });
+      try {
+        this.panorama.setZoom(0);
+      } catch (e) {}
     }
 
     // Inicializar linterna al 100% de batería
@@ -883,7 +922,7 @@ export class PanoramaViewer {
 
       // Si no quitas la luz de un punto (distancia <= 1.5px), la batería NO se consume
       if (dist > 1.5 && this.flashlightBattery > 0) {
-        const drainPerPx = CONFIG.FLASHLIGHT_DRAIN_PER_PX || 0.0025;
+        const drainPerPx = CONFIG.FLASHLIGHT_DRAIN_PER_PX || 0.00416667;
         const drain = dist * drainPerPx;
         this.flashlightBattery = Math.max(0, this.flashlightBattery - drain);
         this.flashlightPos = { x: clientX, y: clientY };
@@ -918,6 +957,15 @@ export class PanoramaViewer {
     this._isFlashlightActive = !!active;
     this._hasMovedOnce = false;
     if (this.isFlashlight) {
+      if (this.panorama) {
+        this.panorama.setOptions({
+          scrollwheel: false,
+          disableDoubleClickZoom: true,
+        });
+        try {
+          this.panorama.setZoom(0);
+        } catch (e) {}
+      }
       const overlay = document.getElementById('panoFlashlightOverlay');
       if (overlay) overlay.classList.remove('hidden');
       if (!this.flashlightPos) {
@@ -947,8 +995,8 @@ export class PanoramaViewer {
       return;
     }
 
-    const maxR = CONFIG.FLASHLIGHT_MAX_RADIUS || 155;
-    const minR = CONFIG.FLASHLIGHT_MIN_RADIUS || 65;
+    const maxR = CONFIG.FLASHLIGHT_MAX_RADIUS || 131;
+    const minR = CONFIG.FLASHLIGHT_MIN_RADIUS || 55;
 
     let r = maxR;
     if (battery < 20) {
@@ -964,9 +1012,9 @@ export class PanoramaViewer {
       r = (maxR * 0.65) + (maxR - maxR * 0.65) * t;
     }
 
-    // Mientras battery > 0, garantizar siempre una pizca de luz visible y nítida (mínimo 50px de radio)
-    r = Math.max(50, Math.round(r));
-    const innerClear = Math.max(20, Math.round(r * 0.50));
+    // Mientras battery > 0, garantizar siempre una pizca de luz visible y nítida (mínimo 43px de radio)
+    r = Math.max(43, Math.round(r));
+    const innerClear = Math.max(18, Math.round(r * 0.50));
     const softEdge = Math.max(innerClear + 10, Math.round(r * 0.85));
 
     // Oscuridad absoluta (#000000 100% negro opaco) en toda la pantalla:

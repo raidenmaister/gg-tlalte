@@ -4,7 +4,7 @@
 
 export const CONFIG = {
   // Versión oficial de la aplicación visible en menús
-  VERSION: 'BETA v1.9',
+  VERSION: 'v1.0.0',
 
   // Fallback opcional de API Key (cliente). La key real se define en
   // js/keys.js (window.GG_GOOGLE_MAPS_API_KEY), que se mantiene local y NO se
@@ -12,7 +12,7 @@ export const CONFIG = {
   GOOGLE_API_KEY: '',
 
   // Archivo con las ubicaciones jugables ({lat,lng,pano_id,date}).
-  COORDINATES_URL: 'coordenadas_validas.json',
+  COORDINATES_URL: 'coordenadas_validas.json?v=1.0.0',
 
   // Prefijo para los IDs de PeerJS (evita colisiones en el cloud público).
   PEER_PREFIX: 'ggtlalte-v1-',
@@ -46,6 +46,7 @@ export const CONFIG = {
   MAX_HP: 5000,             // Vida inicial de cada jugador.
   BASE_SCORE: 5000,         // Puntos máximos por ronda.
   SCORE_DISTANCE: 1.2,      // Constante de decaimiento para escala urbana/local (km).
+  SATELLITE_SCORE_DISTANCE: 3.5, // Ojo de Halcón abarca todo el municipio (~37 km): escala más amplia.
   PERFECT_DISTANCE: 0.025,  // Distancia (km) considerada "perfecta" (25 m).
   MIN_LOCATION_SEPARATION_KM: 0.161, // Distancia mínima (km) entre TODOS los panos de la partida (161 m).
 
@@ -120,9 +121,9 @@ export const CONFIG = {
   RACE_HURRY_COUNTDOWN: 30,      // Segundos de prisa cuando el primer jugador cruza la meta
 
   // Submodo Linterna Táctica (Niebla Nocturna 360°)
-  FLASHLIGHT_MAX_RADIUS: 155,       // Radio máximo del haz en px (con batería alta)
-  FLASHLIGHT_MIN_RADIUS: 65,        // Radio mínimo del haz en px antes de apagarse
-  FLASHLIGHT_DRAIN_PER_PX: 0.0025,  // Consumo por pixel de movimiento (~40,000 px para 100% de batería, fluido y táctico)
+  FLASHLIGHT_MAX_RADIUS: 131,       // Radio máximo del haz en px (+10%: 131 px)
+  FLASHLIGHT_MIN_RADIUS: 55,        // Radio mínimo del haz en px antes de apagarse (+10%: 55 px)
+  FLASHLIGHT_DRAIN_PER_PX: 0.00416667, // Consumo por pixel de movimiento (calibrado para durar 25% menos: ~24,000 px para 100% de batería)
   FLASHLIGHT_PERFECT_BONUS: 2000,   // Puntos extra por Perfect (<= 25m) con Linterna ("Búho Nocturno")
   FLASHLIGHT_PERFECT_HEAL: 1000,    // Curación HP extra en duelos con Linterna ("Búho Nocturno")
 

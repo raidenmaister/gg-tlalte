@@ -2,34 +2,68 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="theme-color" content="#0a0a14">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>GG-TLALTE · GeoGuessr P2P</title>
+    <meta name="description" content="Adivina en qué parte de Tlaltenango de Sánchez Román fue tomada cada imagen. Solitario, multijugador, reto diario y modo satelital.">
+    <!-- App instalable (PWA) -->
+    <link rel="manifest" href="manifest.webmanifest">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="GG-TLALTE">
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230a0a14'/%3E%3Ctext x='32' y='45' font-family='Arial, sans-serif' font-size='38' font-weight='bold' fill='%23e94560' text-anchor='middle'%3EG%3C/text%3E%3C/svg%3E">
+
+    <!-- Preconexión DNS y TLS anticipada para acelerar la carga de mapas y dependencias -->
+    <link rel="preconnect" href="https://maps.googleapis.com">
+    <link rel="preconnect" href="https://maps.gstatic.com" crossorigin>
+    <link rel="preconnect" href="https://streetviewpixels-pa.googleapis.com" crossorigin>
+    <link rel="preconnect" href="https://unpkg.com">
+    <link rel="dns-prefetch" href="https://maps.googleapis.com">
+    <link rel="dns-prefetch" href="https://maps.gstatic.com">
+    <link rel="dns-prefetch" href="https://streetviewpixels-pa.googleapis.com">
+    <link rel="dns-prefetch" href="https://unpkg.com">
 
     <!-- Leaflet (minimapa) -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-    <link rel="stylesheet" href="style.css?v=1.9">
+    <link rel="stylesheet" href="style.css?v=1.0.0">
 </head>
 <body>
 
-    <!-- Fondo orbital ASCII -->
-    <div id="ascii-earth" class="hidden"></div>
+    <!-- Fondo panorámico 360° ambiental -->
+    <div id="menu-pano-bg" class="menu-pano-bg"></div>
 
     <!-- Badge de versión (menús) -->
-    <div id="versionBadge" class="version-badge" title="Ver historial de versiones">BETA v1.9</div>
+    <div id="versionBadge" class="version-badge" title="Ver historial de versiones">v1.0.0</div>
 
     <!-- ====================== PANTALLA: NOMBRE ====================== -->
     <div id="screen-name" class="screen">
         <div class="card name-card">
             <div class="logo-mini">GG-TLALTE</div>
             <h2>Bienvenido</h2>
-            <p>Introduce tu nombre de jugador</p>
-            <input type="text" id="playerNameInput" maxlength="20" placeholder="Tu nombre" autocomplete="off">
-            <button class="btn-primary" id="saveNameBtn">Entrar</button>
+            <div class="auth-tabs" id="authTabs">
+                <button type="button" class="auth-tab active" data-tab="new">Soy nuevo</button>
+                <button type="button" class="auth-tab" data-tab="login">Ya tengo cuenta</button>
+            </div>
+            <div class="auth-pane" id="authNew">
+                <p>Elige tu nombre de jugador</p>
+                <input type="text" id="playerNameInput" maxlength="20" placeholder="Tu nombre" autocomplete="off">
+                <button class="btn-primary" id="saveNameBtn">Entrar</button>
+            </div>
+            <div class="auth-pane hidden" id="authLogin">
+                <p>Entra desde otro celular o PC con tu contraseña o tu código de recuperación (los configuras en <strong>Mi perfil</strong>).</p>
+                <input type="text" id="loginNameInput" maxlength="20" placeholder="Tu nombre de jugador" autocomplete="username">
+                <div class="auth-method" id="loginMethod">
+                    <button type="button" class="auth-method-btn active" data-method="password">🔑 Contraseña</button>
+                    <button type="button" class="auth-method-btn" data-method="code">🧾 Código de recuperación</button>
+                </div>
+                <input type="password" id="loginSecretInput" maxlength="72" placeholder="Contraseña" autocomplete="current-password">
+                <button class="btn-primary" id="loginBtn">Iniciar sesión</button>
+            </div>
         </div>
     </div>
 
@@ -38,6 +72,9 @@
         <div class="menu">
             <h1 class="title">GG-TLALTE</h1>
             <p class="greeting">Bienvenido, <span id="menuPlayerName"></span>. Elige un modo:</p>
+
+            <!-- Aviso del administrador -->
+            <div id="menuAnnouncement" class="announce-banner hidden"></div>
 
             <!-- Banner de actualización disponible -->
             <div id="menuUpdateBanner" class="update-banner hidden">
@@ -52,7 +89,12 @@
                 <button class="mode-card" id="soloBtn">
                     <span class="icon">▶</span>
                     <h2>Jugar en solitario</h2>
-                    <p>Elige entre 5, 7, 10 o 15 rondas · 5000 pts por ronda.</p>
+                    <p>5, 7, 10 o 15 rondas · ¡Nuevo modo 🛰️ Ojo de Halcón!</p>
+                </button>
+                <button class="mode-card mode-card-daily" id="dailyBtn">
+                    <span class="icon">📅</span>
+                    <h2>Reto diario</h2>
+                    <p id="dailyCardText">10 imágenes iguales para todos · un intento al día.</p>
                 </button>
                 <button class="mode-card" id="createBtn">
                     <span class="icon">＋</span>
@@ -69,10 +111,15 @@
                     <h2>Leaderboard</h2>
                     <p>Los mejores puntajes en solitario.</p>
                 </button>
+                <button class="mode-card" id="profileBtn">
+                    <span class="icon">👤</span>
+                    <h2>Mi perfil</h2>
+                    <p>Historial, estadísticas y acceso desde otros dispositivos.</p>
+                </button>
             </div>
             <div class="menu-bottom-row">
-                <button class="btn-sound" id="soundBtn" title="Activar/desactivar sonido">🔊</button>
                 <button type="button" class="btn-changelog" id="changelogBtn" title="Historial de versiones y novedades">📜 Historial de versiones</button>
+                <button type="button" class="btn-changelog btn-install hidden" id="installBtn" title="Instalar GG-TLALTE como app">📲 Instalar app</button>
             </div>
         </div>
     </div>
@@ -89,6 +136,7 @@
                     <button type="button" class="mode-tab active" data-mode="normal">🎮 Normal</button>
                     <button type="button" class="mode-tab" data-mode="static">🛑 Estático</button>
                     <button type="button" class="mode-tab" data-mode="temporal">⏱️ Temporal</button>
+                    <button type="button" class="mode-tab mode-tab-new" data-mode="satellite">🛰️ Ojo de Halcón</button>
                 </div>
 
                 <!-- Sub-variante para Modo Normal (Solitario) -->
@@ -179,6 +227,72 @@
         </div>
     </div>
 
+    <!-- ====================== PANTALLA: RETO DIARIO ====================== -->
+    <div id="screen-daily" class="screen hidden">
+        <div class="card daily-card">
+            <h2>📅 Reto diario</h2>
+            <p class="daily-date" id="dailyDateText">Cargando…</p>
+            <div class="daily-mode">
+                <span class="daily-mode-label">Modo de hoy</span>
+                <span class="daily-mode-name" id="dailyModeName">—</span>
+                <p class="mode-desc" id="dailyModeDesc"></p>
+                <div class="daily-facts">
+                    <span>🖼️ 10 imágenes</span>
+                    <span id="dailyTimeText">⏱️ —</span>
+                    <span id="dailyPlayersText">👥 0 jugadores</span>
+                </div>
+            </div>
+            <div id="dailyMine" class="daily-mine hidden"></div>
+            <div class="card-actions">
+                <button class="btn-primary btn-action" id="dailyPlayBtn" disabled>▶️ Jugar reto de hoy</button>
+            </div>
+            <p class="daily-next" id="dailyNextText"></p>
+            <div class="daily-lb-head">
+                <h3>Clasificación del día</h3>
+                <select id="dailyDateSelect" class="daily-date-select" aria-label="Elegir día"></select>
+            </div>
+            <div class="lb-list" id="dailyList"></div>
+            <p class="empty-hint hidden" id="dailyEmpty">Nadie ha completado este reto todavía.</p>
+            <button class="btn-ghost" id="dailyBackBtn">Volver</button>
+        </div>
+    </div>
+
+    <!-- ====================== PANTALLA: PERFIL ====================== -->
+    <div id="screen-profile" class="screen hidden">
+        <div class="card profile-card">
+            <div class="profile-head">
+                <div class="profile-avatar" id="profileAvatar">?</div>
+                <div class="profile-head-text">
+                    <h2 id="profileName">Perfil</h2>
+                    <p id="profileSince"></p>
+                </div>
+            </div>
+            <div class="profile-stats" id="profileStats"></div>
+            <h3 class="profile-section-title">🏅 Mejores marcas</h3>
+            <div class="profile-best" id="profileBest"></div>
+            <h3 class="profile-section-title">🕑 Historial de partidas</h3>
+            <div class="profile-history" id="profileHistory"></div>
+
+            <div id="profileAccount" class="profile-account hidden">
+                <h3 class="profile-section-title">🔐 Acceso desde otros dispositivos</h3>
+                <p class="profile-account-info" id="profileAccountInfo"></p>
+                <div class="account-row">
+                    <input type="password" id="profilePwInput" maxlength="72" placeholder="Nueva contraseña (mínimo 6)" autocomplete="new-password">
+                    <button type="button" class="btn-primary" id="profilePwBtn">Guardar contraseña</button>
+                </div>
+                <div class="account-row">
+                    <button type="button" class="btn-ghost" id="profileCodeBtn">🧾 Generar código de recuperación</button>
+                </div>
+                <div id="profileCodeBox" class="recovery-box hidden"></div>
+                <div class="account-row">
+                    <button type="button" class="btn-ghost" id="profileLogoutOthersBtn">Cerrar sesión en otros dispositivos</button>
+                    <button type="button" class="btn-ghost btn-danger" id="profileLogoutBtn">Cerrar sesión aquí</button>
+                </div>
+            </div>
+            <button class="btn-ghost" id="profileBackBtn">Volver</button>
+        </div>
+    </div>
+
     <!-- ====================== PANTALLA: LEADERBOARD ====================== -->
     <div id="screen-leaderboard" class="screen hidden">
         <div class="card leaderboard-card">
@@ -190,7 +304,9 @@
                 <button type="button" class="lb-mode-tab" data-mode="static">🛑 Estático</button>
                 <button type="button" class="lb-mode-tab" data-mode="static_tunnel">🔍 Estático (Zoom)</button>
                 <button type="button" class="lb-mode-tab" data-mode="static_blur">🌫️ Estático (Borroso)</button>
+                <button type="button" class="lb-mode-tab" data-mode="flashlight">🔦 Linterna</button>
                 <button type="button" class="lb-mode-tab" data-mode="temporal">⏱️ Temporal</button>
+                <button type="button" class="lb-mode-tab" data-mode="satellite">🛰️ Ojo de Halcón</button>
             </div>
             <div class="lb-tabs" id="lbRoundsTabs">
                 <button type="button" class="lb-tab active" data-rounds="5">5 rondas</button>
@@ -200,6 +316,7 @@
             </div>
             <div class="lb-list" id="leaderboardList"></div>
             <p class="empty-hint hidden" id="leaderboardEmpty">Aún no hay puntajes en esta categoría.</p>
+            <p class="lb-note">🛡️ Puntajes calculados y validados en el servidor. Se muestra la mejor marca de cada jugador.</p>
             <button class="btn-ghost" id="leaderboardBackBtn">Volver</button>
         </div>
     </div>
@@ -225,6 +342,7 @@
                     <button type="button" class="mode-tab active" data-mode="normal">🎮 Normal</button>
                     <button type="button" class="mode-tab" data-mode="static">🛑 Estático</button>
                     <button type="button" class="mode-tab" data-mode="temporal">⏱️ Temporal</button>
+                    <button type="button" class="mode-tab mode-tab-new" data-mode="satellite">🛰️ Ojo de Halcón</button>
                 </div>
 
                 <!-- Sub-variante para Modo Normal (Multi) -->
@@ -444,6 +562,8 @@
         <div id="panoStaticOverlay" class="pano-static-overlay hidden"></div>
         <!-- Capa de niebla nocturna y haz de luz para Linterna Táctica -->
         <div id="panoFlashlightOverlay" class="pano-flashlight-overlay hidden"></div>
+        <!-- Vista satelital del modo «Ojo de Halcón» (imagen compuesta por el servidor) -->
+        <div id="satView" class="sat-view hidden"></div>
         <!-- Cortina visual para sincronización anti-trampas y modo temporal -->
         <div class="pano-blind hidden" id="panoBlind">
             <div class="blind-content">
@@ -604,6 +724,7 @@
             <div class="panel">
                 <h2 class="panel-title" id="resultTitle"></h2>
                 <div class="result-stats" id="resultStats"></div>
+                <div class="result-solo-chip hidden" id="resultSoloChip"></div>
                 <button class="btn-primary hidden" id="resultNextBtn">Siguiente ronda →</button>
                 <p class="panel-note hidden" id="resultNote"></p>
             </div>
@@ -627,11 +748,227 @@
                 <button type="button" class="btn-close-modal" id="changelogCloseBtn" aria-label="Cerrar">✕</button>
             </div>
             <div class="changelog-list" id="changelogList">
+                <!-- GRUPO: VERSIONES 2.x -->
+                <details class="changelog-group" open>
+                    <summary class="changelog-group-title">🎉 Versión 1.0 · Lanzamiento oficial</summary>
+
+                    <!-- v1.0.0 -->
+                    <div class="changelog-entry current">
+                        <div class="changelog-title-row">
+                            <span class="changelog-version">v1.0.0 <span class="changelog-date">· 12 nov 2026</span></span>
+                            <span class="changelog-badge badge-current">Actual</span>
+                        </div>
+                        <ul class="changelog-list-items">
+                            <li><strong>¡Adiós BETA! Primera versión oficial:</strong> Después de más de 50 versiones de prueba, GG-TLALTE sale de beta con la numeración 1.0.0.</li>
+                            <li><strong>📅 Reto diario:</strong> Cada día, 10 imágenes iguales para todos los jugadores en un modo distinto (Normal, Ojo de Halcón, Estático, Borroso, Temporal, Linterna, Zoom…). Un solo intento por día, clasificación propia de cada día y cuenta regresiva para el siguiente reto.</li>
+                            <li><strong>👤 Perfil del jugador:</strong> Estadísticas (partidas, promedio por ronda, perfects, distancia media, racha de retos diarios, modo favorito), mejores marcas por modo e historial de partidas en solitario, reto diario y multijugador. Toca cualquier nombre del leaderboard para ver su perfil.</li>
+                            <li><strong>🔐 Tu cuenta en cualquier dispositivo:</strong> Configura una contraseña o genera un código de recuperación en tu perfil y entra con «Ya tengo cuenta» desde otro celular o PC. También puedes cerrar sesión en los demás dispositivos.</li>
+                            <li><strong>📲 Instalar como app:</strong> Botón «Instalar app» en el menú para agregar GG-TLALTE a la pantalla de inicio del celular, con ícono propio y pantalla completa.</li>
+                            <li><strong>🛰️ Ojo de Halcón más justo:</strong> Ahora el 60% de las imágenes de cada partida son de la ciudad y el 40% de fuera (rancherías, caminos, campo y sierra).</li>
+                            <li><strong>Resultado de cada ronda visible:</strong> En solitario, al confirmar se muestran la distancia, los puntos de la ronda, el total y las insignias (Perfect, Búho Nocturno, racha).</li>
+                            <li><strong>Celular en horizontal y detalles:</strong> El minimapa abierto ya no tapa casi toda la imagen, la etiqueta de versión ya no se encima con el chat de la sala y tu propia fila del leaderboard se resalta con la etiqueta «TÚ».</li>
+                            <li><strong>Multijugador sin trampa de «conjetura tardía»:</strong> En todos los modos, una chincheta que llega después de que la ronda se cerró (y de que ya se vio la ubicación real) se ignora. Los paquetes que vienen en camino siguen teniendo 3.5 s de tolerancia antes del cierre.</li>
+                            <li><strong>Panel de administración:</strong> Herramienta privada con inicio de sesión para gestionar jugadores (suspender, restablecer acceso, borrar), leaderboards, retos diarios, salas, sesiones sospechosas, avisos y modo mantenimiento, registros de seguridad y respaldos.</li>
+                        </ul>
+                    </div>
+                </details>
+
+                <!-- GRUPO: VERSIONES BETA 2.x -->
+                <details class="changelog-group">
+                    <summary class="changelog-group-title">🧪 Versiones BETA 2.x (v2.0.0 – v2.1.4)</summary>
+
+                    <!-- BETA v2.1.4 -->
+                    <div class="changelog-entry">
+                        <div class="changelog-title-row">
+                            <span class="changelog-version">BETA v2.1.4 <span class="changelog-date">· 12 nov 2026</span></span>
+                        </div>
+                        <ul class="changelog-list-items">
+                            <li><strong>Botón «CONFIRMAR GUESS» visible en celulares y tablets:</strong> En pantallas angostas el botón quedaba cortado o completamente fuera de la pantalla al abrir el minimapa. Ahora va debajo del minimapa, a todo su ancho, y respeta el borde inferior de los iPhone.</li>
+                        </ul>
+                    </div>
+
+                    <!-- BETA v2.1.3 -->
+                    <div class="changelog-entry">
+                        <div class="changelog-title-row">
+                            <span class="changelog-version">BETA v2.1.3 <span class="changelog-date">· 12 nov 2026</span></span>
+                        </div>
+                        <ul class="changelog-list-items">
+                            <li><strong>Ojo de Halcón sin capa satelital en el minimapa:</strong> Durante este modo el minimapa queda fijo en el mapa de calles y se oculta el botón 🛰️, porque comparar la foto con la vista satelital sería trampa. Al volver a los otros modos se recupera tu capa preferida.</li>
+                        </ul>
+                    </div>
+
+                    <!-- BETA v2.1.2 -->
+                    <div class="changelog-entry">
+                        <div class="changelog-title-row">
+                            <span class="changelog-version">BETA v2.1.2 <span class="changelog-date">· 12 nov 2026</span></span>
+                        </div>
+                        <ul class="changelog-list-items">
+                            <li><strong>Ojo de Halcón en todo el municipio:</strong> El banco pasa de 165 a más de 1,600 vistas satelitales repartidas por todo el municipio de Tlaltenango (límite oficial de OpenStreetMap): la cabecera, más de 70 rancherías y localidades, caminos y carreteras rurales, campo, sierra y barrancas. Cada partida mezcla los tipos de terreno.</li>
+                            <li><strong>Puntuación a escala municipal:</strong> En Ojo de Halcón los puntos bajan de forma más gradual con la distancia, porque el área de juego ahora mide unos 37 km.</li>
+                            <li><strong>Minimapa ampliado:</strong> Ahora cubre todo el municipio y permite alejarse un nivel más para poner la chincheta en cualquier rincón.</li>
+                        </ul>
+                    </div>
+
+                    <!-- BETA v2.1.1 -->
+                    <div class="changelog-entry">
+                        <div class="changelog-title-row">
+                            <span class="changelog-version">BETA v2.1.1 <span class="changelog-date">· 12 nov 2026</span></span>
+                        </div>
+                        <ul class="changelog-list-items">
+                            <li><strong>Ojo de Halcón reparado en el hosting:</strong> La vista satelital ya no falla al iniciar. Las imágenes ahora vienen de un banco pre-generado y protegido en el servidor (con nombres aleatorios que no revelan la ubicación), así que cargan al instante y no dependen de descargas externas. Si una imagen falla, se reintenta automáticamente y se muestra el motivo exacto.</li>
+                            <li><strong>Partidas fallidas fuera del leaderboard:</strong> Una partida cortada por un error del servidor se muestra como «Partida cancelada» y ya no se registra con 0 puntos.</li>
+                        </ul>
+                    </div>
+
+                    <!-- BETA v2.1.0 -->
+                    <div class="changelog-entry">
+                        <div class="changelog-title-row">
+                            <span class="changelog-version">BETA v2.1.0 <span class="changelog-date">· 12 nov 2026</span></span>
+                        </div>
+                        <ul class="changelog-list-items">
+                            <li><strong>Nuevo modo «🛰️ Ojo de Halcón» (Solitario y Multijugador):</strong> Una foto satelital con zoom máximo cubre toda la pantalla, girada a un ángulo aleatorio y sin brújula. Abre el minimapa, pon la chincheta donde creas que está el centro de la imagen y descubre en el mapa a pantalla completa cuánto acertaste (o quién acertó más en la sala). Tiene su propia pestaña en el leaderboard y +1 minuto de tiempo en solitario.</li>
+                            <li><strong>Leaderboard reiniciado a 0 y reparado:</strong> Todas las clasificaciones empiezan de cero. Se corrigió la pérdida de puntajes cuando dos partidas terminaban a la vez (escrituras con bloqueo), el leaderboard ya no reescribe datos al consultarse, se añadió la pestaña de 🔦 Linterna (sus partidas no se mostraban) y al terminar verás tu puntaje, tu posición y si es nuevo récord.</li>
+                            <li><strong>Seguridad reforzada (anti-trampas):</strong> El servidor elige las ubicaciones, entrega una ronda a la vez, calcula la distancia, los puntos y el tiempo; el navegador ya no puede enviar un puntaje inventado. En Ojo de Halcón las coordenadas nunca llegan al navegador antes de fijar la chincheta. Cada nombre queda protegido con una clave secreta del dispositivo, hay límites de peticiones por IP, detección de patrones automatizados y los datos del servidor ya no son descargables.</li>
+                            <li><strong>Historial de versiones con scroll:</strong> Se corrigió el modal que no permitía desplazarse y mostraba un grupo vacío «roto» al final.</li>
+                        </ul>
+                    </div>
+
+                    <!-- BETA v2.0.10 -->
+                    <div class="changelog-entry">
+                        <div class="changelog-title-row">
+                            <span class="changelog-version">BETA v2.0.10 <span class="changelog-date">· 11 sep 2026</span></span>
+                        </div>
+                        <ul class="changelog-list-items">
+                            <li><strong>Actualización de API Key:</strong> Renovación de la clave de Google Maps API para Street View y mapas satelitales.</li>
+                        </ul>
+                    </div>
+
+                    <!-- BETA v2.0.9 -->
+                    <div class="changelog-entry">
+                        <div class="changelog-title-row">
+                            <span class="changelog-version">BETA v2.0.9 <span class="changelog-date">· 10 sep 2026</span></span>
+                        </div>
+                        <ul class="changelog-list-items">
+                            <li><strong>Zoom con la rueda restaurado:</strong> El modo normal permite acercar y alejar la vista tanto en solitario como en multijugador.</li>
+                            <li><strong>Puntuaciones de solitario:</strong> Se recupera el registro de nombres perdido en despliegues anteriores y se avisa si falla el guardado en el leaderboard.</li>
+                            <li><strong>Datos conservados al actualizar:</strong> Los despliegues ya no sobrescriben los usuarios ni las puntuaciones del servidor.</li>
+                        </ul>
+                    </div>
+
+                    <!-- BETA v2.0.8 -->
+                    <div class="changelog-entry">
+                        <div class="changelog-title-row">
+                            <span class="changelog-version">BETA v2.0.8 <span class="changelog-date">· 8 sep 2026</span></span>
+
+                        </div>
+                        <ul class="changelog-list-items">
+                            <li><strong>Eliminación Total de Música en Menús:</strong> Se retiró toda la música de fondo del sitio web y se eliminó el botón de silenciar del menú principal, manteniendo una experiencia enfocada y limpia únicamente con los efectos de sonido esenciales del juego (SFX de clics, temporizador, conjeturas y resultados).</li>
+                            <li><strong>Reajuste de Duración de Linterna (-25%):</strong> Calibrado el consumo de batería de la linterna táctica para que dure un 25% menos de desplazamiento continuo (aumentando la tasa de drenaje por píxel recorrido) tanto en solitario como en multijugador, incrementando la tensión y la estrategia en el modo nocturno.</li>
+                        </ul>
+                    </div>
+
+                    <!-- BETA v2.0.7 -->
+                    <div class="changelog-entry">
+                        <div class="changelog-title-row">
+                            <span class="changelog-version">BETA v2.0.7 <span class="changelog-date">· 8 sep 2026</span></span>
+                        </div>
+                        <ul class="changelog-list-items">
+                            <li><strong>Partitura Completa de «Aria Math» (C418 / Minecraft):</strong> Implementación íntegra de la composición original de 295 notas a través de 30 compases armónicos sin cortes con física acústica de Handpan y acompañamiento de pads.</li>
+                        </ul>
+                    </div>
+
+                    <!-- BETA v2.0.6 -->
+                    <div class="changelog-entry">
+                        <div class="changelog-title-row">
+                            <span class="changelog-version">BETA v2.0.6 <span class="changelog-date">· 8 sep 2026</span></span>
+                        </div>
+                        <ul class="changelog-list-items">
+                            <li><strong>Reconstrucción Acústica de «Aria Math» (C418 / Minecraft):</strong> Rediseño fiel de la melodía ambiental de los menús basado en partituras y transcripciones del tema de C418 con síntesis física de Handpan y eco espacial con delay.</li>
+                        </ul>
+                    </div>
+
+                    <!-- BETA v2.0.5 -->
+                    <div class="changelog-entry">
+                        <div class="changelog-title-row">
+                            <span class="changelog-version">BETA v2.0.5 <span class="changelog-date">· 8 sep 2026</span></span>
+                        </div>
+                        <ul class="changelog-list-items">
+                            <li><strong>Nueva Melodía Ambiental en el Menú:</strong> Introducción de música ambiental generada proceduralmente con Web Audio API.</li>
+                            <li><strong>Historial de Versiones con Secciones Desplegables:</strong> El registro de cambios ahora organiza las versiones en bloques plegables interactivos (acordeones para versiones 2.x y 1.x), evitando la sobrecarga visual de texto y permitiendo explorar cómodamente cada actualización.</li>
+                        </ul>
+                    </div>
+
+                    <!-- BETA v2.0.4 -->
+                    <div class="changelog-entry">
+                        <div class="changelog-title-row">
+                            <span class="changelog-version">BETA v2.0.4 <span class="changelog-date">· 8 sep 2026</span></span>
+                        </div>
+                        <ul class="changelog-list-items">
+                        <li><strong>Optimización de Velocidad y Carga Acelerada:</strong> Implementada compresión Gzip / Deflate en el servidor web (<code>mod_deflate</code>) reduciendo el tamaño total de transferencia en un ~80% (de más de 650 KB a menos de 100 KB).</li>
+                        <li><strong>Caché Inteligente y Carga Instantánea:</strong> Configurada directiva de caché de alto rendimiento en <code>.htaccess</code> (<code>Cache-Control: public, max-age=604800</code>) para todos los scripts, hojas de estilo y coordenadas versionadas, garantizando una apertura instantánea de pantalla desde memoria/disco sin descargas repetitivas.</li>
+                        <li><strong>Preconexión DNS y TLS Anticipada:</strong> Agregadas etiquetas <code>&lt;link rel="preconnect"&gt;</code> y <code>dns-prefetch</code> hacia Google Maps, Google Street View Pixels y librerías CDN en el <code>&lt;head&gt;</code>, eliminando las latencias de negociación SSL.</li>
+                        <li><strong>Eliminación del Cuello de Botella de Azulejos en Menús:</strong> El visor panorámico ambiental 360° ahora carga primero de forma nítida y limpia los 2 a 3 azulejos frontales antes de arrancar la rotación continua, evitando solicitar 40 azulejos simultáneos que saturaban la conexión en el arranque.</li>
+                        <li><strong>Carga Paralela de Librerías Street View:</strong> Incorporado el parámetro <code>libraries=streetView</code> directo en la API de Google Maps y retrasada la comprobación periódica de versiones para no competir por ancho de banda durante la carga inicial.</li>
+                    </ul>
+                </div>
+
+                <!-- BETA v2.0.3 -->
+                <div class="changelog-entry">
+                    <div class="changelog-title-row">
+                        <span class="changelog-version">BETA v2.0.3 <span class="changelog-date">· 8 sep 2026</span></span>
+                    </div>
+                    <ul class="changelog-list-items">
+                        <li><strong>Ajuste de Nombres Largos en Pantalla de Resultados:</strong> Solucionado el problema donde los nombres largos de jugadores se cortaban en la pantalla de resultados. Se amplió el ancho del contenedor del HUD de vida (hasta 480px) y el espacio permitido para nombres (hasta 150px) con ajuste elástico (flex-shrink) y tooltip con el nombre completo al pasar el ratón, evitando recortes en los bordes y preservando la forma redondeada de las barras.</li>
+                        <li><strong>Auto-Scroll Automático en Chat de Salas:</strong> En el chat del lobby (salas públicas y privadas), la lista de mensajes ahora se desplaza suave y automáticamente hacia abajo al enviar o recibir mensajes, empujando los mensajes anteriores hacia arriba de manera fluida y manteniendo siempre visible el último mensaje.</li>
+                    </ul>
+                </div>
+
+                <!-- BETA v2.0.2 -->
+                <div class="changelog-entry">
+                    <div class="changelog-title-row">
+                        <span class="changelog-version">BETA v2.0.2 <span class="changelog-date">· 8 sep 2026</span></span>
+                    </div>
+                    <ul class="changelog-list-items">
+                        <li><strong>Tope de Vida en Modo Linterna Multijugador:</strong> Corregido el cálculo de curación por Perfect (Búho Nocturno) para respetar estrictamente el límite máximo de 5,000 HP, evitando que los jugadores finalicen la partida con 6,000 puntos de vida.</li>
+                        <li><strong>Recreación Fluida de Salas para Anfitriones:</strong> Solucionado el bloqueo de estado donde el anfitrión aparecía como si continuara jugando tras terminar una partida, permitiendo crear nuevas salas de inmediato sin necesidad de recargar la página.</li>
+                        <li><strong>Estabilidad del Fondo Panorámico en Menús:</strong> Eliminado el fallo intermitente de pantalla negra al iniciar o volver a los menús, garantizando la carga visual continua de panorámicas 360° en rotación suave.</li>
+                    </ul>
+                </div>
+
+                <!-- BETA v2.0.1 -->
+                <div class="changelog-entry">
+                    <div class="changelog-title-row">
+                        <span class="changelog-version">BETA v2.0.1 <span class="changelog-date">· 8 sep 2026</span></span>
+                    </div>
+                    <ul class="changelog-list-items">
+                        <li><strong>Consumo de Batería 25% Más Rápido (Modo Linterna Táctica):</strong> Calibración de la tasa de gasto energético por movimiento (~32,000 px para consumir el 100% de la linterna), ofreciendo un ritmo más demandante, dinámico y táctico durante la exploración.</li>
+                        <li><strong>Bloqueo Absoluto de Zoom en Linterna Táctica:</strong> Prohibido el zoom por rueda de ratón, trackpad, gestos táctiles, doble clic y atajos de teclado (+, -, =, PageUp/Down). La panorámica queda bloqueada en perspectiva natural (zoom 0) para obligar a explorar desplazando el haz de luz en lugar de acercar la cámara.</li>
+                    </ul>
+                </div>
+
+                <!-- BETA v2.0 -->
+                <div class="changelog-entry">
+                    <div class="changelog-title-row">
+                        <span class="changelog-version">BETA v2.0 <span class="changelog-date">· 7 sep 2026</span></span>
+                    </div>
+                    <ul class="changelog-list-items">
+                        <li><strong>Nuevo Fondo Panorámico 360° en Menús:</strong> Reemplazo integral del fondo orbital de arte ASCII por panorámicas 360° reales y aleatorias de Tlaltenango de Sánchez Román tomadas directamente de la lista de ubicaciones del juego.</li>
+                        <li><strong>Rotación Cinemática Ambiental:</strong> La cámara 360° gira de forma continua y suave de derecha a izquierda (~2.5°/s), creando una atmósfera envolvente y viva que resalta tras las tarjetas de menú con efecto <em>glassmorphism</em>.</li>
+                        <li><strong>Transición Sutil Cada 45 Segundos:</strong> Tras cada 45 segundos de estancia activa en los menús, la escena realiza una transición cinematográfica suave (fundido a negro &rarr; cambio de panorámica &rarr; fundido desde negro).</li>
+                        <li><strong>Detección Inteligente de Foco y Pestaña:</strong> Si cambias de pestaña, minimizas o el navegador pierde el foco, el temporizador y el cambio de panorámica se pausan automáticamente sin cambiar mientras estés ausente. Al regresar, el tiempo se reanuda de inmediato.</li>
+                        <li><strong>Suspensión Energética al 100%:</strong> Al arrancar una partida, el visor ambiental de fondo se suspende por completo, garantizando cero consumo de CPU/GPU durante las rondas competitivas.</li>
+                    </ul>
+                </div>
+                </details>
+
+                <!-- GRUPO: VERSIONES 1.x -->
+                <details class="changelog-group">
+                    <summary class="changelog-group-title">📦 Versiones BETA 1.x (v1.0.0 – v1.9)</summary>
+
                 <!-- BETA v1.9 -->
-                <div class="changelog-entry current">
+                <div class="changelog-entry">
                     <div class="changelog-title-row">
                         <span class="changelog-version">BETA v1.9 <span class="changelog-date">· 7 sep 2026</span></span>
-                        <span class="changelog-badge badge-current">Actual</span>
                     </div>
                     <ul class="changelog-list-items">
                         <li><strong>Pizca de Luz Garantizada en Reserva Crítica (&gt; 0%):</strong> Corregido el problema donde la linterna se extinguía o dejaba de alumbrar antes de tiempo al 2%. Mientras la batería conserve energía (&gt; 0%), se garantiza un haz focalizado visible (&ge; 50px de radio) con centro cristalino para que el jugador siempre disponga de una pizca de luz hasta el último segundo. La oscuridad total entra en vigor única y exclusivamente al llegar al 0%.</li>
@@ -961,6 +1298,7 @@
                         <li><strong>Leaderboard Global en Solitario:</strong> Clasificación por rondas y puntuación geodésica.</li>
                     </ul>
                 </div>
+                </details>
             </div>
             <button type="button" class="btn-primary" id="changelogCloseBtnBottom">Cerrar</button>
         </div>
@@ -969,10 +1307,10 @@
     <!-- Toast -->
     <div id="toast"></div>
 
-    <!-- CDNs -->
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
-    <script src="js/keys.js"></script>
-    <script type="module" src="js/app.js?v=1.9"></script>
+    <!-- CDNs con carga diferida no bloqueante -->
+    <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script defer src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+    <script defer src="js/keys.js"></script>
+    <script type="module" src="js/app.js?v=1.0.0"></script>
 </body>
 </html>

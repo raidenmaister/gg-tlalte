@@ -2,14 +2,17 @@
 // app.js — Punto de entrada. Coordina UI, red, visor panorámico y juego.
 // ============================================================================
 
-import { $, formatKm, formatNumber, clamp, escapeHtml, detectPotatoMode } from './utils.js?v=1.9';
-import { CONFIG } from './config.js?v=1.9';
-import { audio } from './audio.js?v=1.9';
-import { PanoramaViewer } from './panorama.js?v=1.9';
-import { Minimap } from './minimap.js?v=1.9';
-import { Network } from './net.js?v=1.9';
-import { Game } from './game.js?v=1.9';
-import { AsciiEarthBackground } from './ascii-earth.js?v=1.9';
+import { $, formatKm, formatNumber, clamp, escapeHtml, detectPotatoMode } from './utils.js?v=1.0.0';
+import { CONFIG } from './config.js?v=1.0.0';
+import { audio } from './audio.js?v=1.0.0';
+import { PanoramaViewer } from './panorama.js?v=1.0.0';
+import { Minimap } from './minimap.js?v=1.0.0';
+import { Network } from './net.js?v=1.0.0';
+import { Game } from './game.js?v=1.0.0';
+import { MenuPanoBackground } from './menu-pano.js?v=1.0.0';
+import { identity, secureApi } from './secure.js?v=1.0.0';
+import { satView } from './satview.js?v=1.0.0';
+import * as features from './features.js?v=1.0.0';
 
 const PLAYER_KEY = 'ggtlalte:playerName';
 const ROOM_KEY = 'ggtlalte:activeRoom';
@@ -23,7 +26,7 @@ const pano = new PanoramaViewer('pano');
 const minimap = new Minimap('minimap');
 const net = new Network();
 const game = new Game({ pano, map: minimap, net, audio });
-const asciiEarth = new AsciiEarthBackground('ascii-earth');
+const menuPano = new MenuPanoBackground('menu-pano-bg');
 
 /* ------------------------------ Estado UI ------------------------------ */
 let meName = '';
@@ -49,18 +52,13 @@ function showScreen(id) {
   const el = document.getElementById('screen-' + id);
   if (el) el.classList.remove('hidden');
 
-  // El fondo orbital y de estrellas persiste entre todos los menús (Req 3)
-  const isMenu = ['name', 'menu', 'solo', 'create', 'join', 'leaderboard', 'lobby'].includes(id);
+  // El fondo panorámico 360 ambiental persiste entre todos los menús (BETA v2.0)
+  const isMenu = ['name', 'menu', 'solo', 'create', 'join', 'leaderboard', 'lobby', 'daily', 'profile'].includes(id);
+  document.body.dataset.screen = id;
   if (isMenu) {
-    asciiEarth.start();
-    if (audio && audio.userInteracted) {
-      audio.startMenuMusic();
-    }
+    menuPano.start();
   } else {
-    asciiEarth.stop();
-    if (audio) {
-      audio.stopMenuMusic();
-    }
+    menuPano.stop();
   }
 
   // El badge de versión solo se muestra en los menús
@@ -73,6 +71,11 @@ function showScreen(id) {
   if (!isMenu) {
     const modal = document.getElementById('changelogModal');
     if (modal) modal.classList.add('hidden');
+  }
+
+  // Al entrar al lobby de sala pública o privada, asegurar scroll al final del chat
+  if (id === 'lobby') {
+    scrollChatToBottom(false);
   }
 }
 
@@ -114,11 +117,13 @@ async function checkNameAvailable(name) {
 }
 
 async function registerName(name) {
-  return apiPost('register-name', { name });
+  return secureApi.register(name);
 }
 
-async function saveScoreToLeaderboard(entry) {
-  return apiPost('save-score', entry);
+function setPlayerName(name) {
+  meName = name;
+  game.meName = name;
+  identity.name = name;
 }
 
 async function fetchLeaderboard(rounds, mode = leaderboardMode || 'normal') {
@@ -137,7 +142,10 @@ async function fetchLeaderboard(rounds, mode = leaderboardMode || 'normal') {
 /* --------------------------- Carga de datos ---------------------------- */
 function ensureData() {
   if (!dataPromise) {
-    dataPromise = game.loadData().catch((err) => {
+    dataPromise = game.loadData().then((coords) => {
+      menuPano.setCoordinates(coords);
+      return coords;
+    }).catch((err) => {
       dataPromise = null;
       throw err;
     });
@@ -199,6 +207,9 @@ function renderHud(hud) {
   const roundLabel = $('#hudRound');
   if (roundLabel) roundLabel.textContent = `RONDA ${hud.round}/${hud.total}`;
 
+  // Ojo de Halcón: sin capa satelital en el minimapa (sería trampa comparar la foto)
+  minimap.setSatelliteLocked(hud.gameMode === 'satellite');
+
   const isMulti = hud.mode === 'multi';
   $('#hudScore').classList.toggle('hidden', isMulti);
   $('#hudHp').classList.toggle('hidden', !isMulti);
@@ -250,6 +261,7 @@ function renderMultiHp(players) {
     const name = document.createElement('span');
     name.className = 'hp-name';
     name.textContent = p.name;
+    name.title = p.name || '';
     name.style.color = color;
     name.style.textShadow = `0 0 8px ${color}55, 0 1px 3px rgba(0,0,0,0.9)`;
 
@@ -513,7 +525,7 @@ function renderResult(result) {
       return `
         <div class="res-multi-row">
           <div class="res-multi-info">
-            <div class="res-multi-name" style="color:${color};">
+            <div class="res-multi-name" style="color:${color};" title="${escapeHtml(p.name)}">
               <span class="res-color-dot" style="background:${color};"></span>
               ${escapeHtml(p.name)}
             </div>
@@ -586,6 +598,22 @@ function renderResult(result) {
     }
     rows.push(statRow('Total', formatNumber(result.myTotalScore)));
     stats.innerHTML = rows.join('');
+
+    // Tarjeta compacta sobre el mapa: distancia y puntos de la ronda
+    const chip = $('#resultSoloChip');
+    if (chip) {
+      const badges = [];
+      if (result.isPerfect) badges.push('<span class="rsc-badge rsc-perfect">⭐ ¡PERFECT!</span>');
+      if (result.owlBonus) badges.push('<span class="rsc-badge rsc-owl">🦉 +2,000</span>');
+      if (result.perfectStreak >= 2) badges.push(`<span class="rsc-badge rsc-streak">🔥 x${result.perfectStreak}</span>`);
+      if (result.overTime) badges.push('<span class="rsc-badge rsc-late">⌛ Fuera de tiempo</span>');
+      chip.innerHTML = `
+        <div class="rsc-item"><span class="rsc-label">Distancia</span><span class="rsc-value">${result.myDistanceKm != null ? formatKm(result.myDistanceKm) : 'Sin chincheta'}</span></div>
+        <div class="rsc-item rsc-points"><span class="rsc-label">Puntos</span><span class="rsc-value">+${formatNumber(result.myScore)}</span></div>
+        <div class="rsc-item"><span class="rsc-label">Total</span><span class="rsc-value">${formatNumber(result.myTotalScore)}</span></div>
+        ${badges.length ? `<div class="rsc-badges">${badges.join('')}</div>` : ''}`;
+      chip.classList.remove('hidden');
+    }
     nextBtn.classList.remove('hidden');
     nextBtn.textContent = result.round >= result.total ? 'Ver resultados →' : 'Siguiente ronda →';
     note.classList.add('hidden');
@@ -621,7 +649,7 @@ function renderResult(result) {
       return `
         <div class="res-multi-row">
           <div class="res-multi-info">
-            <div class="res-multi-name" style="color:${color};">
+            <div class="res-multi-name" style="color:${color};" title="${escapeHtml(p.name)}">
               <span class="res-color-dot" style="background:${color};"></span>
               ${escapeHtml(p.name)} ${p.isPerfect ? '⭐' : ''} ${streakBadge} ${owlBadge}
             </div>
@@ -642,19 +670,57 @@ function renderResult(result) {
 
   if (result.mode === 'solo') {
     $('#resultPanel').classList.remove('hidden');
+  } else {
+    const chip = $('#resultSoloChip');
+    if (chip) chip.classList.add('hidden');
   }
 }
 
 async function handleGameOver(result) {
   renderGameOver(result);
-  if (result.mode === 'solo' && meName) {
-    await saveScoreToLeaderboard({
-      name: meName,
+  if (result.mode === 'multi' && meName && result.me) {
+    // Historial del perfil (partidas multijugador)
+    secureApi.recordMulti({
+      gameMode: game.gameMode,
       rounds: result.total,
-      points: result.myTotalScore,
-      timeMs: result.timeMs || 0,
-      gameMode: result.gameMode || 'normal',
-    });
+      score: result.myTotalScore || 0,
+      rank: result.rank || 1,
+      players: (result.players || []).length || 2,
+    }).catch(() => {});
+    return;
+  }
+  if (result.mode !== 'solo' || !meName) return;
+
+  const stats = $('#gameOverStats');
+  const status = document.createElement('div');
+  status.className = 'stat-row stat-lb-status';
+  status.innerHTML = '<span class="stat-label">🏆 Leaderboard</span><span class="stat-value">Registrando…</span>';
+  if (stats) stats.appendChild(status);
+  const valueEl = status.querySelector('.stat-value');
+
+  if (result.aborted) {
+    valueEl.textContent = 'No registrado (partida cancelada)';
+    status.classList.add('stat-lb-fail');
+    return;
+  }
+
+  const saved = await game.finishSoloSession(result.timeMs || 0);
+  if (saved && saved.ok && saved.saved && saved.daily) {
+    status.querySelector('.stat-label').textContent = '📅 Reto diario';
+    valueEl.textContent = `${formatNumber(saved.score)} pts · puesto #${saved.rank || '—'}`;
+    status.classList.add('stat-lb-best');
+    return;
+  }
+  if (saved && saved.ok && saved.saved) {
+    const rankText = saved.rank ? `#${saved.rank}` : 'fuera del top 100';
+    valueEl.textContent = saved.newBest
+      ? `¡Nuevo récord! ${formatNumber(saved.score)} · ${rankText}`
+      : `${formatNumber(saved.score)} · récord ${formatNumber(saved.best)} (${rankText})`;
+    status.classList.add(saved.newBest ? 'stat-lb-best' : 'stat-lb-ok');
+  } else {
+    valueEl.textContent = 'No registrado';
+    status.classList.add('stat-lb-fail');
+    showError((saved && saved.error) || 'No se pudo guardar tu puntuación. Comprueba tu conexión.');
   }
 }
 
@@ -671,7 +737,11 @@ function renderGameOver(result) {
   const stats = $('#gameOverStats');
 
   if (result.mode === 'solo') {
-    title.textContent = result.timedOut ? '¡Tiempo agotado!' : '¡Partida terminada!';
+    title.textContent = result.aborted
+      ? 'Partida cancelada'
+      : result.daily
+        ? (result.timedOut ? '📅 Reto diario · ¡Tiempo agotado!' : '📅 ¡Reto diario completado!')
+        : (result.timedOut ? '¡Tiempo agotado!' : '¡Partida terminada!');
     title.className = 'panel-title panel-title-neutral';
     stats.innerHTML = [
       statRow('Puntos totales', formatNumber(result.myTotalScore)),
@@ -713,6 +783,15 @@ function renderGameOver(result) {
     ).join('');
   }
 
+  // Al finalizar la partida, liberar la persistencia de sala y estado activo para permitir crear/unirse de inmediato
+  localStorage.removeItem(ROOM_KEY);
+  if (net) {
+    net._gameInProgress = false;
+    if (net.isHost) {
+      net.updateRoomStatus('finished');
+    }
+  }
+
   $('#gameOverPanel').classList.remove('hidden');
 }
 
@@ -742,6 +821,7 @@ function resetGuessUI() {
 
 function resetGameUI() {
   resetGuessUI();
+  satView.hide();
   if (pano) {
     pano.setBlind(false);
     pano.setStatic(false);
@@ -870,6 +950,7 @@ function renderLobby() {
     else if (net.gameMode === 'blur') modeText = `Normal Borroso (${net.blurSeconds || 3}s)`;
     else if (net.gameMode === 'static_blur') modeText = `Estático Borroso (${net.blurSeconds || 3}s)`;
     else if (net.gameMode === 'flashlight' || net.flashlightMode) modeText = 'Linterna Táctica (Normal)';
+    else if (net.gameMode === 'satellite') modeText = '🛰️ Ojo de Halcón (satelital)';
     roundsInfo.textContent = `${modeText} · ${net.rounds || CONFIG.DUEL_ROUNDS} rondas`;
   }
 
@@ -922,6 +1003,29 @@ function formatLocalTime(ts) {
   return `${hours}:${minutes}`;
 }
 
+function scrollChatToBottom(smooth = true) {
+  const list = $('#chatMessagesList');
+  const wrap = $('#chatMessagesWrap');
+  const doScroll = () => {
+    if (list) {
+      try {
+        list.scrollTo({
+          top: list.scrollHeight,
+          behavior: smooth ? 'smooth' : 'auto',
+        });
+      } catch {
+        list.scrollTop = list.scrollHeight;
+      }
+    }
+    if (wrap) {
+      wrap.scrollTop = wrap.scrollHeight;
+    }
+  };
+  doScroll();
+  requestAnimationFrame(doScroll);
+  setTimeout(doScroll, 60);
+}
+
 function appendLobbyChatMessage({ senderName, text, timestamp, isMe = false, isSystem = false }) {
   const list = $('#chatMessagesList');
   if (!list) return;
@@ -960,11 +1064,8 @@ function appendLobbyChatMessage({ senderName, text, timestamp, isMe = false, isS
 
   list.appendChild(msgDiv);
 
-  // Auto-scroll al final del contenedor de mensajes
-  const wrap = $('#chatMessagesWrap');
-  if (wrap) {
-    wrap.scrollTop = wrap.scrollHeight;
-  }
+  // Auto-scroll al final del contenedor de mensajes (empuja mensajes hacia arriba)
+  scrollChatToBottom(true);
 }
 
 function sendLobbyChatMessage() {
@@ -1124,6 +1225,7 @@ function renderTypingIndicator() {
     } else {
       nameText.textContent = 'Varios jugadores están escribiendo…';
     }
+    scrollChatToBottom(true);
   }
 }
 
@@ -1179,6 +1281,54 @@ function formatTime(ms) {
   return m > 0 ? `${m}:${String(r).padStart(2, '0')}` : `0:${String(r).padStart(2, '0')}`;
 }
 
+/** Fila del leaderboard (también la usa el reto diario). Tocar el nombre abre su perfil. */
+function buildLbRow(entry, i, metaText) {
+  const li = document.createElement('div');
+  li.className = 'lb-row' + (i === 0 ? ' top1' : i === 1 ? ' top2' : i === 2 ? ' top3' : '');
+  const isMe = meName && (entry.name || '').toLowerCase() === meName.toLowerCase();
+  if (isMe) li.classList.add('lb-me');
+
+  const rank = document.createElement('span');
+  rank.className = 'lb-rank';
+  rank.textContent = String(i + 1);
+
+  const main = document.createElement('div');
+  main.className = 'lb-main';
+  const name = document.createElement('button');
+  name.type = 'button';
+  name.className = 'lb-name lb-name-link';
+  name.textContent = entry.name || 'Anónimo';
+  name.title = 'Ver perfil';
+  name.addEventListener('click', () => features.openProfile(entry.name, isMe, document.body.dataset.screen || 'leaderboard'));
+  if (isMe) {
+    const tag = document.createElement('span');
+    tag.className = 'lb-me-tag';
+    tag.textContent = 'TÚ';
+    name.appendChild(tag);
+  }
+  const meta = document.createElement('span');
+  meta.className = 'lb-meta';
+  meta.textContent = metaText;
+  main.appendChild(name);
+  main.appendChild(meta);
+
+  const score = document.createElement('div');
+  score.className = 'lb-score';
+  const val = document.createElement('span');
+  val.className = 'lb-score-value';
+  val.textContent = formatNumber(entry.score);
+  const label = document.createElement('span');
+  label.className = 'lb-score-label';
+  label.textContent = 'PTS';
+  score.appendChild(val);
+  score.appendChild(label);
+
+  li.appendChild(rank);
+  li.appendChild(main);
+  li.appendChild(score);
+  return li;
+}
+
 function renderLeaderboard() {
   const list = $('#leaderboardList');
   const empty = $('#leaderboardEmpty');
@@ -1192,45 +1342,12 @@ function renderLeaderboard() {
       return;
     }
     empty.classList.add('hidden');
-
     entries.forEach((entry, i) => {
-      const li = document.createElement('div');
-      li.className = 'lb-row' + (i === 0 ? ' top1' : i === 1 ? ' top2' : i === 2 ? ' top3' : '');
-
-      const rank = document.createElement('span');
-      rank.className = 'lb-rank';
-      rank.textContent = String(i + 1);
-
-      const main = document.createElement('div');
-      main.className = 'lb-main';
-
-      const name = document.createElement('span');
-      name.className = 'lb-name';
-      name.textContent = entry.name || 'Anónimo';
-
-      const meta = document.createElement('span');
-      meta.className = 'lb-meta';
-      meta.textContent = `${formatNumber(entry.points)} pts · ${formatTime(entry.timeMs)}`;
-
-      main.appendChild(name);
-      main.appendChild(meta);
-
-      const score = document.createElement('div');
-      score.className = 'lb-score';
-      const val = document.createElement('span');
-      val.className = 'lb-score-value';
-      val.textContent = formatNumber(entry.score);
-      const label = document.createElement('span');
-      label.className = 'lb-score-label';
-      label.textContent = 'PTS';
-      score.appendChild(val);
-      score.appendChild(label);
-
-      li.appendChild(rank);
-      li.appendChild(main);
-      li.appendChild(score);
-      list.appendChild(li);
+      const games = Number(entry.games) || 1;
+      list.appendChild(buildLbRow(entry, i, `${formatNumber(entry.points)} pts · ${formatTime(entry.timeMs)} · ${games} ${games === 1 ? 'partida' : 'partidas'}`));
     });
+    const mine = list.querySelector('.lb-me');
+    if (mine) mine.scrollIntoView({ block: 'nearest' });
   });
 }
 
@@ -1297,6 +1414,8 @@ function renderPublicList(rooms) {
       modeLabel = `🎮 Normal + 🌫️ Borroso (${secs}s)`;
     } else if (room.gameMode === 'flashlight') {
       modeLabel = '🔦 Linterna Táctica (Normal)';
+    } else if (room.gameMode === 'satellite') {
+      modeLabel = '🛰️ Ojo de Halcón';
     } else if (room.gameMode === 'static') {
       modeLabel = '🛑 Estático';
     } else if (room.gameMode === 'temporal') {
@@ -1483,16 +1602,42 @@ async function startSolo(rounds = soloRounds) {
                    (currentSoloMode === 'static' && soloStaticVariant === 'blur');
     const isFlashlight = (currentSoloMode === 'normal' && soloNormalVariant === 'flashlight');
     let effectiveMode = currentSoloMode;
-    if (isFlashlight) effectiveMode = 'flashlight';
+    if (currentSoloMode === 'satellite') effectiveMode = 'satellite';
+    else if (isFlashlight) effectiveMode = 'flashlight';
     else if (currentSoloMode === 'normal' && isZoom) effectiveMode = 'tunnel';
     else if (currentSoloMode === 'static' && isZoom) effectiveMode = 'static_tunnel';
     else if (currentSoloMode === 'normal' && isBlur) effectiveMode = 'blur';
     else if (currentSoloMode === 'static' && isBlur) effectiveMode = 'static_blur';
 
-    game.startSolo(rounds, effectiveMode, currentSoloTemporalSecs, currentSoloTunnelSecs, isZoom, currentSoloBlurSecs, isBlur, isFlashlight);
+    await game.startSolo(rounds, effectiveMode, currentSoloTemporalSecs, currentSoloTunnelSecs, isZoom, currentSoloBlurSecs, isBlur, isFlashlight);
   } catch (err) {
+    game.abort();
+    resetGameUI();
     showError('Error al cargar: ' + err.message);
     showScreen('menu');
+  }
+}
+
+async function startDaily(info) {
+  audio.ensure();
+  try {
+    setLoadingText('Preparando el reto diario…');
+    showScreen('loading');
+    await ensureData();
+    showScreen('game');
+    resetGameUI();
+    await ensureViewers();
+    setTimeout(() => pano.refresh(), 60);
+    game.meName = meName;
+    const m = info.mode;
+    const isZoom = m === 'tunnel' || m === 'static_tunnel';
+    const isBlur = m === 'blur' || m === 'static_blur';
+    await game.startSolo(10, m, info.temporalSeconds, info.tunnelSeconds, isZoom, info.blurSeconds, isBlur, m === 'flashlight', { daily: true });
+  } catch (err) {
+    game.abort();
+    resetGameUI();
+    showError(err.message);
+    features.openDaily();
   }
 }
 
@@ -1538,7 +1683,8 @@ async function hostStartGame() {
                    (currentMultiMode === 'static' && multiStaticVariant === 'blur') ||
                    net.gameMode === 'blur' || net.gameMode === 'static_blur' || !!net.blurMode;
     let effectiveMode = currentMultiMode;
-    if (isRace) effectiveMode = 'race';
+    if (currentMultiMode === 'satellite' || net.gameMode === 'satellite') effectiveMode = 'satellite';
+    else if (isRace) effectiveMode = 'race';
     else if (isFlashlight) effectiveMode = 'flashlight';
     else if (currentMultiMode === 'normal' && isZoom) effectiveMode = 'tunnel';
     else if (currentMultiMode === 'static' && isZoom) effectiveMode = 'static_tunnel';
@@ -1558,6 +1704,9 @@ async function hostStartGame() {
     );
   } catch (err) {
     net.updateRoomStatus('waiting');
+    game.abort();
+    resetGameUI();
+    $('#startBtn').disabled = false;
     showError('Error al cargar: ' + err.message);
     showScreen('lobby');
     renderLobby();
@@ -1568,23 +1717,30 @@ function createRoom(isPublic = false) {
   if (isCreatingRoom) return;
   setCreateRoomLoading(true);
 
+  // Asegurar limpieza de cualquier estado residual previo antes de crear nueva sala
+  try {
+    if (game) game.abort();
+    if (net) {
+      net._gameInProgress = false;
+      net.roomStatus = 'waiting';
+    }
+    localStorage.removeItem(ROOM_KEY);
+  } catch (e) {}
+
   audio.ensure();
   destroyLobbyChat();
   const rounds = Number($('#roomRounds').value) || CONFIG.DUEL_ROUNDS;
   const limit = Number($('#roomLimit').value) || CONFIG.ROOM_MAX_PLAYERS;
 
-  const isRace = (currentMultiMode === 'normal' && multiNormalVariant === 'race') || net.gameMode === 'race';
-  const isFlashlight = (currentMultiMode === 'normal' && multiNormalVariant === 'flashlight') ||
-                       net.gameMode === 'flashlight' ||
-                       !!net.flashlightMode;
+  const isRace = (currentMultiMode === 'normal' && multiNormalVariant === 'race');
+  const isFlashlight = (currentMultiMode === 'normal' && multiNormalVariant === 'flashlight');
   const isZoom = (currentMultiMode === 'normal' && multiNormalVariant === 'zoom') ||
-                 (currentMultiMode === 'static' && multiStaticVariant === 'zoom') ||
-                 net.gameMode === 'tunnel' || net.gameMode === 'static_tunnel' || !!net.zoomMode;
+                 (currentMultiMode === 'static' && multiStaticVariant === 'zoom');
   const isBlur = (currentMultiMode === 'normal' && multiNormalVariant === 'blur') ||
-                 (currentMultiMode === 'static' && multiStaticVariant === 'blur') ||
-                 net.gameMode === 'blur' || net.gameMode === 'static_blur' || !!net.blurMode;
+                 (currentMultiMode === 'static' && multiStaticVariant === 'blur');
   let effectiveMode = currentMultiMode;
-  if (isRace) effectiveMode = 'race';
+  if (currentMultiMode === 'satellite') effectiveMode = 'satellite';
+  else if (isRace) effectiveMode = 'race';
   else if (isFlashlight) effectiveMode = 'flashlight';
   else if (currentMultiMode === 'normal' && isZoom) effectiveMode = 'tunnel';
   else if (currentMultiMode === 'static' && isZoom) effectiveMode = 'static_tunnel';
@@ -1756,13 +1912,11 @@ function wire() {
       showToast(reg && reg.error ? reg.error : 'No se pudo registrar el nombre', 'error');
       return;
     }
-    meName = name;
-    game.meName = name;
-    localStorage.setItem(PLAYER_KEY, name);
+    setPlayerName(reg.name || name);
+    localStorage.setItem(PLAYER_KEY, meName);
     audio.userInteracted = true;
     audio.ensure();
     audio.click();
-    audio.startMenuMusic();
     $('#menuPlayerName').textContent = meName;
     showScreen('menu');
   };
@@ -1841,11 +1995,13 @@ function wire() {
         }
       } else if (currentSoloMode === 'temporal') {
         descEl.textContent = 'Modo Temporal: La imagen desaparece tras unos segundos. ¡Memoriza rápido!';
+      } else if (currentSoloMode === 'satellite') {
+        descEl.textContent = 'Ojo de Halcón: una foto satelital con zoom máximo, girada y sin brújula, de cualquier rincón del municipio (ciudad, rancherías, caminos, campo y sierra). Pon la chincheta donde creas que está el centro de la imagen.';
       }
     }
 
-    // Actualiza dinámicamente los tiempos en las pestañas (+1 min en Zoom y Borroso)
-    const times = (hasZoom || hasBlur)
+    // Actualiza dinámicamente los tiempos en las pestañas (+1 min en Zoom, Borroso y Ojo de Halcón)
+    const times = (hasZoom || hasBlur || currentSoloMode === 'satellite')
       ? { 5: '⏱️ 2:45', 7: '⏱️ 3:00', 10: '⏱️ 3:30', 15: '⏱️ 4:30' }
       : { 5: '⏱️ 1:45', 7: '⏱️ 2:00', 10: '⏱️ 2:30', 15: '⏱️ 3:30' };
 
@@ -2005,6 +2161,8 @@ function wire() {
         }
       } else if (currentMultiMode === 'temporal') {
         descEl.textContent = 'Modo Temporal: La imagen desaparece tras unos segundos. ¡Memoriza rápido!';
+      } else if (currentMultiMode === 'satellite') {
+        descEl.textContent = 'Ojo de Halcón: todos ven la misma foto satelital con zoom máximo, girada y sin brújula, de cualquier rincón del municipio. Pon tu chincheta en el minimapa; al final se revela quién acertó más.';
       }
     }
   }
@@ -2165,25 +2323,6 @@ function wire() {
   $('#createRoomConfirmBtn').addEventListener('click', () => createRoom(isRoomPublic));
   $('#createBackBtn').addEventListener('click', () => showScreen('menu'));
 
-  // --- Sonido ---
-  const soundBtn = $('#soundBtn');
-  const updateSoundBtn = () => {
-    soundBtn.textContent = audio.enabled ? '🔊' : '🔇';
-  };
-  soundBtn.addEventListener('click', () => {
-    audio.userInteracted = true;
-    audio.ensure();
-    audio.toggle();
-    updateSoundBtn();
-    const isMenu = ['name', 'menu', 'solo', 'create', 'join', 'leaderboard', 'lobby'].some((s) => {
-      const el = document.getElementById('screen-' + s);
-      return el && !el.classList.contains('hidden');
-    });
-    if (audio.enabled && isMenu) {
-      audio.startMenuMusic();
-    }
-  });
-  updateSoundBtn();
 
   // --- Unirse ---
   const joinCodeInput = $('#joinCodeInput');
@@ -2378,6 +2517,7 @@ function wire() {
     toggleLayerBtn.title = isSat ? 'Cambiar a vista estándar (calles)' : 'Cambiar a vista satelital';
     toggleLayerBtn.classList.toggle('active', isSat);
   };
+  minimap.onLayerChange = updateToggleLayerBtn;
   if (toggleLayerBtn) {
     updateToggleLayerBtn();
     toggleLayerBtn.addEventListener('click', (e) => {
@@ -2657,7 +2797,7 @@ function wireGame() {
 
 function wireNet() {
   net.cb.isGameInProgress = () => {
-    return gameInProgress() || (game && (game.state === 'playing' || game.state === 'result' || game._hostStarted));
+    return gameInProgress() || (game && (game.state === 'playing' || game.state === 'result' || (game._hostStarted && game.state !== 'gameover' && game.state !== 'idle')));
   };
 
   net.cb.isExistingActivePlayer = (name) => {
@@ -2821,7 +2961,7 @@ function boot() {
   detectPotatoMode();
   const versionBadge = $('#versionBadge');
   if (versionBadge) {
-    versionBadge.textContent = CONFIG.VERSION || 'BETA v1.8.6';
+    versionBadge.textContent = CONFIG.VERSION || 'v1.0.0';
     versionBadge.style.cursor = 'pointer';
     versionBadge.title = 'Ver historial de versiones';
     versionBadge.addEventListener('click', () => {
@@ -2838,6 +2978,33 @@ function boot() {
   wire();
   wireGame();
   wireNet();
+  features.setup({
+    showScreen,
+    showToast,
+    getName: () => meName,
+    buildLbRow,
+    startDaily,
+    onLoggedIn(name) {
+      setPlayerName(name);
+      localStorage.setItem(PLAYER_KEY, name);
+      $('#menuPlayerName').textContent = name;
+      audio.userInteracted = true;
+      audio.ensure();
+      showScreen('menu');
+      features.refreshSiteInfo();
+    },
+    logout() {
+      localStorage.removeItem(PLAYER_KEY);
+      localStorage.removeItem(ROOM_KEY);
+      identity.resetKey();
+      meName = '';
+      game.meName = '';
+      identity.name = '';
+      $('#playerNameInput').value = '';
+      showScreen('name');
+      showToast('Sesión cerrada en este dispositivo.', 'info');
+    },
+  });
 
   // Compás: actualiza al rotar la cámara.
   pano.callbacks.onPovChange = (heading, pitch) => {
@@ -2861,15 +3028,10 @@ function boot() {
     audio.place();
   };
 
-  // Desbloqueo de audio y música BGM al primer gesto del usuario.
+  // Desbloqueo de audio para efectos de sonido (SFX) al primer gesto del usuario.
   const unlockAudioGesture = () => {
     audio.userInteracted = true;
     audio.ensure();
-    const isMenu = ['name', 'menu', 'solo', 'create', 'join', 'leaderboard', 'lobby'].some((s) => {
-      const el = document.getElementById('screen-' + s);
-      return el && !el.classList.contains('hidden');
-    });
-    if (isMenu) audio.startMenuMusic();
   };
   document.addEventListener('pointerdown', unlockAudioGesture, { once: true });
   document.addEventListener('keydown', unlockAudioGesture, { once: true });
@@ -2918,14 +3080,14 @@ function boot() {
       }
 
       if (vData && vData.version) {
-        const curVer = (CONFIG.VERSION || '').replace(/^BETA\s+v/i, '').trim();
+        const curVer = (CONFIG.VERSION || '').replace(/^(BETA\s+)?v/i, '').trim();
         if (vData.version !== curVer) {
           LOG('Nueva versión detectada:', vData.version, 'actual:', curVer);
 
           // 1. Resaltar badge de versión flotante
           const badge = document.getElementById('versionBadge');
           if (badge) {
-            badge.textContent = `BETA v${vData.version} (Shift+F5)`;
+            badge.textContent = `v${vData.version} (Shift+F5)`;
             badge.classList.add('has-update');
             badge.title = 'Haz clic o presiona Shift + F5 para actualizar a la última versión';
             badge.onclick = () => window.location.reload(true);
@@ -2948,25 +3110,50 @@ function boot() {
           // 3. Notificación toast persistente
           if (!_updateToastShown) {
             _updateToastShown = true;
-            showToast(`¡Nueva versión BETA v${vData.version} disponible! Presiona Shift + F5 para actualizar`, 'warning', 35000);
+            showToast(`¡Nueva versión v${vData.version} disponible! Presiona Shift + F5 para actualizar`, 'warning', 35000);
           }
         }
       }
     } catch (e) {}
   }
-  setInterval(checkVersionUpdate, 5000);
+  // Comprobación periódica no intrusiva de versión (sin saturar la red al iniciar)
+  setTimeout(checkVersionUpdate, 5000);
+  setInterval(checkVersionUpdate, 35000);
   window.addEventListener('focus', () => checkVersionUpdate());
-  checkVersionUpdate();
+
+  // Precarga inmediata de coordenadas para el fondo panorámico 360 (BETA v2.0)
+  ensureData().catch(() => {});
 
   const saved = localStorage.getItem(PLAYER_KEY);
   if (saved) {
-    meName = saved;
-    game.meName = saved;
+    setPlayerName(saved);
     $('#menuPlayerName').textContent = saved;
-    // Asegura que el nombre siga registrado en el servidor (por si el JSON
-    // se reinició o se desplegó desde cero).
-    checkNameAvailable(saved).then((available) => {
-      if (available) registerName(saved).catch(() => {});
+    // Verifica (o recupera, si el servidor se reinició) el nombre con la clave secreta del dispositivo.
+    secureApi.login().then((res) => {
+      if (res && res.ok) {
+        if (res.name && res.name !== meName) {
+          setPlayerName(res.name);
+          localStorage.setItem(PLAYER_KEY, res.name);
+          $('#menuPlayerName').textContent = res.name;
+        }
+        return;
+      }
+      if (res && !res.network && /pertenece|suspendida/.test(res.error || '') && !gameInProgress() && net.role == null) {
+        localStorage.removeItem(PLAYER_KEY);
+        const old = meName;
+        meName = '';
+        showScreen('name');
+        if (/suspendida/.test(res.error || '')) {
+          showToast(res.error, 'error', 7000);
+        } else {
+          // Llevar al jugador a «Ya tengo cuenta» con su nombre escrito.
+          const tab = document.querySelector('#authTabs .auth-tab[data-tab="login"]');
+          if (tab) tab.click();
+          const li = $('#loginNameInput');
+          if (li) li.value = old;
+          showToast('Este dispositivo no tiene acceso a esa cuenta: inicia sesión con tu contraseña o código de recuperación.', 'warning', 7000);
+        }
+      }
     });
 
     // Si había una sala anfitriona o invitada activa, reincorpórate a ella tras recargar.

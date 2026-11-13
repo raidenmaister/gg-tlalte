@@ -1,12 +1,76 @@
-﻿# Desactivar cache del navegador para archivos estaticos del juego
+# ==============================================================================
+# GG-TLALTE · Seguridad, rendimiento y caché (v1.0.0)
+# ==============================================================================
+
+Options -Indexes
+
+# App instalable (PWA)
+AddType application/manifest+json .webmanifest
+
+# 1. Bloquear datos del servidor, secretos y archivos internos
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^data(/|$) - [F,L]
+    RewriteRule ^satpool(/|$) - [F,L]
+    RewriteRule ^config(/|$) - [F,L]
+</IfModule>
+
+<FilesMatch "^(users|rooms|leaderboard|sessions|ratelimit)\.json$">
+    Require all denied
+</FilesMatch>
+<FilesMatch "\.(lock|tmp|log|env|md|txt|py|cjs|mjs|geojson|sh|bak|ini|sql)$">
+    Require all denied
+</FilesMatch>
+<FilesMatch "^(\.env.*|\.git.*|\.htaccess|package(-lock)?\.json|deploy\.mjs)$">
+    Require all denied
+</FilesMatch>
+
+# 2. Cabeceras de seguridad
 <IfModule mod_headers.c>
-    <FilesMatch "\.(html|htm|js|css|json)$">
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set Permissions-Policy "camera=(), microphone=(), geolocation=()"
+</IfModule>
+
+# 3. Compresión Gzip / Deflate para reducir el tamaño de transferencia en ~80%
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css text/javascript application/javascript application/x-javascript application/json application/xml image/svg+xml
+</IfModule>
+
+# 4. Control de caché inteligente
+<IfModule mod_headers.c>
+    # index.html y version.json NUNCA se cachean para detectar actualizaciones inmediatamente
+    <FilesMatch "\.(html|htm)$">
         Header set Cache-Control "no-cache, no-store, must-revalidate, max-age=0"
         Header set Pragma "no-cache"
         Header set Expires "0"
     </FilesMatch>
-</IfModule>
+    <Files "version.json">
+        Header set Cache-Control "no-cache, no-store, must-revalidate, max-age=0"
+        Header set Pragma "no-cache"
+        Header set Expires "0"
+    </Files>
 
-<IfModule mod_expires.c>
-    ExpiresActive Off
+    # Archivos estáticos versionados (?v=X) y datos: caché veloz en navegador
+    <FilesMatch "\.(js|css|png|jpg|jpeg|svg|webp|ico|woff|woff2)$">
+        Header set Cache-Control "public, max-age=604800, stale-while-revalidate=86400"
+    </FilesMatch>
+    <Files "coordenadas_validas.json">
+        Header set Cache-Control "public, max-age=604800, stale-while-revalidate=86400"
+    </Files>
+
+    # El service worker debe revisarse siempre para que las actualizaciones lleguen al instante
+    <Files "sw.js">
+        Header set Cache-Control "no-cache, max-age=0"
+        Header set Service-Worker-Allowed "/"
+    </Files>
+    <Files "manifest.webmanifest">
+        Header set Cache-Control "public, max-age=86400"
+    </Files>
+    # Panel de administración: nunca en caché ni dentro de iframes
+    <FilesMatch "^(administracion\.html|admin-api\.php)$">
+        Header set Cache-Control "no-store, max-age=0"
+        Header always set X-Frame-Options "DENY"
+    </FilesMatch>
 </IfModule>

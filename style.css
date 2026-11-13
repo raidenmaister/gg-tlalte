@@ -59,22 +59,54 @@ input {
     font-family: inherit;
 }
 
-/* ============================== Fondo orbital ASCII ============================== */
-#ascii-earth {
+/* ============================== Fondo Panorámico 360° Menús (BETA v2.0) ============================== */
+#menu-pano-bg,
+.menu-pano-bg {
     position: fixed;
     inset: 0;
     z-index: 0;
     pointer-events: none;
     overflow: hidden;
+    background: #060812;
 }
 
-.ascii-earth-canvas {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
-    height: 100vh;
-    display: block;
+.menu-pano-stage {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+
+/* Ocultar artefactos de UI que StreetView pudiera inyectar en el fondo */
+.menu-pano-stage .gm-style-cc,
+.menu-pano-stage .gmnoprint,
+.menu-pano-stage a[href^="http"] {
+    display: none !important;
+}
+
+/* Viñeta oscura sutil para contraste nítido de tarjetas glassmorphism y títulos */
+.menu-pano-vignette {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(circle at center, rgba(10, 10, 20, 0.38) 0%, rgba(6, 8, 18, 0.72) 100%);
+    z-index: 1;
+}
+
+/* Cortina negra para transiciones suaves de cambio de panorámica (imagen -> negro -> imagen) */
+.menu-pano-curtain {
+    position: absolute;
+    inset: 0;
+    background: #000;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.8s ease-in-out;
+    z-index: 2;
+}
+
+.menu-pano-curtain.fade-black {
+    opacity: 1;
 }
 
 /* Badge de versión */
@@ -316,7 +348,8 @@ input {
 }
 
 /* ============================== Entrada ============================== */
-.card input[type='text'] {
+.card input[type='text'],
+.card input[type='password'] {
     width: 100%;
     padding: 13px 14px;
     border-radius: 10px;
@@ -330,7 +363,8 @@ input {
     transition: border-color 0.2s, box-shadow 0.2s;
 }
 
-.card input[type='text']:focus {
+.card input[type='text']:focus,
+.card input[type='password']:focus {
     border-color: var(--accent);
     box-shadow: 0 0 0 3px var(--accent-glow);
 }
@@ -690,6 +724,7 @@ input {
     gap: 10px;
     padding-right: 4px;
     scroll-behavior: smooth;
+    overflow-anchor: auto;
 }
 
 .chat-messages-list::-webkit-scrollbar {
@@ -1333,9 +1368,15 @@ body.is-potato .pano-blur-overlay.phase-5 {
 
 .mode-select-row {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(4, 1fr);
     gap: 8px;
     width: 100%;
+}
+
+@media (max-width: 640px) {
+    .mode-select-row {
+        grid-template-columns: repeat(2, 1fr);
+    }
 }
 
 @media (max-width: 480px) {
@@ -1654,6 +1695,10 @@ body.is-potato .pano-blur-overlay.phase-5 {
     padding-right: 84px;
 }
 
+.hud-top.over-map .hud-hp {
+    max-width: min(520px, calc(100vw - 100px));
+}
+
 .hud-left,
 .hud-right {
     pointer-events: auto;
@@ -1831,7 +1876,8 @@ body.is-potato .pano-blur-overlay.phase-5 {
     flex-direction: column;
     align-items: flex-end;
     gap: 6px;
-    max-width: 300px;
+    width: max-content;
+    max-width: min(480px, calc(100vw - 110px));
     max-height: 52vh;
     overflow-y: auto;
     overflow-x: hidden;
@@ -1840,14 +1886,14 @@ body.is-potato .pano-blur-overlay.phase-5 {
 
 @media (max-width: 560px) {
     .hud-hp {
-        max-width: min(250px, 60vw);
+        max-width: min(340px, calc(100vw - 40px));
     }
 }
 
 .hud-hp.many-players {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    width: min(340px, 48vw);
+    width: min(420px, 75vw);
     max-height: 52vh;
     gap: 4px 6px;
 }
@@ -1858,7 +1904,7 @@ body.is-potato .pano-blur-overlay.phase-5 {
 }
 
 .hud-hp.many-players .hp-name {
-    max-width: 65px;
+    max-width: 95px;
     font-size: 0.72rem;
 }
 
@@ -1884,17 +1930,19 @@ body.is-potato .pano-blur-overlay.phase-5 {
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     min-width: 0;
+    max-width: 100%;
     box-sizing: border-box;
 }
 
 .hp-name {
     font-size: 0.82rem;
     font-weight: 800;
-    max-width: 85px;
+    max-width: 150px;
+    min-width: 50px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    flex-shrink: 0;
+    flex-shrink: 1;
 }
 
 .hp-bar {
@@ -2298,7 +2346,7 @@ body.is-potato .pano-blur-overlay.phase-5 {
     font-weight: 800;
     line-height: 1.25;
     white-space: nowrap;
-    max-width: 220px;
+    max-width: 320px;
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -2310,7 +2358,7 @@ body.is-potato .pano-blur-overlay.phase-5 {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    max-width: 120px;
+    max-width: 170px;
 }
 
 .gg-player-pin__dmg {
@@ -2637,7 +2685,7 @@ body.is-potato .pano-blur-overlay.phase-5 {
 
 .res-multi-row {
     display: grid;
-    grid-template-columns: 1fr auto auto;
+    grid-template-columns: minmax(0, 1fr) auto auto;
     align-items: center;
     gap: 12px;
     padding: 8px 12px;
@@ -2647,12 +2695,20 @@ body.is-potato .pano-blur-overlay.phase-5 {
     border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
+.res-multi-info {
+    min-width: 0;
+}
+
 .res-multi-name {
     font-weight: 700;
     font-size: 0.95rem;
     display: flex;
     align-items: center;
     gap: 6px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .res-color-dot {
@@ -3457,7 +3513,8 @@ select, option {
 
     .hud-hp {
         grid-template-columns: 1fr;
-        width: min(260px, 62vw);
+        width: max-content;
+        max-width: min(340px, 85vw);
         max-height: 25vh;
         gap: 4px;
     }
@@ -3467,7 +3524,8 @@ select, option {
     }
 
     .hp-name {
-        max-width: 68px;
+        max-width: 95px;
+        min-width: 45px;
         font-size: 0.72rem;
     }
 
@@ -3549,10 +3607,6 @@ select, option {
     margin-top: clamp(20px, 4vh, 40px);
 }
 
-.menu-bottom-row .btn-sound {
-    margin-top: 0 !important;
-}
-
 .btn-changelog {
     font-size: 0.92rem;
     font-weight: 700;
@@ -3581,6 +3635,8 @@ select, option {
 .changelog-panel {
     max-width: min(680px, 94vw);
     max-height: 85vh;
+    min-height: 0;
+    overflow: hidden;
     display: flex;
     flex-direction: column;
     padding: clamp(18px, 3vw, 28px);
@@ -3619,13 +3675,37 @@ select, option {
 }
 
 .changelog-list {
+    flex: 1 1 auto;
+    min-height: 0;
     overflow-y: auto;
+    overflow-x: hidden;
     max-height: 58vh;
     padding-right: 6px;
     display: flex;
     flex-direction: column;
     gap: 14px;
     margin-bottom: 16px;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(233, 69, 96, 0.55) transparent;
+}
+
+.changelog-list::-webkit-scrollbar {
+    width: 8px;
+}
+
+.changelog-list::-webkit-scrollbar-thumb {
+    background: rgba(233, 69, 96, 0.55);
+    border-radius: 8px;
+}
+
+/* Los grupos y entradas nunca deben encogerse: si lo hacen, overflow:hidden recorta el
+   contenido y el contenedor deja de tener scroll (bug v2.0.10). */
+.changelog-list > *,
+.changelog-group > .changelog-entry {
+    flex-shrink: 0;
 }
 
 .changelog-entry {
@@ -3711,6 +3791,70 @@ select, option {
     left: 0;
     color: var(--accent);
     font-weight: bold;
+}
+
+/* Secciones desplegables del Historial de Versiones */
+.changelog-group {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.015);
+    overflow: hidden;
+    transition: all 0.2s ease;
+}
+
+.changelog-group[open] {
+    background: rgba(255, 255, 255, 0.025);
+    border-color: rgba(255, 255, 255, 0.12);
+}
+
+.changelog-group-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 13px 16px;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--text);
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+    transition: color 0.2s, background 0.2s;
+}
+
+.changelog-group-title::-webkit-details-marker {
+    display: none;
+}
+
+.changelog-group-title::before {
+    content: '▶';
+    font-size: 0.68rem;
+    color: var(--accent);
+    transition: transform 0.25s ease;
+    display: inline-block;
+}
+
+.changelog-group[open] > .changelog-group-title::before {
+    transform: rotate(90deg);
+}
+
+.changelog-group[open] > .changelog-group-title {
+    border-bottom: 1px solid var(--border);
+}
+
+.changelog-group-title:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.changelog-group > .changelog-entry {
+    border-radius: 0;
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 0;
+}
+
+.changelog-group > .changelog-entry:first-of-type {
+    border-top: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -4136,3 +4280,829 @@ body.is-race-mode .minimap-wrap {
     }
 }
 
+
+
+/* -------------------------------------------------------------------------- */
+/* Modo «Ojo de Halcón» (BETA v2.1.0): vista satelital con zoom máximo         */
+/* -------------------------------------------------------------------------- */
+.sat-view {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    overflow: hidden;
+    background: #0b0f16;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+}
+
+.sat-stage {
+    position: absolute;
+    inset: 0;
+}
+
+.sat-img {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    max-width: none;
+    pointer-events: none;
+    transform-origin: 50% 50%;
+    image-rendering: auto;
+    transition: opacity 0.35s ease;
+}
+
+.sat-view.loading .sat-img {
+    opacity: 0;
+}
+
+.sat-vignette {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, 0.45) 100%);
+}
+
+.sat-crosshair {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 46px;
+    height: 46px;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    border: 2px solid rgba(255, 255, 255, 0.85);
+    border-radius: 50%;
+    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.45), 0 0 18px rgba(56, 189, 248, 0.55);
+}
+
+.sat-crosshair span {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 6px;
+    height: 6px;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    background: #38bdf8;
+    box-shadow: 0 0 8px #38bdf8;
+}
+
+.sat-crosshair::before,
+.sat-crosshair::after {
+    content: '';
+    position: absolute;
+    background: rgba(255, 255, 255, 0.85);
+    left: 50%;
+    top: 50%;
+}
+
+.sat-crosshair::before {
+    width: 2px;
+    height: 70px;
+    transform: translate(-50%, -50%);
+    -webkit-mask: linear-gradient(#000 0 20px, transparent 20px 50px, #000 50px);
+    mask: linear-gradient(#000 0 20px, transparent 20px 50px, #000 50px);
+}
+
+.sat-crosshair::after {
+    width: 70px;
+    height: 2px;
+    transform: translate(-50%, -50%);
+    -webkit-mask: linear-gradient(90deg, #000 0 20px, transparent 20px 50px, #000 50px);
+    mask: linear-gradient(90deg, #000 0 20px, transparent 20px 50px, #000 50px);
+}
+
+.sat-tag {
+    position: absolute;
+    left: 50%;
+    top: 74px;
+    transform: translateX(-50%);
+    max-width: calc(100% - 32px);
+    padding: 7px 14px;
+    border-radius: 999px;
+    background: rgba(6, 10, 18, 0.72);
+    border: 1px solid rgba(56, 189, 248, 0.35);
+    color: #e2e8f0;
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-align: center;
+    pointer-events: none;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    animation: satTagFade 7s ease forwards;
+}
+
+.sat-view.loading .sat-tag {
+    animation: none;
+    opacity: 0;
+}
+
+@keyframes satTagFade {
+    0%, 75% { opacity: 1; }
+    100% { opacity: 0; }
+}
+
+@media (max-width: 640px) {
+    .sat-tag {
+        top: 64px;
+        font-size: 0.72rem;
+    }
+}
+
+/* Sin brújula ni botón de recarga de Street View en Ojo de Halcón */
+body.is-sat-mode #hudCompass,
+body.is-sat-mode #panoRecoverBtn,
+body.is-sat-mode #toggleLayerBtn {
+    display: none !important;
+}
+
+.mode-tab-new {
+    position: relative;
+}
+
+.mode-tab-new::after {
+    content: 'NUEVO';
+    position: absolute;
+    top: -7px;
+    right: -4px;
+    padding: 1px 6px;
+    border-radius: 6px;
+    background: #38bdf8;
+    color: #00121c;
+    font-size: 0.58rem;
+    font-weight: 900;
+    letter-spacing: 0.04em;
+}
+
+/* Leaderboard: estado del registro y fila propia */
+.lb-row.lb-me {
+    outline: 2px solid rgba(56, 189, 248, 0.6);
+}
+
+.lb-note {
+    margin: 4px 0 10px;
+    font-size: 0.76rem;
+    color: var(--muted);
+    text-align: center;
+}
+
+.stat-row.stat-lb-best .stat-value {
+    color: #fbbf24;
+}
+
+.stat-row.stat-lb-ok .stat-value {
+    color: #34d399;
+}
+
+.stat-row.stat-lb-fail .stat-value {
+    color: #f87171;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Minimapa responsivo (BETA v2.1.4): en celulares y tablets el botón         */
+/* CONFIRMAR va debajo del mapa para no salirse por la izquierda.            */
+/* -------------------------------------------------------------------------- */
+@media (max-width: 820px) {
+    .minimap-wrap:not(.fullscreen) {
+        flex-direction: column-reverse;
+        align-items: stretch;
+        gap: 8px;
+        right: 10px;
+        bottom: max(10px, env(safe-area-inset-bottom));
+        max-width: calc(100vw - 20px);
+    }
+
+    .minimap-wrap:not(.fullscreen) .btn-confirm {
+        width: 100%;
+    }
+
+    .minimap-wrap:not(.fullscreen) .minimap-panel {
+        width: min(300px, calc(100vw - 20px));
+    }
+
+    .minimap-wrap.expanded:not(.fullscreen) .minimap-panel {
+        width: min(560px, calc(100vw - 20px));
+        height: min(440px, 58vh);
+    }
+}
+
+@media (max-width: 480px) {
+    .minimap-wrap:not(.fullscreen) .minimap-panel {
+        width: min(240px, calc(100vw - 20px));
+        height: 160px;
+    }
+
+    .minimap-wrap.expanded:not(.fullscreen) .minimap-panel {
+        width: calc(100vw - 20px);
+        height: 55vh;
+    }
+
+    .minimap-wrap:not(.fullscreen) .btn-confirm {
+        padding: 12px 16px;
+    }
+}
+
+/* ========================================================================== */
+/* v1.0.0 · Cuentas, reto diario, perfil, PWA y arreglos                     */
+/* ========================================================================== */
+
+/* --- Pantalla de acceso ---------------------------------------------------- */
+.auth-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    padding: 4px;
+    margin: 6px 0 14px;
+    border-radius: 12px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border);
+}
+
+.auth-tab,
+.auth-method-btn {
+    padding: 9px 10px;
+    border-radius: 9px;
+    background: transparent;
+    color: var(--muted);
+    font-weight: 700;
+    font-size: 0.9rem;
+    transition: background 0.2s, color 0.2s;
+}
+
+.auth-tab.active,
+.auth-method-btn.active {
+    background: var(--accent);
+    color: #fff;
+}
+
+.auth-pane {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.auth-pane p {
+    font-size: 0.86rem;
+    color: var(--muted);
+}
+
+.auth-method {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+}
+
+.auth-method-btn {
+    border: 1px solid var(--border-strong);
+    font-size: 0.8rem;
+}
+
+#authLogin input {
+    width: 100%;
+}
+
+/* --- Menú ------------------------------------------------------------------ */
+.announce-banner {
+    margin: 0 auto 18px;
+    max-width: 720px;
+    padding: 12px 16px;
+    border-radius: 12px;
+    background: rgba(56, 189, 248, 0.12);
+    border: 1px solid rgba(56, 189, 248, 0.45);
+    color: #e0f2fe;
+    font-weight: 600;
+    text-align: center;
+    white-space: pre-line;
+}
+
+.announce-banner.is-maintenance {
+    background: rgba(245, 158, 11, 0.14);
+    border-color: rgba(245, 158, 11, 0.6);
+    color: #fde68a;
+}
+
+.mode-card-daily {
+    border-color: rgba(251, 191, 36, 0.45);
+    background: linear-gradient(160deg, rgba(251, 191, 36, 0.12), var(--surface));
+}
+
+.btn-install {
+    border-color: rgba(56, 189, 248, 0.5);
+}
+
+@media (max-width: 480px) {
+    /* Tarjetas compactas en fila para que el menú de 6 opciones quepa mejor */
+    .modes {
+        gap: 10px;
+    }
+
+    .mode-card {
+        flex-direction: row;
+        align-items: center;
+        text-align: left;
+        gap: 14px;
+        padding: 14px 16px;
+        min-height: 0;
+    }
+
+    .mode-card .icon {
+        font-size: 1.6rem;
+        flex-shrink: 0;
+        width: 36px;
+        text-align: center;
+    }
+
+    .mode-card h2 {
+        font-size: 1.02rem;
+    }
+
+    .mode-card p {
+        font-size: 0.78rem;
+    }
+
+    .menu-bottom-row {
+        flex-wrap: wrap;
+    }
+
+    /* La etiqueta de versión no debe tapar el chat de la sala ni los botones */
+    body[data-screen="lobby"] #versionBadge,
+    body[data-screen="create"] #versionBadge,
+    body[data-screen="profile"] #versionBadge,
+    body[data-screen="daily"] #versionBadge {
+        display: none;
+    }
+}
+
+/* --- Leaderboard: fila propia y nombres con perfil -------------------------- */
+.lb-name-link {
+    background: none;
+    border: none;
+    padding: 0;
+    color: inherit;
+    font: inherit;
+    font-weight: 700;
+    text-align: left;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+}
+
+.lb-name-link:hover {
+    color: #fff;
+    text-decoration: underline;
+}
+
+.lb-row.lb-me {
+    background: rgba(56, 189, 248, 0.16) !important;
+    border-color: #38bdf8 !important;
+    box-shadow: inset 4px 0 0 #38bdf8;
+}
+
+.lb-me-tag {
+    font-size: 0.62rem;
+    font-weight: 900;
+    padding: 1px 6px;
+    border-radius: 6px;
+    background: #38bdf8;
+    color: #00121c;
+    letter-spacing: 0.05em;
+    text-decoration: none;
+}
+
+/* --- Resultado de ronda en solitario ---------------------------------------- */
+#resultPanel .result-solo-chip {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px 18px;
+    margin: 0 auto 12px;
+    padding: 10px 16px;
+    max-width: 360px;
+    border-radius: 14px;
+    background: rgba(8, 11, 22, 0.88);
+    border: 1px solid var(--border-strong);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    pointer-events: auto;
+}
+
+#resultPanel .result-solo-chip.hidden {
+    display: none !important;
+}
+
+.rsc-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 70px;
+}
+
+.rsc-label {
+    font-size: 0.66rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+}
+
+.rsc-value {
+    font-size: 1.12rem;
+    font-weight: 800;
+    color: #fff;
+}
+
+.rsc-points .rsc-value {
+    color: #34d399;
+}
+
+.rsc-badges {
+    flex-basis: 100%;
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.rsc-badge {
+    font-size: 0.74rem;
+    font-weight: 800;
+    padding: 2px 8px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.rsc-perfect { background: rgba(251, 191, 36, 0.2); color: #fde68a; }
+.rsc-owl { background: rgba(167, 139, 250, 0.2); color: #ddd6fe; }
+.rsc-streak { background: rgba(249, 115, 22, 0.2); color: #fed7aa; }
+.rsc-late { background: rgba(239, 68, 68, 0.2); color: #fecaca; }
+
+/* --- Reto diario ------------------------------------------------------------- */
+.daily-card,
+.profile-card {
+    max-width: 640px;
+    width: 100%;
+    text-align: left;
+}
+
+.daily-card h2,
+.profile-card h2 {
+    text-align: center;
+}
+
+.daily-date {
+    text-align: center;
+    color: var(--muted);
+    margin-bottom: 12px;
+}
+
+.daily-mode {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 14px;
+    border-radius: 14px;
+    background: rgba(251, 191, 36, 0.07);
+    border: 1px solid rgba(251, 191, 36, 0.35);
+    text-align: center;
+}
+
+.daily-mode-label {
+    font-size: 0.72rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #fbbf24;
+    font-weight: 800;
+}
+
+.daily-mode-name {
+    font-size: 1.4rem;
+    font-weight: 900;
+    color: #fff;
+}
+
+.daily-facts {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px 14px;
+    font-size: 0.84rem;
+    color: #cbd5e1;
+}
+
+.daily-mine {
+    margin-top: 12px;
+    padding: 10px 14px;
+    border-radius: 12px;
+    background: rgba(56, 189, 248, 0.1);
+    border: 1px solid rgba(56, 189, 248, 0.4);
+    text-align: center;
+    font-size: 0.9rem;
+}
+
+.daily-next {
+    text-align: center;
+    font-size: 0.78rem;
+    color: var(--muted);
+    margin: 8px 0 16px;
+}
+
+.daily-lb-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.daily-lb-head h3 {
+    font-size: 1rem;
+}
+
+.daily-date-select {
+    padding: 7px 10px;
+    border-radius: 9px;
+    background: rgba(0, 0, 0, 0.35);
+    color: var(--text);
+    border: 1px solid var(--border-strong);
+    font: inherit;
+    font-size: 0.85rem;
+}
+
+#screen-daily .lb-list {
+    max-height: 40vh;
+}
+
+#screen-daily .btn-ghost,
+#screen-profile #profileBackBtn {
+    display: block;
+    margin: 0 auto;
+}
+
+/* --- Perfil ------------------------------------------------------------------ */
+.profile-head {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 16px;
+}
+
+.profile-head-text h2 {
+    text-align: left;
+    margin: 0;
+    word-break: break-word;
+}
+
+.profile-head-text p {
+    font-size: 0.82rem;
+    color: var(--muted);
+}
+
+.profile-avatar {
+    width: 58px;
+    height: 58px;
+    flex-shrink: 0;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent), #8b5cf6);
+    color: #fff;
+    font-size: 1.6rem;
+    font-weight: 900;
+    box-shadow: 0 6px 18px var(--accent-glow);
+}
+
+.profile-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 130px), 1fr));
+    gap: 8px;
+}
+
+.pstat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 10px 6px;
+    border-radius: 12px;
+    background: rgba(0, 0, 0, 0.28);
+    border: 1px solid var(--border);
+    text-align: center;
+}
+
+.pstat-icon {
+    font-size: 1.1rem;
+}
+
+.pstat-value {
+    font-size: 1rem;
+    font-weight: 800;
+    color: #fff;
+}
+
+.pstat-label {
+    font-size: 0.7rem;
+    color: var(--muted);
+}
+
+.profile-section-title {
+    font-size: 1rem;
+    margin: 18px 0 8px;
+}
+
+.profile-best,
+.profile-history {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.profile-history {
+    max-height: 38vh;
+    overflow-y: auto;
+    padding-right: 4px;
+    overscroll-behavior: contain;
+}
+
+.pbest,
+.ph-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 9px 12px;
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid var(--border);
+    flex-wrap: wrap;
+}
+
+.pbest-mode small,
+.pbest-score small {
+    color: var(--muted);
+    font-weight: 500;
+}
+
+.pbest-score {
+    font-weight: 800;
+    color: #fbbf24;
+}
+
+.ph-main {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    font-weight: 700;
+}
+
+.ph-tag {
+    font-size: 0.7rem;
+    padding: 2px 7px;
+    border-radius: 7px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #cbd5e1;
+    font-weight: 700;
+}
+
+.ph-daily { background: rgba(251, 191, 36, 0.18); color: #fde68a; }
+.ph-multi { background: rgba(167, 139, 250, 0.2); color: #ddd6fe; }
+
+.ph-detail {
+    font-size: 0.84rem;
+    color: #e2e8f0;
+}
+
+.ph-date {
+    flex-basis: 100%;
+    font-size: 0.72rem;
+    color: var(--muted);
+}
+
+.profile-account {
+    margin-top: 6px;
+    padding: 14px;
+    border-radius: 14px;
+    background: rgba(56, 189, 248, 0.06);
+    border: 1px solid rgba(56, 189, 248, 0.3);
+    margin-bottom: 14px;
+}
+
+.profile-account .profile-section-title {
+    margin-top: 0;
+}
+
+.profile-account-info {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-size: 0.84rem;
+    margin-bottom: 10px;
+}
+
+.account-warn {
+    margin-top: 4px;
+    color: #fde68a;
+    font-weight: 600;
+}
+
+.account-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.account-row input {
+    flex: 1 1 200px;
+    min-width: 0;
+}
+
+.account-row .btn-ghost,
+.account-row .btn-primary {
+    flex: 1 1 auto;
+}
+
+.recovery-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 12px;
+    margin-bottom: 10px;
+    border-radius: 12px;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px dashed #fbbf24;
+    text-align: center;
+}
+
+.recovery-code {
+    font-family: 'Courier New', Consolas, monospace;
+    font-size: 1.35rem;
+    font-weight: 900;
+    letter-spacing: 0.12em;
+    color: #fbbf24;
+    user-select: all;
+}
+
+.recovery-label,
+.recovery-hint {
+    font-size: 0.78rem;
+    color: var(--muted);
+}
+
+.btn-danger {
+    border-color: rgba(239, 68, 68, 0.6) !important;
+    color: #fca5a5 !important;
+}
+
+/* --- Celular en horizontal: el minimapa abierto ya no tapa toda la imagen ---- */
+@media (orientation: landscape) and (max-height: 520px) {
+    .minimap-wrap:not(.fullscreen) {
+        flex-direction: row;
+        align-items: flex-end;
+        right: max(10px, env(safe-area-inset-right));
+        bottom: 8px;
+        gap: 8px;
+        max-width: none;
+    }
+
+    .minimap-wrap:not(.fullscreen) .btn-confirm {
+        width: auto;
+        padding: 10px 14px;
+        font-size: 0.82rem;
+    }
+
+    .minimap-wrap:not(.fullscreen) .minimap-panel {
+        width: min(220px, 34vw);
+        height: min(130px, 36vh);
+    }
+
+    .minimap-wrap.expanded:not(.fullscreen) .minimap-panel {
+        width: min(400px, 46vw);
+        height: calc(100vh - 110px);
+        max-height: 300px;
+    }
+
+    #resultPanel .result-solo-chip {
+        padding: 6px 12px;
+        margin-bottom: 6px;
+    }
+
+    #resultPanel #resultNextBtn {
+        margin-bottom: 10px;
+    }
+}
+
+.auth-pane input,
+.account-row input {
+    margin-bottom: 0 !important;
+}
+
+.account-row input {
+    text-align: left !important;
+    font-size: 0.95rem !important;
+}

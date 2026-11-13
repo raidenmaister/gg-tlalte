@@ -25,7 +25,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
     exit;
 }
 
-define('APP_VERSION_FALLBACK', '1.0.0');
+define('APP_VERSION_FALLBACK', '1.0.1');
 define('DATA_DIR', __DIR__ . '/data');
 define('ROOMS_FILE', DATA_DIR . '/rooms.json');
 define('USERS_FILE', DATA_DIR . '/users.json');
@@ -861,6 +861,12 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
 $action = is_string($IN['action'] ?? null) ? $IN['action'] : '';
 
 switch ($action) {
+    case 'time': {
+        // Reloj común para revelar las rondas multijugador en el mismo instante en todos los dispositivos.
+        header('Cache-Control: no-store');
+        out(['ok' => true, 't' => (int) round(microtime(true) * 1000)]);
+    }
+
     case 'version': {
         $v = loadJson(__DIR__ . '/version.json', ['version' => APP_VERSION_FALLBACK]);
         out(['ok' => true, 'version' => $v['version'] ?? APP_VERSION_FALLBACK]);

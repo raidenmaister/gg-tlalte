@@ -4,7 +4,7 @@
 
 export const CONFIG = {
   // Versión oficial de la aplicación visible en menús
-  VERSION: 'v1.0.0',
+  VERSION: 'v1.0.1',
 
   // Fallback opcional de API Key (cliente). La key real se define en
   // js/keys.js (window.GG_GOOGLE_MAPS_API_KEY), que se mantiene local y NO se
@@ -12,7 +12,7 @@ export const CONFIG = {
   GOOGLE_API_KEY: '',
 
   // Archivo con las ubicaciones jugables ({lat,lng,pano_id,date}).
-  COORDINATES_URL: 'coordenadas_validas.json?v=1.0.0',
+  COORDINATES_URL: 'coordenadas_validas.json?v=1.0.1',
 
   // Prefijo para los IDs de PeerJS (evita colisiones en el cloud público).
   PEER_PREFIX: 'ggtlalte-v1-',
@@ -69,6 +69,11 @@ export const CONFIG = {
   ROOM_MAX_PLAYERS: 25,     // Tamaño máximo permitido de sala (hasta 25 jugadores).
   ROOM_MIN_PLAYERS: 2,      // Mínimo para iniciar partida.
   RESULT_DURATION: 9000,    // ms que se muestra el resumen de ronda.
+  SYNC_WAIT_MS: 8000,        // Máx. espera a que TODOS carguen la imagen (Street View) antes de fijar la salida.
+  SYNC_WAIT_SAT_MS: 12000,   // Igual para Ojo de Halcón (la imagen pesa más).
+  SYNC_LOAD_WAIT_MS: 8000,   // Máx. espera de carga propia del visor antes de reportarse listo.
+  REVEAL_LEAD_MS: 3000,      // Margen entre la señal de salida y el revelado si todos van por P2P.
+  REVEAL_LEAD_RELAY_MS: 5000, // Margen si algún jugador depende del relay HTTP (más lento).
   PREPARE_DURATION: 3,      // Segundos de "prepárate" antes de adivinar (duelo).
   NO_GUESS_BASE_PENALTY: 100, // Ronda 1: 100 pts
   NO_GUESS_STEP_PENALTY: 50,  // +50 pts cada ronda subsiguiente (150, 200, 250...)

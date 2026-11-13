@@ -5,12 +5,12 @@
 // - JS/CSS/íconos versionados (?v=) se sirven desde caché y se actualizan solos.
 // - api.php, el panel de administración y cualquier dato del servidor NUNCA se cachean.
 // ============================================================================
-const VERSION = '1.0.0';
+const VERSION = '1.0.1';
 const CACHE = `gg-tlalte-${VERSION}`;
 const PRECACHE = [
   './',
   './index.html',
-  './style.css?v=1.0.0',
+  './style.css?v=1.0.1',
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',

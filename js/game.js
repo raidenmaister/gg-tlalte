@@ -13,7 +13,8 @@
 //   'toast'       {message, kind}
 // ============================================================================
 
-import { CONFIG, damageMultiplier, getNoGuessPenalty } from './config.js?v=1.0.0';
+import { CONFIG, damageMultiplier, getNoGuessPenalty } from './config.js?v=1.0.1';
+import { syncClock, serverNow, isClockSynced, msUntil } from './clock.js?v=1.0.1';
 import {
   haversineKm,
   scoreForDistance,
@@ -27,9 +28,9 @@ import {
   pickVerifiedRaceRound,
   computeRaceScore,
   clamp,
-} from './utils.js?v=1.0.0';
-import { secureApi, identity } from './secure.js?v=1.0.0';
-import { satView } from './satview.js?v=1.0.0';
+} from './utils.js?v=1.0.1';
+import { secureApi, identity } from './secure.js?v=1.0.1';
+import { satView } from './satview.js?v=1.0.1';
 
 export class Game {
   constructor({ pano, map, net, audio }) {
@@ -217,6 +218,7 @@ export class Game {
     this._reset();
     this.mode = 'multi';
     this.role = 'host';
+    syncClock(5, true);
     this.gameMode = gameMode || 'normal';
     this.isRaceMode = (this.gameMode === 'race');
     this.zoomMode = !!zoomMode || this.gameMode === 'tunnel' || this.gameMode === 'static_tunnel';
@@ -318,6 +320,7 @@ export class Game {
     this._reset();
     this.mode = 'multi';
     this.role = 'guest';
+    syncClock(5, true);
     this.gameMode = data.gameMode || 'normal';
     this.isRaceMode = !!(data.gameMode === 'race' || data.isRaceMode);
     this.raceDistanceSetting = Number(data.raceDistanceSetting) || (this.net && this.net.raceDistance) || CONFIG.DEFAULT_RACE_DISTANCE || 1000;
@@ -482,6 +485,9 @@ export class Game {
     this._roundActive = false;
     this._syncStartedRound = null;
     this._roundSyncStarted = null;
+    this._loadedRound = null;
+    this._revealWhenLoaded = null;
+    if (this.mode !== 'solo') syncClock(isClockSynced() ? 1 : 3);
     this.myGuess = null;
     this._clearTemporal();
     this._clearTunnelProgression();
@@ -588,16 +594,17 @@ export class Game {
             })),
           });
 
-          this.pano.waitForReady(2500)
+          this.pano.waitForReady(CONFIG.SYNC_LOAD_WAIT_MS || 8000)
             .catch(() => {})
             .then(() => {
+              this._markLoaded(round);
               this._panoReadyPeers.add(this.net.myId);
               this._checkAllPanoReady(round);
             });
 
           this._syncTimeout = setTimeout(() => {
             this._triggerSyncStart(round);
-          }, 1200);
+          }, CONFIG.SYNC_WAIT_MS || 8000);
         }
         return;
       }
@@ -723,17 +730,18 @@ export class Game {
       });
 
       // El anfitrión también espera a que su visor decodifique
-      this.pano.waitForReady(2500)
+      this.pano.waitForReady(CONFIG.SYNC_LOAD_WAIT_MS || 8000)
         .catch(() => {})
         .then(() => {
+          this._markLoaded(round);
           this._panoReadyPeers.add(this.net.myId);
           this._checkAllPanoReady(round);
         });
 
-      // Margen de sincronización ultra ágil: máximo 1200ms para no demorar la partida si un rival tiene conexión lenta
+      // Barrera de carga: se espera a que TODOS tengan la imagen lista (máximo SYNC_WAIT_MS) antes de fijar la hora de revelado
       this._syncTimeout = setTimeout(() => {
         this._triggerSyncStart(round);
-      }, 1200);
+      }, CONFIG.SYNC_WAIT_MS || 8000);
     }
   }
 
@@ -864,14 +872,15 @@ export class Game {
     satView.load(secureApi.satImageUrl(this.satToken, round), this.satRotation)
       .catch((err) => this.emit('toast', { message: (err && err.message) || 'No se pudo cargar la vista satelital', kind: 'error' }))
       .then(() => {
+        this._markLoaded(round);
         this._panoReadyPeers.add(this.net.myId);
         this._checkAllPanoReady(round);
       });
 
-    // La primera carga compone la imagen en el servidor: margen más amplio que en Street View.
+    // Barrera de carga: se espera a que TODOS tengan la imagen (máximo SYNC_WAIT_SAT_MS).
     this._syncTimeout = setTimeout(() => {
       this._triggerSyncStart(round);
-    }, 7000);
+    }, CONFIG.SYNC_WAIT_SAT_MS || 12000);
   }
 
   /** Anfitrión (Ojo de Halcón): cierra la ronda en el servidor y recibe la ubicación real. */
@@ -929,8 +938,17 @@ export class Game {
   _checkAllPanoReady(round) {
     if (this.role !== 'host' || this._resolved || this.currentRound !== round) return;
     if (this._syncStartedRound === round) return;
-    const targetCount = this.players.length;
-    if (this._panoReadyPeers.size >= targetCount) {
+    const active = this.players.filter((p) => !p.disconnected);
+    const targetCount = Math.max(1, active.length);
+    const ready = Math.min(this._panoReadyPeers.size, targetCount);
+    const progressKey = round + ':' + ready;
+    if (this._lastReadyProgress !== progressKey) {
+      this._lastReadyProgress = progressKey;
+      const progress = { type: 'readyProgress', round, ready, total: targetCount };
+      this.net.broadcast(progress);
+      this._onReadyProgress(progress);
+    }
+    if (ready >= targetCount) {
       if (this._syncTimeout) {
         clearTimeout(this._syncTimeout);
         this._syncTimeout = null;
@@ -939,7 +957,34 @@ export class Game {
     }
   }
 
-  /** Host: emite la señal de salida sincronizada a todos los jugadores. */
+  /** Muestra cuántos jugadores ya terminaron de cargar mientras se espera a los demás. */
+  _onReadyProgress(data) {
+    if (this.state !== 'playing' || this.currentRound !== data.round) return;
+    if (this._roundSyncStarted === data.round || this._roundActive) return;
+    if (this._loadedRound !== data.round) return;
+    this.pano.setBlind(true, 'Ronda ' + data.round, `Esperando a que todos carguen la imagen… (${data.ready}/${data.total} listos)`, true);
+  }
+
+  /** Este dispositivo ya tiene la imagen de la ronda lista (o agotó la espera de carga). */
+  _markLoaded(round) {
+    this._loadedRound = round;
+    if (this._revealWhenLoaded === round) {
+      this._revealWhenLoaded = null;
+      this._revealRound(round);
+    }
+  }
+
+  /** Margen entre la señal de salida y el revelado: cubre la latencia del más lento. */
+  _revealLeadMs() {
+    const direct = this.net && typeof this.net.allDirect === 'function' && this.net.allDirect();
+    return direct ? (CONFIG.REVEAL_LEAD_MS || 3000) : (CONFIG.REVEAL_LEAD_RELAY_MS || 5000);
+  }
+
+  /**
+   * Host: fija una HORA ABSOLUTA de revelado (reloj del servidor) y la envía a todos.
+   * Cada dispositivo destapa la imagen exactamente a esa hora, sin importar cuánto
+   * tardó en llegarle el mensaje: nadie la ve antes que los demás.
+   */
   _triggerSyncStart(round) {
     if (this.role !== 'host' || this._resolved || this.currentRound !== round) return;
     if (this._syncStartedRound === round) return;
@@ -948,38 +993,43 @@ export class Game {
       clearTimeout(this._syncTimeout);
       this._syncTimeout = null;
     }
-    const prepSecs = CONFIG.PREPARE_DURATION || 3;
-    this.net.broadcast({
+    const lead = this._revealLeadMs();
+    const revealAt = serverNow() + lead;
+    this._revealAt = revealAt;
+    this._revealSynced = isClockSynced();
+    const msg = () => ({
       type: 'syncStart',
       round,
-      prepareSeconds: prepSecs,
+      revealAt,
+      clockSynced: this._revealSynced,
+      leadMs: Math.max(0, revealAt - serverNow()),
+      prepareSeconds: Math.ceil(lead / 1000),
     });
-    // Re-emisión preventiva para amortiguar pérdidas esporádicas de paquetes WebRTC en clientes móviles/inestables
-    setTimeout(() => {
-      if (this.role === 'host' && this.currentRound === round && !this._resolved) {
-        this.net.broadcast({
-          type: 'syncStart',
-          round,
-          prepareSeconds: prepSecs,
-        });
-      }
-    }, 150);
-    this._onSyncStart({ round, prepareSeconds: prepSecs });
+    this.net.broadcast(msg());
+    // Re-emisiones preventivas (mensajes perdidos en móviles inestables); la hora es la misma, así que no desincronizan
+    [200, 1200].forEach((delay) => {
+      setTimeout(() => {
+        if (this.role === 'host' && this.currentRound === round && !this._resolved && serverNow() < revealAt) {
+          this.net.broadcast(msg());
+        }
+      }, delay);
+    });
+    this._onSyncStart(msg());
   }
 
   _onSyncStart(data) {
     const round = data.round != null ? data.round : this.currentRound;
-    if (this._roundSyncStarted === round && this._roundActive) return;
+    if (this._roundSyncStarted === round) return;
     this._roundSyncStarted = round;
     this.currentRound = round;
     if (this._guestBlindFailsafe) {
       clearTimeout(this._guestBlindFailsafe);
       this._guestBlindFailsafe = null;
     }
-    this.pano.refresh();
-    const prepSecs = data.prepareSeconds || 3;
-    this.pano.setBlind(true, '¡Prepárate!', `La imagen se mostrará en ${prepSecs} segundos`, false);
-    this._startPrepare(prepSecs, this.currentRound);
+    const fallback = data.leadMs != null ? Number(data.leadMs) : (data.prepareSeconds || 3) * 1000;
+    const maxWait = (CONFIG.REVEAL_LEAD_RELAY_MS || 5000) + 1000;
+    const waitMs = msUntil(Number(data.revealAt) || 0, !!data.clockSynced, fallback, maxWait);
+    this._startPrepare(waitMs, round);
   }
 
   /** Arranca la fase de adivinar en solitario. */
@@ -989,41 +1039,59 @@ export class Game {
   }
 
   /**
-   * Fase "prepárate": cuenta atrás fija de 3 segundos sincronizada.
+   * Fase "prepárate": cuenta atrás hasta la hora de revelado común.
+   * @param {number} waitMs milisegundos locales hasta revelar
    */
-  _startPrepare(durationSeconds, round) {
+  _startPrepare(waitMs, round) {
     this._clearPrepare();
-    let left = durationSeconds || CONFIG.PREPARE_DURATION || 3;
-    this.emit('prepare', { seconds: left });
-
-    this._prepare = setInterval(() => {
-      left--;
-      if (left > 0) {
+    const revealLocal = Date.now() + Math.max(0, waitMs);
+    let lastShown = null;
+    const show = () => {
+      const left = Math.ceil((revealLocal - Date.now()) / 1000);
+      if (left > 0 && left !== lastShown) {
+        lastShown = left;
         this.emit('prepare', { seconds: left });
-        this.pano.setBlind(true, '¡Prepárate!', `La imagen se mostrará en ${left} segundos`, false);
-      } else {
-        this._clearPrepare();
-        // Forzar visibilidad y resize del StreetView al destapar
-        this.pano.refresh();
-        this.pano.setBlind(false);
-        this._activateRound(round);
-        const isTunnel = this.gameMode === 'tunnel' || this.gameMode === 'static_tunnel' || this.zoomMode;
-        const isBlur = this.gameMode === 'blur' || this.gameMode === 'static_blur' || this.blurMode;
-        if (this.gameMode === 'temporal') {
-          this._startTemporalCountdown(this.temporalSeconds);
-        } else if (isTunnel) {
-          this._startTunnelProgression(this.tunnelSeconds);
-        } else if (isBlur) {
-          this._startBlurProgression(this.blurSeconds);
-        }
+        this.pano.setBlind(true, '¡Prepárate!', `La imagen se mostrará en ${left} segundo${left === 1 ? '' : 's'}`, false);
       }
-    }, 1000);
+    };
+    show();
+    this._prepare = setInterval(show, 100);
+    this._prepareReveal = setTimeout(() => this._revealRound(round), Math.max(0, waitMs));
+  }
+
+  /** Destapa la imagen a la hora acordada (o en cuanto termine de cargar si este dispositivo va tarde). */
+  _revealRound(round) {
+    this._clearPrepare();
+    if (this.currentRound !== round || this._roundActive || this._resolved) return;
+    if (this._loadedRound !== round) {
+      // Este dispositivo aún no termina de cargar: espera su imagen, pero nunca la ve antes que los demás.
+      this._revealWhenLoaded = round;
+      this.pano.setBlind(true, 'Ronda ' + round, 'La ronda ya empezó · terminando de cargar tu imagen…', true);
+      return;
+    }
+    // Forzar visibilidad y resize del StreetView al destapar
+    this.pano.refresh();
+    this.pano.setBlind(false);
+    this._activateRound(round);
+    const isTunnel = this.gameMode === 'tunnel' || this.gameMode === 'static_tunnel' || this.zoomMode;
+    const isBlur = this.gameMode === 'blur' || this.gameMode === 'static_blur' || this.blurMode;
+    if (this.gameMode === 'temporal') {
+      this._startTemporalCountdown(this.temporalSeconds);
+    } else if (isTunnel) {
+      this._startTunnelProgression(this.tunnelSeconds);
+    } else if (isBlur) {
+      this._startBlurProgression(this.blurSeconds);
+    }
   }
 
   _clearPrepare() {
     if (this._prepare) {
       clearInterval(this._prepare);
       this._prepare = null;
+    }
+    if (this._prepareReveal) {
+      clearTimeout(this._prepareReveal);
+      this._prepareReveal = null;
     }
     this.emit('prepare', { seconds: null });
   }
@@ -1686,21 +1754,26 @@ export class Game {
       this.roundEnd = this.hurryEnd;
     }
 
+    const endsAt = serverNow() + hurrySecs * 1000;
+    const clockSynced = isClockSynced();
     this.net.broadcast({
       type: 'raceHurryStart',
       seconds: hurrySecs,
       winnerName,
+      endsAt,
+      clockSynced,
     });
 
-    this._onRaceHurryStart({ seconds: hurrySecs, winnerName });
+    this._onRaceHurryStart({ seconds: hurrySecs, winnerName, endsAt, clockSynced });
   }
 
   _onRaceHurryStart(data) {
     this._raceHurryActive = true;
     const secs = data.seconds || 30;
-    this.hurryEnd = Date.now() + secs * 1000;
+    const ms = msUntil(Number(data.endsAt) || 0, !!data.clockSynced, secs * 1000, secs * 1000 + 1000);
+    this.hurryEnd = Date.now() + ms;
     this.emit('countdown', {
-      seconds: secs,
+      seconds: Math.ceil(ms / 1000),
       guesserName: data.winnerName || 'Un rival',
       penalty: 0,
     });
@@ -1811,14 +1884,18 @@ export class Game {
     this.hurryGuesser = guesserName;
     const seconds = CONFIG.OPPONENT_COUNTDOWN || 15;
     const penalty = getNoGuessPenalty(this.currentRound);
+    const endsAt = serverNow() + seconds * 1000;
+    const clockSynced = isClockSynced();
     this.net.broadcast({
       type: 'hurryStart',
       round: this.currentRound,
       seconds,
       guesserName,
       penalty,
+      endsAt,
+      clockSynced,
     });
-    this._runHurryCountdown(seconds, guesserName, penalty);
+    this._runHurryCountdown(seconds, guesserName, penalty, endsAt, clockSynced);
   }
 
   _onHurryStart(data) {
@@ -1827,18 +1904,23 @@ export class Game {
     const seconds = data.seconds || CONFIG.OPPONENT_COUNTDOWN || 15;
     const guesserName = data.guesserName || '';
     const penalty = data.penalty || getNoGuessPenalty(this.currentRound);
-    this._runHurryCountdown(seconds, guesserName, penalty);
+    this._runHurryCountdown(seconds, guesserName, penalty, Number(data.endsAt) || 0, !!data.clockSynced);
   }
 
-  _runHurryCountdown(totalSeconds, guesserName = '', penalty = 0) {
+  _runHurryCountdown(totalSeconds, guesserName = '', penalty = 0, endsAt = 0, remoteSynced = false) {
     this._clearHurryTimer();
     const roundPenalty = penalty || getNoGuessPenalty(this.currentRound);
-    let left = totalSeconds;
+    // Hora de cierre común: todos ven el mismo segundo restante aunque el aviso les llegue tarde
+    const msLeft = msUntil(endsAt, remoteSynced, totalSeconds * 1000, totalSeconds * 1000 + 1000);
+    const localEnd = Date.now() + msLeft;
+    let left = Math.ceil(msLeft / 1000);
     // Asigna el timestamp límite para el temporizador maestro de rescate del anfitrión (margen de red +4.5s)
-    this.hurryEnd = Date.now() + (totalSeconds + 4.5) * 1000;
+    this.hurryEnd = localEnd + 4500;
     this.emit('countdown', { seconds: left, guesserName, penalty: roundPenalty });
     this._hurry = setInterval(() => {
-      left--;
+      const nowLeft = Math.max(0, Math.ceil((localEnd - Date.now()) / 1000));
+      if (nowLeft === left) return;
+      left = nowLeft;
       if (left >= 0) {
         this.emit('countdown', { seconds: left, guesserName, penalty: roundPenalty });
       }
@@ -1880,7 +1962,7 @@ export class Game {
           }, 3500);
         }
       }
-    }, 1000);
+    }, 200);
   }
 
   _clearHurryTimer() {
@@ -1981,9 +2063,13 @@ export class Game {
       });
       setTimeout(() => {
         if (this.currentRound && !this._resolved) {
+          const revealAt = this._syncStartedRound === this.currentRound && this._revealAt ? this._revealAt : 0;
           this.net.sendTo(peerId, {
             type: 'syncStart',
             round: this.currentRound,
+            revealAt,
+            clockSynced: !!(revealAt && this._revealSynced),
+            leadMs: revealAt ? Math.max(0, revealAt - serverNow()) : 1000,
             prepareSeconds: 1,
           });
         }
@@ -2080,6 +2166,9 @@ export class Game {
           this._pendingRoundStart = data;
           break;
         }
+        this._loadedRound = null;
+        this._revealWhenLoaded = null;
+        syncClock(isClockSynced() ? 1 : 3);
 
         if (data.isRaceMode || data.gameMode === 'race' || this.isRaceMode) {
           this.isRaceMode = true;
@@ -2184,12 +2273,13 @@ export class Game {
                 this.pano.setBlind(false);
                 this._activateRound(data.round);
               }
-            }, 3600);
+            }, (CONFIG.SYNC_WAIT_MS || 8000) + (CONFIG.REVEAL_LEAD_RELAY_MS || 5000) + 4000);
 
-            this.pano.waitForReady(2500)
+            this.pano.waitForReady(CONFIG.SYNC_LOAD_WAIT_MS || 8000)
               .catch(() => {})
               .then(() => {
                 if (this.state !== 'playing' || this.currentRound !== data.round) return;
+                this._markLoaded(data.round);
                 this.net.send({
                   type: 'panoReady',
                   round: this.currentRound,
@@ -2302,7 +2392,7 @@ export class Game {
             this.pano.setBlind(false);
             this._activateRound(data.round);
           }
-        }, this.isSatellite ? 9000 : 3600);
+        }, (this.isSatellite ? (CONFIG.SYNC_WAIT_SAT_MS || 12000) : (CONFIG.SYNC_WAIT_MS || 8000)) + (CONFIG.REVEAL_LEAD_RELAY_MS || 5000) + 4000);
 
         this.pano.setStatic(isStatic || this.gameMode === 'temporal');
         this.map.reset();
@@ -2316,16 +2406,21 @@ export class Game {
         this.emit('temporalTimer', { seconds: null });
         this._emitHud();
 
-        (satReady || this.pano.waitForReady(2500))
+        (satReady || this.pano.waitForReady(CONFIG.SYNC_LOAD_WAIT_MS || 8000))
           .catch(() => {})
           .then(() => {
             if (this.state !== 'playing' || this.currentRound !== data.round) return;
+            this._markLoaded(data.round);
             this.net.send({
               type: 'panoReady',
               round: this.currentRound,
               senderId: this.net.myId,
             });
           });
+        break;
+      }
+      case 'readyProgress': {
+        if (this.role === 'guest') this._onReadyProgress(data);
         break;
       }
       case 'panoReady': {

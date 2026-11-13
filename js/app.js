@@ -2,17 +2,17 @@
 // app.js — Punto de entrada. Coordina UI, red, visor panorámico y juego.
 // ============================================================================
 
-import { $, formatKm, formatNumber, clamp, escapeHtml, detectPotatoMode } from './utils.js?v=1.0.0';
-import { CONFIG } from './config.js?v=1.0.0';
-import { audio } from './audio.js?v=1.0.0';
-import { PanoramaViewer } from './panorama.js?v=1.0.0';
-import { Minimap } from './minimap.js?v=1.0.0';
-import { Network } from './net.js?v=1.0.0';
-import { Game } from './game.js?v=1.0.0';
-import { MenuPanoBackground } from './menu-pano.js?v=1.0.0';
-import { identity, secureApi } from './secure.js?v=1.0.0';
-import { satView } from './satview.js?v=1.0.0';
-import * as features from './features.js?v=1.0.0';
+import { $, formatKm, formatNumber, clamp, escapeHtml, detectPotatoMode } from './utils.js?v=1.0.1';
+import { CONFIG } from './config.js?v=1.0.1';
+import { audio } from './audio.js?v=1.0.1';
+import { PanoramaViewer } from './panorama.js?v=1.0.1';
+import { Minimap } from './minimap.js?v=1.0.1';
+import { Network } from './net.js?v=1.0.1';
+import { Game } from './game.js?v=1.0.1';
+import { MenuPanoBackground } from './menu-pano.js?v=1.0.1';
+import { identity, secureApi } from './secure.js?v=1.0.1';
+import { satView } from './satview.js?v=1.0.1';
+import * as features from './features.js?v=1.0.1';
 
 const PLAYER_KEY = 'ggtlalte:playerName';
 const ROOM_KEY = 'ggtlalte:activeRoom';
@@ -2961,7 +2961,7 @@ function boot() {
   detectPotatoMode();
   const versionBadge = $('#versionBadge');
   if (versionBadge) {
-    versionBadge.textContent = CONFIG.VERSION || 'v1.0.0';
+    versionBadge.textContent = CONFIG.VERSION || 'v1.0.1';
     versionBadge.style.cursor = 'pointer';
     versionBadge.title = 'Ver historial de versiones';
     versionBadge.addEventListener('click', () => {

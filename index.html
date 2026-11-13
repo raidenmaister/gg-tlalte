@@ -30,7 +30,7 @@
 
     <!-- Leaflet (minimapa) -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-    <link rel="stylesheet" href="style.css?v=1.0.0">
+    <link rel="stylesheet" href="style.css?v=1.0.1">
 </head>
 <body>
 
@@ -38,7 +38,7 @@
     <div id="menu-pano-bg" class="menu-pano-bg"></div>
 
     <!-- Badge de versión (menús) -->
-    <div id="versionBadge" class="version-badge" title="Ver historial de versiones">v1.0.0</div>
+    <div id="versionBadge" class="version-badge" title="Ver historial de versiones">v1.0.1</div>
 
     <!-- ====================== PANTALLA: NOMBRE ====================== -->
     <div id="screen-name" class="screen">
@@ -752,11 +752,23 @@
                 <details class="changelog-group" open>
                     <summary class="changelog-group-title">🎉 Versión 1.0 · Lanzamiento oficial</summary>
 
-                    <!-- v1.0.0 -->
+                    <!-- v1.0.1 -->
                     <div class="changelog-entry current">
                         <div class="changelog-title-row">
-                            <span class="changelog-version">v1.0.0 <span class="changelog-date">· 12 nov 2026</span></span>
+                            <span class="changelog-version">v1.0.1 <span class="changelog-date">· 13 nov 2026</span></span>
                             <span class="changelog-badge badge-current">Actual</span>
+                        </div>
+                        <ul class="changelog-list-items">
+                            <li><strong>⏱️ Salida simultánea en multijugador:</strong> Todos los jugadores ven la imagen en el mismo instante, sin importar qué tan rápido o lento sea su internet. Cada dispositivo sincroniza su reloj con el servidor y la imagen se destapa a una hora exacta común, en vez de contar «3, 2, 1» desde que le llega el aviso.</li>
+                            <li><strong>Nadie arranca con ventaja:</strong> La ronda espera a que todos terminen de cargar la imagen (hasta 8 s en Street View y 12 s en Ojo de Halcón) y muestra cuántos jugadores ya están listos. Si alguien se queda atrás, su imagen aparece en cuanto termine de cargar, nunca antes que la de los demás.</li>
+                            <li><strong>Contador de 15 s justo:</strong> La cuenta regresiva tras la primera chincheta termina al mismo segundo para todos, aunque el aviso llegue tarde a algún jugador. Aplica en todos los modos, incluida la Carrera.</li>
+                        </ul>
+                    </div>
+
+                    <!-- v1.0.0 -->
+                    <div class="changelog-entry">
+                        <div class="changelog-title-row">
+                            <span class="changelog-version">v1.0.0 <span class="changelog-date">· 12 nov 2026</span></span>
                         </div>
                         <ul class="changelog-list-items">
                             <li><strong>¡Adiós BETA! Primera versión oficial:</strong> Después de más de 50 versiones de prueba, GG-TLALTE sale de beta con la numeración 1.0.0.</li>
@@ -1311,6 +1323,6 @@
     <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script defer src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
     <script defer src="js/keys.js"></script>
-    <script type="module" src="js/app.js?v=1.0.0"></script>
+    <script type="module" src="js/app.js?v=1.0.1"></script>
 </body>
 </html>

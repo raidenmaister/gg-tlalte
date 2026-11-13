@@ -9,8 +9,8 @@
 //    exactamente igual y sin requerir servidores TURN adicionales ni VPS.
 // ============================================================================
 
-import { CONFIG } from './config.js?v=1.0.0';
-import { generateCode } from './utils.js?v=1.0.0';
+import { CONFIG } from './config.js?v=1.0.1';
+import { generateCode } from './utils.js?v=1.0.1';
 
 const API_URL = 'api.php';
 
@@ -159,7 +159,7 @@ export class Network {
     // Mensajes críticos (como conjeturas 'guess', 'ready' o llegada de carrera 'raceReach') usan transporte dual:
     // se envían por WebRTC y SIEMPRE también por HTTP relay si hay sala, asegurando 100% de entrega
     // ante desconexiones silenciosas o pérdida de paquetes UDP/P2P.
-    const isCritical = obj.type === 'guess' || obj.type === 'ready' || obj.type === 'raceReach';
+    const isCritical = obj.type === 'guess' || obj.type === 'ready' || obj.type === 'raceReach' || obj.type === 'panoReady';
     if ((!sentP2P || isCritical) && this.roomId) {
       this._api('send-msg', {
         id: this.roomId,
@@ -191,7 +191,7 @@ export class Network {
 
     // Si hay invitados que no tienen canal P2P abierto o no hay ninguno,
     // se transmite por el relay HTTP (los eventos de tipeo solo van por P2P para no cargar PHP)
-    if (this.roomId && obj.type !== 'lobbyTyping' && (p2pCount < this.guestNames.size || p2pCount === 0)) {
+    if (this.roomId && obj.type !== 'lobbyTyping' && obj.type !== 'readyProgress' && (p2pCount < this.guestNames.size || p2pCount === 0)) {
       this._api('send-msg', {
         id: this.roomId,
         from: this.myId || 'host',
@@ -369,6 +369,15 @@ export class Network {
       clearInterval(this._heartbeat);
       this._heartbeat = null;
     }
+  }
+
+  /** Host: ¿todos los invitados tienen canal P2P directo? (si no, algunos dependen del relay HTTP, más lento) */
+  allDirect() {
+    let open = 0;
+    this.conns.forEach((conn, peerId) => {
+      if (peerId !== '__host__' && conn && conn.open) open++;
+    });
+    return open >= this.guestNames.size;
   }
 
   setAwaitingGuesses(val) {

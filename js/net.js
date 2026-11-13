@@ -9,8 +9,8 @@
 //    exactamente igual y sin requerir servidores TURN adicionales ni VPS.
 // ============================================================================
 
-import { CONFIG } from './config.js?v=1.0.1';
-import { generateCode } from './utils.js?v=1.0.1';
+import { CONFIG } from './config.js?v=1.0.2';
+import { generateCode } from './utils.js?v=1.0.2';
 
 const API_URL = 'api.php';
 
@@ -49,6 +49,9 @@ export class Network {
     this.temporalSeconds = CONFIG.DEFAULT_TEMPORAL_SECONDS || 3;
     this.tunnelSeconds = CONFIG.DEFAULT_TUNNEL_SECONDS || 3;
     this.blurSeconds = CONFIG.DEFAULT_BLUR_SECONDS || 3;
+    this.satZoom = 280;
+    this.satSource = 'both';
+    this.satCity = 60;
 
     this._localName = '';
     this._guestPlayers = [];
@@ -138,6 +141,10 @@ export class Network {
       if (config.blurSeconds) this.blurSeconds = config.blurSeconds;
       if (config.raceDistance) this.raceDistance = config.raceDistance;
       if (config.raceSeconds) this.raceSeconds = config.raceSeconds;
+      if (config.satZoom) this.satZoom = Number(config.satZoom) || 280;
+      if (config.satSource) this.satSource = config.satSource;
+      if (config.satCity) this.satCity = Number(config.satCity) || 60;
+      if (config.isPublic !== undefined) this.isPublic = !!config.isPublic;
     }
   }
 
@@ -314,6 +321,9 @@ export class Network {
       blurSeconds: this.blurSeconds || CONFIG.DEFAULT_BLUR_SECONDS,
       raceDistance: this.raceDistance || CONFIG.DEFAULT_RACE_DISTANCE || 1000,
       raceSeconds: this.raceSeconds || CONFIG.DEFAULT_RACE_DURATION || 150,
+      satZoom: this.satZoom || 280,
+      satSource: this.satSource || 'both',
+      satCity: this.satCity || 60,
     }).then((res) => {
       if ((!res || !res.ok) && isPublic && this.cb.onError) {
         this.cb.onError('public-register');
@@ -669,6 +679,9 @@ export class Network {
     this.blurSeconds = Number(opts.blurSeconds) || CONFIG.DEFAULT_BLUR_SECONDS;
     this.raceDistance = Number(opts.raceDistance) || CONFIG.DEFAULT_RACE_DISTANCE || 1000;
     this.raceSeconds = Number(opts.raceSeconds) || CONFIG.DEFAULT_RACE_DURATION || 150;
+    this.satZoom = Number(opts.satZoom) || 280;
+    this.satSource = opts.satSource || 'both';
+    this.satCity = Number(opts.satCity) || 60;
     this.limit = Math.min(
       CONFIG.ROOM_MAX_PLAYERS,
       Math.max(CONFIG.ROOM_MIN_PLAYERS, opts.limit || CONFIG.ROOM_MAX_PLAYERS)
@@ -698,6 +711,9 @@ export class Network {
     this.tunnelSeconds = saved.tunnelSeconds || CONFIG.DEFAULT_TUNNEL_SECONDS;
     this.blurSeconds = saved.blurSeconds || CONFIG.DEFAULT_BLUR_SECONDS;
     this.blurMode = !!saved.blurMode;
+    this.satZoom = Number(saved.satZoom) || 280;
+    this.satSource = saved.satSource || 'both';
+    this.satCity = Number(saved.satCity) || 60;
     this.limit = Math.min(
       CONFIG.ROOM_MAX_PLAYERS,
       Math.max(CONFIG.ROOM_MIN_PLAYERS, saved.limit || CONFIG.ROOM_MAX_PLAYERS)
@@ -947,6 +963,10 @@ export class Network {
       blurSeconds: this.blurSeconds || CONFIG.DEFAULT_BLUR_SECONDS,
       raceDistance: this.raceDistance || CONFIG.DEFAULT_RACE_DISTANCE || 1000,
       raceSeconds: this.raceSeconds || CONFIG.DEFAULT_RACE_DURATION || 150,
+      satZoom: this.satZoom || 280,
+      satSource: this.satSource || 'both',
+      satCity: this.satCity || 60,
+      isPublic: !!this.isPublic,
     };
     LOG('_syncPlayers', { count: players.length });
     this.broadcast({ type: 'players', players, config });

@@ -103,7 +103,7 @@ export const secureApi = {
   }, { retries: 3 }),
   soloFinish: (token, clientTimeMs) => apiCall('solo-finish', { token, clientTimeMs }, { retries: 2 }),
 
-  roomSatStart: (rounds, players) => apiCall('room-sat-start', { ...auth(), rounds, players }, { retries: 1 }),
+  roomSatStart: (rounds, players, sat = {}) => apiCall('room-sat-start', { ...auth(), rounds, players, satZoom: sat.zoom, satSource: sat.src, satCity: sat.city }, { retries: 1 }),
   satGuess: (token, round, guess) => apiCall('sat-guess', { ...auth(), token, round, lat: guess.lat, lng: guess.lng }, { retries: 2 }),
   satReveal: (token, round) => apiCall('sat-reveal', { ...auth(), token, round }, { retries: 4 }),
 

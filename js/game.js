@@ -13,8 +13,8 @@
 //   'toast'       {message, kind}
 // ============================================================================
 
-import { CONFIG, damageMultiplier, getNoGuessPenalty } from './config.js?v=1.0.1';
-import { syncClock, serverNow, isClockSynced, msUntil } from './clock.js?v=1.0.1';
+import { CONFIG, damageMultiplier, getNoGuessPenalty } from './config.js?v=1.0.2';
+import { syncClock, serverNow, isClockSynced, msUntil } from './clock.js?v=1.0.2';
 import {
   haversineKm,
   scoreForDistance,
@@ -28,9 +28,9 @@ import {
   pickVerifiedRaceRound,
   computeRaceScore,
   clamp,
-} from './utils.js?v=1.0.1';
-import { secureApi, identity } from './secure.js?v=1.0.1';
-import { satView } from './satview.js?v=1.0.1';
+} from './utils.js?v=1.0.2';
+import { secureApi, identity } from './secure.js?v=1.0.2';
+import { satView } from './satview.js?v=1.0.2';
 
 export class Game {
   constructor({ pano, map, net, audio }) {
@@ -195,18 +195,24 @@ export class Game {
 
     // El servidor elige las ubicaciones (≥161 m entre sí) y las entrega una a una.
     identity.name = this.meName;
+    const sat = opts.sat || {};
     const res = await secureApi.soloStart({
       rounds: this.rounds,
       gameMode: this.gameMode,
       tunnelSeconds: this.tunnelSeconds,
       blurSeconds: this.blurSeconds,
       daily: !!opts.daily,
+      satZoom: sat.zoom,
+      satSource: sat.src,
+      satCity: sat.city,
     });
     if (!res || !res.ok || !res.token) {
       throw new Error((res && res.error) || 'No se pudo iniciar la partida en el servidor');
     }
     this.soloToken = res.token;
     this.dailyDate = res.daily || null;
+    this.satCfg = res.sat || null;
+    this.satZoom = (res.sat && Number(res.sat.zoom)) || 280;
     if (res.tunnelSeconds) this.tunnelSeconds = Number(res.tunnelSeconds);
     if (res.blurSeconds) this.blurSeconds = Number(res.blurSeconds);
     this.locations = new Array(this.rounds).fill(-1);
@@ -273,11 +279,14 @@ export class Game {
       // Ojo de Halcón: el servidor guarda las ubicaciones; nadie (ni el anfitrión) las conoce
       // hasta que la ronda se cierra.
       identity.name = this.meName;
-      const res = await secureApi.roomSatStart(this.rounds, this.players.map((p) => p.name));
+      const wanted = { zoom: this.net.satZoom, src: this.net.satSource, city: this.net.satCity };
+      const res = await secureApi.roomSatStart(this.rounds, this.players.map((p) => p.name), wanted);
       if (!res || !res.ok || !res.token) {
         throw new Error((res && res.error) || 'No se pudo preparar la partida satelital');
       }
       this.satToken = res.token;
+      this.satCfg = res.sat || null;
+      this.satZoom = (res.sat && Number(res.sat.zoom)) || 280;
       this.locations = new Array(this.rounds).fill(-1);
     } else {
       // Selección aleatoria garantizando al menos 161m entre TODOS los panos de la partida
@@ -302,6 +311,7 @@ export class Game {
       tunnelSeconds: this.tunnelSeconds,
       blurSeconds: this.blurSeconds,
       satToken: this.satToken,
+      satCfg: this.satCfg,
       players: this.players.map((p) => ({ id: p.id, name: p.name })),
     });
 
@@ -335,6 +345,8 @@ export class Game {
     this.rounds = data.rounds || CONFIG.DUEL_ROUNDS;
     this.locations = data.locations || [];
     this.satToken = data.satToken || null;
+    this.satCfg = data.satCfg || null;
+    this.satZoom = (data.satCfg && Number(data.satCfg.zoom)) || 280;
     this.players = (data.players || []).map((p) => ({
       id: p.id,
       name: p.name,
@@ -793,7 +805,7 @@ export class Game {
     if (isSat) {
       this.satRotation = Math.floor(Math.random() * 360);
       try {
-        await satView.load(secureApi.satImageUrl(token, round), this.satRotation);
+        await satView.load(secureApi.satImageUrl(token, round), this.satRotation, this.satZoom);
       } catch (err) {
         if (stale()) return;
         this.emit('toast', { message: (err && err.message) || 'No se pudo cargar la vista satelital', kind: 'error' });
@@ -859,6 +871,7 @@ export class Game {
       round,
       gameMode: 'satellite',
       satToken: this.satToken,
+      satCfg: this.satCfg,
       satRotation: this.satRotation,
       players: this.players.map((p) => ({
         id: p.id,
@@ -869,7 +882,7 @@ export class Game {
       })),
     });
 
-    satView.load(secureApi.satImageUrl(this.satToken, round), this.satRotation)
+    satView.load(secureApi.satImageUrl(this.satToken, round), this.satRotation, this.satZoom)
       .catch((err) => this.emit('toast', { message: (err && err.message) || 'No se pudo cargar la vista satelital', kind: 'error' }))
       .then(() => {
         this._markLoaded(round);
@@ -2040,6 +2053,7 @@ export class Game {
       gameMode: this.gameMode,
       temporalSeconds: this.temporalSeconds,
       satToken: this.satToken,
+      satCfg: this.satCfg,
       players: this.players.map((p) => ({ id: p.id, name: p.name, hp: p.hp, score: p.score })),
     });
 
@@ -2049,6 +2063,7 @@ export class Game {
       this.net.sendTo(peerId, {
         type: 'roundStart',
         satToken: this.satToken,
+      satCfg: this.satCfg,
         satRotation: this.satRotation,
         round: this.currentRound,
         total: this.rounds,
@@ -2367,7 +2382,8 @@ export class Game {
           if (data.satToken) this.satToken = data.satToken;
           this.satRotation = Number(data.satRotation) || 0;
           this.pano.setBlind(true, 'Ronda ' + data.round, 'Preparando vista satelital…', true);
-          satReady = satView.load(secureApi.satImageUrl(this.satToken, data.round), this.satRotation)
+          if (data.satCfg && data.satCfg.zoom) this.satZoom = Number(data.satCfg.zoom) || this.satZoom;
+          satReady = satView.load(secureApi.satImageUrl(this.satToken, data.round), this.satRotation, this.satZoom || 280)
             .catch((err) => this.emit('toast', { message: (err && err.message) || 'No se pudo cargar la vista satelital', kind: 'error' }));
         } else {
           satView.hide();

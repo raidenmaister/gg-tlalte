@@ -4,7 +4,7 @@
 
 export const CONFIG = {
   // Versión oficial de la aplicación visible en menús
-  VERSION: 'v1.0.1',
+  VERSION: 'v1.0.2',
 
   // Fallback opcional de API Key (cliente). La key real se define en
   // js/keys.js (window.GG_GOOGLE_MAPS_API_KEY), que se mantiene local y NO se
@@ -12,7 +12,7 @@ export const CONFIG = {
   GOOGLE_API_KEY: '',
 
   // Archivo con las ubicaciones jugables ({lat,lng,pano_id,date}).
-  COORDINATES_URL: 'coordenadas_validas.json?v=1.0.1',
+  COORDINATES_URL: 'coordenadas_validas.json?v=1.0.2',
 
   // Prefijo para los IDs de PeerJS (evita colisiones en el cloud público).
   PEER_PREFIX: 'ggtlalte-v1-',

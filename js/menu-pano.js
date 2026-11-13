@@ -10,9 +10,9 @@
 // Suspensión total: se detiene al 100% durante las partidas para 0% uso de GPU/CPU.
 // ============================================================================
 
-import { loadGoogleMaps } from './panorama.js?v=1.0.1';
-import { detectPotatoMode } from './utils.js?v=1.0.1';
-import { CONFIG } from './config.js?v=1.0.1';
+import { loadGoogleMaps } from './panorama.js?v=1.0.2';
+import { detectPotatoMode } from './utils.js?v=1.0.2';
+import { CONFIG } from './config.js?v=1.0.2';
 
 export class MenuPanoBackground {
   /**

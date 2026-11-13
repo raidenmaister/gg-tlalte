@@ -6,12 +6,16 @@
 // así que el navegador nunca conoce las coordenadas del lugar antes de adivinar.
 // ============================================================================
 
+/** Metros de terreno que abarca cada foto del banco (zoom 19, 1024 px ≈ 280 m). */
+export const SAT_FULL_M = 280;
+
 export class SatelliteView {
   constructor(id = 'satView') {
     this.id = id;
     this.el = null;
     this.img = null;
     this.rotation = 0;
+    this.zoomM = SAT_FULL_M;
     this._loadToken = 0;
     this._onResize = () => this._layout();
   }
@@ -42,7 +46,9 @@ export class SatelliteView {
     const w = this.el.clientWidth || window.innerWidth;
     const h = this.el.clientHeight || window.innerHeight;
     const diag = Math.sqrt(w * w + h * h);
-    const size = Math.ceil(diag * 1.02);
+    // Zoom elegido: la diagonal de la pantalla abarca `zoomM` metros (280 m = foto completa).
+    const zoomM = Math.max(150, Math.min(SAT_FULL_M, Number(this.zoomM) || SAT_FULL_M));
+    const size = Math.ceil(diag * 1.02 * (SAT_FULL_M / zoomM));
     this.img.style.width = `${size}px`;
     this.img.style.height = `${size}px`;
     this.img.style.transform = `translate(-50%, -50%) rotate(${this.rotation}deg)`;
@@ -52,7 +58,8 @@ export class SatelliteView {
    * Carga la imagen de la ronda con un reintento; si falla, consulta al servidor el
    * motivo exacto para mostrarlo al jugador.
    */
-  async load(url, rotation = 0) {
+  async load(url, rotation = 0, zoomM = SAT_FULL_M) {
+    this.zoomM = Number(zoomM) || SAT_FULL_M;
     try {
       return await this._loadOnce(url, rotation);
     } catch (firstErr) {

@@ -30,7 +30,7 @@
 
     <!-- Leaflet (minimapa) -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-    <link rel="stylesheet" href="style.css?v=1.0.1">
+    <link rel="stylesheet" href="style.css?v=1.0.2">
 </head>
 <body>
 
@@ -38,7 +38,7 @@
     <div id="menu-pano-bg" class="menu-pano-bg"></div>
 
     <!-- Badge de versión (menús) -->
-    <div id="versionBadge" class="version-badge" title="Ver historial de versiones">v1.0.1</div>
+    <div id="versionBadge" class="version-badge" title="Ver historial de versiones">v1.0.2</div>
 
     <!-- ====================== PANTALLA: NOMBRE ====================== -->
     <div id="screen-name" class="screen">
@@ -195,6 +195,27 @@
                         <button type="button" class="pill-btn" data-sec="10">10s</button>
                         <button type="button" class="pill-btn" data-sec="15">15s</button>
                     </div>
+                </div>
+
+                <!-- Parámetros de Ojo de Halcón -->
+                <div id="soloSatConfig" class="sat-config hidden">
+                    <label class="config-label" for="soloSatZoom">Área visible (zoom) <span class="sat-val" id="soloSatZoomVal">280 m</span></label>
+                    <input type="range" class="sat-range" id="soloSatZoom" min="150" max="280" step="10" value="280">
+                    <div class="sat-range-ends"><span>150 m · más cerca</span><span>280 m · más lejos</span></div>
+
+                    <label class="config-label">Fotos de</label>
+                    <div class="pill-row" id="soloSatSourcePills">
+                        <button type="button" class="pill-btn active" data-src="both">🏙️ + 🌄 Ambas</button>
+                        <button type="button" class="pill-btn" data-src="city">🏙️ Solo centro</button>
+                        <button type="button" class="pill-btn" data-src="out">🌄 Solo afuera</button>
+                    </div>
+                    <div id="soloSatMixRow" class="sat-mix-row">
+                        <label class="config-label" for="soloSatCity">Proporción <span class="sat-val" id="soloSatCityVal">60% centro · 40% afuera</span></label>
+                        <input type="range" class="sat-range" id="soloSatCity" min="10" max="90" step="10" value="60">
+                        <div class="sat-range-ends"><span>Más afuera</span><span>Más centro</span></div>
+                    </div>
+                    <p class="sat-hint">Centro = a 2 km o menos de la plaza de Tlaltenango. Afuera = rancherías, caminos, campo y sierra.</p>
+                    <p class="sat-rank-note" id="soloSatRankNote"></p>
                 </div>
             </div>
 
@@ -419,6 +440,26 @@
                         <button type="button" class="pill-btn" data-sec="15">15s</button>
                     </div>
                 </div>
+
+                <!-- Parámetros de Ojo de Halcón -->
+                <div id="multiSatConfig" class="sat-config hidden">
+                    <label class="config-label" for="multiSatZoom">Área visible (zoom) <span class="sat-val" id="multiSatZoomVal">280 m</span></label>
+                    <input type="range" class="sat-range" id="multiSatZoom" min="150" max="280" step="10" value="280">
+                    <div class="sat-range-ends"><span>150 m · más cerca</span><span>280 m · más lejos</span></div>
+
+                    <label class="config-label">Fotos de</label>
+                    <div class="pill-row" id="multiSatSourcePills">
+                        <button type="button" class="pill-btn active" data-src="both">🏙️ + 🌄 Ambas</button>
+                        <button type="button" class="pill-btn" data-src="city">🏙️ Solo centro</button>
+                        <button type="button" class="pill-btn" data-src="out">🌄 Solo afuera</button>
+                    </div>
+                    <div id="multiSatMixRow" class="sat-mix-row">
+                        <label class="config-label" for="multiSatCity">Proporción <span class="sat-val" id="multiSatCityVal">60% centro · 40% afuera</span></label>
+                        <input type="range" class="sat-range" id="multiSatCity" min="10" max="90" step="10" value="60">
+                        <div class="sat-range-ends"><span>Más afuera</span><span>Más centro</span></div>
+                    </div>
+                    <p class="sat-hint">Centro = a 2 km o menos de la plaza de Tlaltenango. Afuera = rancherías, caminos, campo y sierra.</p>
+                </div>
             </div>
 
             <div class="room-config-grid">
@@ -496,6 +537,7 @@
                     <button class="btn-ghost btn-copy" id="copyCodeBtn">Copiar código</button>
                 </div>
                 <p class="lobby-note" id="roomRoundsInfo"></p>
+                <div class="room-params" id="roomParams" aria-label="Parámetros de la sala"></div>
                 <h3 class="players-title">Jugadores <span id="playersCount"></span></h3>
                 <ul class="players-list" id="playersList"></ul>
                 <div class="lobby-actions">
@@ -752,11 +794,25 @@
                 <details class="changelog-group" open>
                     <summary class="changelog-group-title">🎉 Versión 1.0 · Lanzamiento oficial</summary>
 
-                    <!-- v1.0.1 -->
+                    <!-- v1.0.2 -->
                     <div class="changelog-entry current">
                         <div class="changelog-title-row">
-                            <span class="changelog-version">v1.0.1 <span class="changelog-date">· 13 nov 2026</span></span>
+                            <span class="changelog-version">v1.0.2 <span class="changelog-date">· 13 nov 2026</span></span>
                             <span class="changelog-badge badge-current">Actual</span>
+                        </div>
+                        <ul class="changelog-list-items">
+                            <li><strong>🔭 Zoom a tu gusto en Ojo de Halcón:</strong> En solitario y al crear sala, un control deslizante elige cuánto terreno se ve, de 150 m (más cerca y más difícil) a 280 m (la foto completa).</li>
+                            <li><strong>🏙️ Elige de dónde son las fotos:</strong> Solo del centro (a 2 km o menos de la plaza), solo de afuera (rancherías, caminos, campo y sierra) o de ambos, con un control para decidir la proporción (de 10% a 90% del centro).</li>
+                            <li><strong>Leaderboard justo:</strong> Solo las partidas con la configuración estándar (280 m · 60% centro / 40% afuera) compiten en el leaderboard. Las partidas personalizadas se guardan en tu perfil.</li>
+                            <li><strong>👀 Parámetros visibles en la sala:</strong> Todos los que se unen ven lo que eligió el anfitrión, en cualquier modo: modo y variante, segundos de Temporal, Zoom o Borroso, distancia y tiempo de la Carrera, zoom y fotos de Ojo de Halcón, rondas, cupo y si la sala es pública o privada. La lista de salas públicas también muestra el zoom y las fotos de Ojo de Halcón.</li>
+                            <li><strong>Detalle:</strong> La lista de salas públicas decía «partidas» en vez de «rondas».</li>
+                        </ul>
+                    </div>
+
+                    <!-- v1.0.1 -->
+                    <div class="changelog-entry">
+                        <div class="changelog-title-row">
+                            <span class="changelog-version">v1.0.1 <span class="changelog-date">· 13 nov 2026</span></span>
                         </div>
                         <ul class="changelog-list-items">
                             <li><strong>⏱️ Salida simultánea en multijugador:</strong> Todos los jugadores ven la imagen en el mismo instante, sin importar qué tan rápido o lento sea su internet. Cada dispositivo sincroniza su reloj con el servidor y la imagen se destapa a una hora exacta común, en vez de contar «3, 2, 1» desde que le llega el aviso.</li>
@@ -1323,6 +1379,6 @@
     <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script defer src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
     <script defer src="js/keys.js"></script>
-    <script type="module" src="js/app.js?v=1.0.1"></script>
+    <script type="module" src="js/app.js?v=1.0.2"></script>
 </body>
 </html>

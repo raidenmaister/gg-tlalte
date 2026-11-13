@@ -25,7 +25,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
     exit;
 }
 
-define('APP_VERSION_FALLBACK', '1.0.1');
+define('APP_VERSION_FALLBACK', '1.0.2');
 define('DATA_DIR', __DIR__ . '/data');
 define('ROOMS_FILE', DATA_DIR . '/rooms.json');
 define('USERS_FILE', DATA_DIR . '/users.json');
@@ -420,12 +420,46 @@ function satPool() {
  * Elige las rondas satelitales mezclando terrenos (ciudad, localidades, caminos y campo/sierra)
  * y separándolas al menos 500 m entre sí. Devuelve entradas de sesión ['p' => id].
  */
-function pickSatLocations($count) {
+/** Configuración estándar de Ojo de Halcón: la única que cuenta para el leaderboard. */
+const SAT_STD_ZOOM = 280;
+const SAT_STD_CITY = 60;
+
+/**
+ * Lee y valida los parámetros de Ojo de Halcón elegidos por el jugador o anfitrión:
+ * zoom (150–280 m de área visible), origen de las fotos (ambas / solo centro / solo afuera)
+ * y, si son ambas, el porcentaje de fotos del centro (10–90 %).
+ */
+function satParams() {
+    $zoom = intval(input('satZoom', SAT_STD_ZOOM));
+    $zoom = max(150, min(SAT_STD_ZOOM, (int)(round($zoom / 10) * 10)));
+    $src = str_in('satSource', 8);
+    if (!in_array($src, ['both', 'city', 'out'], true)) $src = 'both';
+    $city = intval(input('satCity', SAT_STD_CITY));
+    $city = max(10, min(90, (int)(round($city / 10) * 10)));
+    $pct = $src === 'city' ? 100 : ($src === 'out' ? 0 : $city);
+    return [
+        'zoom' => $zoom,
+        'src' => $src,
+        'city' => $src === 'both' ? $city : $pct,
+        'pct' => $pct,
+        'ranked' => $zoom === SAT_STD_ZOOM && $src === 'both' && $city === SAT_STD_CITY,
+    ];
+}
+
+function satParamsStd() {
+    return ['zoom' => SAT_STD_ZOOM, 'src' => 'both', 'city' => SAT_STD_CITY, 'pct' => SAT_STD_CITY, 'ranked' => true];
+}
+
+/**
+ * Elige fotos del banco satelital: $cityPct % dentro de la ciudad (≤ 2 km del centro) y el
+ * resto fuera (rancherías, caminos, campo y sierra), con al menos 400 m entre ellas.
+ */
+function pickSatLocations($count, $cityPct = SAT_STD_CITY) {
     $pool = satPool();
     if (count($pool) < $count) {
         return array_map(function ($i) { return ['i' => $i]; }, pickLocations($count));
     }
-    // 60 % dentro de la ciudad (≤ 2 km del centro) y 40 % fuera (rancherías, caminos, campo y sierra).
+    $cityPct = max(0, min(100, intval($cityPct)));
     $urban = [];
     $rural = [];
     foreach ($pool as $id => $it) {
@@ -433,26 +467,39 @@ function pickSatLocations($count) {
     }
     shuffle($urban);
     shuffle($rural);
-    $wantUrban = (int)round($count * 0.6);
+    $wantUrban = (int)round($count * $cityPct / 100);
     if (!$urban) $wantUrban = 0;
     if (!$rural) $wantUrban = $count;
     $picked = [];
-    $take = function (array &$ids, $n) use (&$picked, $pool) {
+    $take = function (array $ids, $n, $minKm) use (&$picked, $pool) {
         $got = 0;
-        while ($got < $n && $ids) {
-            $id = array_pop($ids);
+        foreach ($ids as $id) {
+            if ($got >= $n) break;
+            if (in_array($id, $picked, true)) continue;
             $it = $pool[$id];
             $ok = true;
             foreach ($picked as $pid) {
-                if (haversineKm($it['lat'], $it['lng'], $pool[$pid]['lat'], $pool[$pid]['lng']) < 0.4) { $ok = false; break; }
+                if (haversineKm($it['lat'], $it['lng'], $pool[$pid]['lat'], $pool[$pid]['lng']) < $minKm) { $ok = false; break; }
             }
             if ($ok) { $picked[] = $id; $got++; }
         }
         return $got;
     };
-    $gotU = $take($urban, $wantUrban);
-    $gotR = $take($rural, $count - $gotU);
-    if ($gotU + $gotR < $count) $take($urban, $count - $gotU - $gotR);
+    $wantRural = $count - $wantUrban;
+    // Primero se respeta la proporción con 400 m de separación; si la zona elegida no alcanza
+    // (p. ej. «solo centro» con 15 rondas), se relaja la separación antes de mezclar zonas.
+    $isUrban = function ($id) use ($pool) {
+        return haversineKm(TOWN_LAT, TOWN_LNG, $pool[$id]['lat'], $pool[$id]['lng']) <= CITY_KM;
+    };
+    foreach ([0.4, 0.2, 0.0] as $minKm) {
+        $gotU = count(array_filter($picked, $isUrban));
+        $gotR = count($picked) - $gotU;
+        if ($gotU < $wantUrban) $take($urban, $wantUrban - $gotU, $minKm);
+        if ($gotR < $wantRural) $take($rural, $wantRural - $gotR, $minKm);
+        if (count($picked) >= $count) break;
+    }
+    if (count($picked) < $count) $take(array_merge($urban, $rural), $count - count($picked), 0.0);
+    $picked = array_slice($picked, 0, $count);
     shuffle($picked);
     return array_map(function ($id) { return ['p' => (string)$id]; }, $picked);
 }
@@ -924,10 +971,12 @@ switch ($action) {
             if (!in_array($mode, $SOLO_MODES, true)) $mode = 'normal';
             $tunnel = max(2, min(15, intval(input('tunnelSeconds', 3))));
             $blur = max(2, min(15, intval(input('blurSeconds', 3))));
+            $sat = $mode === 'satellite' ? satParams() : null;
             $locs = $mode === 'satellite'
-                ? pickSatLocations($rounds)
+                ? pickSatLocations($rounds, $sat['pct'])
                 : array_map(function ($i) { return ['i' => $i]; }, pickLocations($rounds));
         }
+        if ($mode === 'satellite' && empty($sat)) $sat = satParamsStd();
         if (count($locs) < $rounds) fail('no hay suficientes ubicaciones');
         $token = newToken();
         $session = [
@@ -937,6 +986,7 @@ switch ($action) {
             'mode' => $mode,
             'rounds' => $rounds,
             'cfg' => ['tunnel' => $tunnel, 'blur' => $blur],
+            'sat' => $mode === 'satellite' ? $sat : null,
             'locs' => $locs,
             'cur' => 1,
             'served' => [],
@@ -960,7 +1010,8 @@ switch ($action) {
         });
         if ($res !== true) fail('no se pudo crear la partida');
         out(['ok' => true, 'token' => $token, 'rounds' => $rounds, 'mode' => $mode, 'daily' => $daily,
-             'tunnelSeconds' => $tunnel, 'blurSeconds' => $blur, 'timeMax' => soloTimeMax($rounds, $mode)]);
+             'tunnelSeconds' => $tunnel, 'blurSeconds' => $blur, 'timeMax' => soloTimeMax($rounds, $mode),
+             'sat' => $mode === 'satellite' ? $sat : null]);
     }
 
     case 'solo-round': {
@@ -1174,6 +1225,16 @@ switch ($action) {
             out(['ok' => true, 'saved' => true, 'daily' => $date, 'points' => $points, 'timeMs' => $timeMs, 'timedOut' => $timedOut,
                  'score' => $score, 'rank' => $hist['rank'], 'newBest' => false, 'best' => $score]);
         }
+        $satCfg = $s['sat'] ?? null;
+        if ($mode === 'satellite' && is_array($satCfg) && empty($satCfg['ranked'])) {
+            // Ojo de Halcón con ajustes propios: se guarda en el perfil, pero no compite en el leaderboard.
+            $hist['custom'] = true;
+            $hist['sat'] = ['zoom' => intval($satCfg['zoom']), 'src' => strval($satCfg['src']), 'city' => intval($satCfg['city'])];
+            appendHistory($name, $hist);
+            out(['ok' => true, 'saved' => false, 'custom' => true, 'points' => $points, 'timeMs' => $timeMs,
+                 'timedOut' => $timedOut, 'score' => $score,
+                 'error' => 'Partida personalizada: se guardó en tu perfil. Solo la configuración estándar (280 m · 60 % centro / 40 % afuera) cuenta para el leaderboard.']);
+        }
         $result = withJson(LEADERBOARD_FILE, [], function (&$lb) use ($key, $name, $points, $timeMs, $timeMax, $score, $mode) {
             if (!isset($lb[$key]) || !is_array($lb[$key])) $lb[$key] = [];
             $entry = ['name' => $name, 'points' => $points, 'timeMs' => $timeMs, 'timeMax' => $timeMax,
@@ -1231,11 +1292,13 @@ switch ($action) {
             $k = nameKey(is_string($n) ? $n : '');
             if ($k !== '' && !in_array($k, $players, true)) $players[] = $k;
         }
-        $locs = pickSatLocations($rounds);
+        $sat = satParams();
+        $locs = pickSatLocations($rounds, $sat['pct']);
         if (count($locs) < $rounds) fail('no hay suficientes ubicaciones');
         $token = newToken();
         $session = [
             'kind' => 'room',
+            'sat' => $sat,
             'host' => nameKey($host),
             'players' => $players,
             'mode' => 'satellite',
@@ -1251,7 +1314,7 @@ switch ($action) {
             $all[$token] = $session;
             return [true, true];
         });
-        out(['ok' => true, 'token' => $token, 'rounds' => $rounds]);
+        out(['ok' => true, 'token' => $token, 'rounds' => $rounds, 'sat' => $sat]);
     }
 
     case 'sat-image': {
@@ -1517,6 +1580,9 @@ switch ($action) {
             'blurSeconds' => max(2, min(15, intval(input('blurSeconds', 3)))),
             'raceDistance' => max(100, min(5000, intval(input('raceDistance', 1000)))),
             'raceSeconds' => max(30, min(600, intval(input('raceSeconds', 150)))),
+            'satZoom' => satParams()['zoom'],
+            'satSource' => satParams()['src'],
+            'satCity' => satParams()['city'],
             'status' => 'waiting',
             'updated' => time(),
             'isPublic' => intval(input('isPublic', 1)) ? 1 : 0,
@@ -1666,6 +1732,9 @@ function publicRoom($room) {
         'blurSeconds' => intval($room['blurSeconds'] ?? 3),
         'raceDistance' => intval($room['raceDistance'] ?? 1000),
         'raceSeconds' => intval($room['raceSeconds'] ?? 150),
+        'satZoom' => intval($room['satZoom'] ?? SAT_STD_ZOOM),
+        'satSource' => strval($room['satSource'] ?? 'both'),
+        'satCity' => intval($room['satCity'] ?? SAT_STD_CITY),
         'status' => strval($room['status'] ?? 'waiting'),
     ];
 }

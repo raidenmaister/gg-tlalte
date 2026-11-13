@@ -5,8 +5,8 @@
 // app.js le inyecta sus utilidades con setup(ctx) para no duplicar estado.
 // ============================================================================
 
-import { identity, secureApi } from './secure.js?v=1.0.1';
-import { $, formatNumber, formatKm, escapeHtml } from './utils.js?v=1.0.1';
+import { identity, secureApi } from './secure.js?v=1.0.2';
+import { $, formatNumber, formatKm, escapeHtml } from './utils.js?v=1.0.2';
 
 let ctx = null;
 

@@ -2,17 +2,17 @@
 // app.js — Punto de entrada. Coordina UI, red, visor panorámico y juego.
 // ============================================================================
 
-import { $, formatKm, formatNumber, clamp, escapeHtml, detectPotatoMode } from './utils.js?v=1.0.1';
-import { CONFIG } from './config.js?v=1.0.1';
-import { audio } from './audio.js?v=1.0.1';
-import { PanoramaViewer } from './panorama.js?v=1.0.1';
-import { Minimap } from './minimap.js?v=1.0.1';
-import { Network } from './net.js?v=1.0.1';
-import { Game } from './game.js?v=1.0.1';
-import { MenuPanoBackground } from './menu-pano.js?v=1.0.1';
-import { identity, secureApi } from './secure.js?v=1.0.1';
-import { satView } from './satview.js?v=1.0.1';
-import * as features from './features.js?v=1.0.1';
+import { $, formatKm, formatNumber, clamp, escapeHtml, detectPotatoMode } from './utils.js?v=1.0.2';
+import { CONFIG } from './config.js?v=1.0.2';
+import { audio } from './audio.js?v=1.0.2';
+import { PanoramaViewer } from './panorama.js?v=1.0.2';
+import { Minimap } from './minimap.js?v=1.0.2';
+import { Network } from './net.js?v=1.0.2';
+import { Game } from './game.js?v=1.0.2';
+import { MenuPanoBackground } from './menu-pano.js?v=1.0.2';
+import { identity, secureApi } from './secure.js?v=1.0.2';
+import { satView } from './satview.js?v=1.0.2';
+import * as features from './features.js?v=1.0.2';
 
 const PLAYER_KEY = 'ggtlalte:playerName';
 const ROOM_KEY = 'ggtlalte:activeRoom';
@@ -711,6 +711,12 @@ async function handleGameOver(result) {
     status.classList.add('stat-lb-best');
     return;
   }
+  if (saved && saved.ok && saved.custom) {
+    status.querySelector('.stat-label').textContent = '🎨 Partida personalizada';
+    valueEl.textContent = 'Guardada en tu perfil (no cuenta para el leaderboard)';
+    status.classList.add('stat-lb-ok');
+    return;
+  }
   if (saved && saved.ok && saved.saved) {
     const rankText = saved.rank ? `#${saved.rank}` : 'fuera del top 100';
     valueEl.textContent = saved.newBest
@@ -951,7 +957,33 @@ function renderLobby() {
     else if (net.gameMode === 'static_blur') modeText = `Estático Borroso (${net.blurSeconds || 3}s)`;
     else if (net.gameMode === 'flashlight' || net.flashlightMode) modeText = 'Linterna Táctica (Normal)';
     else if (net.gameMode === 'satellite') modeText = '🛰️ Ojo de Halcón (satelital)';
-    roundsInfo.textContent = `${modeText} · ${net.rounds || CONFIG.DUEL_ROUNDS} rondas`;
+    roundsInfo.textContent = isHost
+      ? 'Parámetros de tu sala (los ven todos los jugadores):'
+      : 'Parámetros elegidos por el anfitrión:';
+    roundsInfo.dataset.summary = `${modeText} · ${net.rounds || CONFIG.DUEL_ROUNDS} rondas`;
+  }
+  const paramsEl = $('#roomParams');
+  if (paramsEl) {
+    paramsEl.innerHTML = '';
+    roomParamChips({
+      gameMode: (net.gameMode === 'normal' && net.flashlightMode) ? 'flashlight' : net.gameMode,
+      temporalSeconds: net.temporalSeconds,
+      tunnelSeconds: net.tunnelSeconds,
+      blurSeconds: net.blurSeconds,
+      raceDistance: net.raceDistance,
+      raceSeconds: net.raceSeconds,
+      satZoom: net.satZoom,
+      satSource: net.satSource,
+      satCity: net.satCity,
+      rounds: net.rounds,
+      limit: net.limit,
+      isPublic: net.isPublic,
+    }).forEach((c) => {
+      const chip = document.createElement('span');
+      chip.className = 'room-param' + (c.mode ? ' room-param-mode' : '');
+      chip.textContent = c.text;
+      paramsEl.appendChild(chip);
+    });
   }
 
   const startBtn = $('#startBtn');
@@ -1415,7 +1447,7 @@ function renderPublicList(rooms) {
     } else if (room.gameMode === 'flashlight') {
       modeLabel = '🔦 Linterna Táctica (Normal)';
     } else if (room.gameMode === 'satellite') {
-      modeLabel = '🛰️ Ojo de Halcón';
+      modeLabel = `🛰️ Ojo de Halcón · ${Number(room.satZoom) || 280} m · ${satSourceText(room.satSource, room.satCity)}`;
     } else if (room.gameMode === 'static') {
       modeLabel = '🛑 Estático';
     } else if (room.gameMode === 'temporal') {
@@ -1433,7 +1465,7 @@ function renderPublicList(rooms) {
 
     const roundsTag = document.createElement('span');
     roundsTag.className = 'public-room-tag public-room-tag-rounds';
-    roundsTag.textContent = `${rounds} partidas`;
+    roundsTag.textContent = `${rounds} rondas`;
 
     meta.appendChild(playersTag);
     meta.appendChild(modeTag);
@@ -1568,6 +1600,11 @@ let leaderboardRounds = 5;
 let leaderboardMode = 'normal';
 
 let currentSoloMode = 'normal';
+// Parámetros de Ojo de Halcón (zoom en metros, origen de las fotos y % del centro)
+const SAT_DEFAULT = { zoom: 280, src: 'both', city: 60 };
+const soloSat = { ...SAT_DEFAULT };
+const multiSat = { ...SAT_DEFAULT };
+const isStdSat = (s) => Number(s.zoom) === 280 && s.src === 'both' && Number(s.city) === 60;
 let soloNormalVariant = 'standard';
 let soloStaticVariant = 'standard';
 let currentSoloTemporalSecs = CONFIG.DEFAULT_TEMPORAL_SECONDS || 3;
@@ -1609,13 +1646,52 @@ async function startSolo(rounds = soloRounds) {
     else if (currentSoloMode === 'normal' && isBlur) effectiveMode = 'blur';
     else if (currentSoloMode === 'static' && isBlur) effectiveMode = 'static_blur';
 
-    await game.startSolo(rounds, effectiveMode, currentSoloTemporalSecs, currentSoloTunnelSecs, isZoom, currentSoloBlurSecs, isBlur, isFlashlight);
+    await game.startSolo(rounds, effectiveMode, currentSoloTemporalSecs, currentSoloTunnelSecs, isZoom, currentSoloBlurSecs, isBlur, isFlashlight,
+      effectiveMode === 'satellite' ? { sat: { ...soloSat } } : {});
   } catch (err) {
     game.abort();
     resetGameUI();
     showError('Error al cargar: ' + err.message);
     showScreen('menu');
   }
+}
+
+/** Texto de las fotos elegidas en Ojo de Halcón. */
+function satSourceText(src, city) {
+  if (src === 'city') return 'Solo centro';
+  if (src === 'out') return 'Solo afuera';
+  const c = Number(city) || 60;
+  return `${c}% centro · ${100 - c}% afuera`;
+}
+
+/** Chips con TODOS los parámetros elegidos por el anfitrión (se muestran a todos en la sala). */
+function roomParamChips(cfg) {
+  const chips = [];
+  const mode = cfg.gameMode || 'normal';
+  const secs = (v) => `${Number(v) || 3} s`;
+  const modeNames = {
+    normal: '🎮 Normal', static: '🛑 Estático', temporal: '⏱️ Temporal', satellite: '🛰️ Ojo de Halcón',
+    tunnel: '🎮 Normal + 🔍 Zoom', static_tunnel: '🛑 Estático + 🔍 Zoom', blur: '🎮 Normal + 🌫️ Borroso',
+    static_blur: '🛑 Estático + 🌫️ Borroso', flashlight: '🔦 Linterna', race: '🏁 Carrera',
+  };
+  chips.push({ text: modeNames[mode] || '🎮 Normal', mode: true });
+  if (mode === 'temporal') chips.push({ text: `👁️ Imagen visible ${secs(cfg.temporalSeconds)}` });
+  if (mode === 'tunnel' || mode === 'static_tunnel') chips.push({ text: `🔍 ${secs(cfg.tunnelSeconds)} por nivel de zoom` });
+  if (mode === 'blur' || mode === 'static_blur') chips.push({ text: `🌫️ ${secs(cfg.blurSeconds)} por nivel de desenfoque` });
+  if (mode === 'race') {
+    const d = Number(cfg.raceDistance) || 1000;
+    const t = Number(cfg.raceSeconds) || 150;
+    chips.push({ text: `📏 Distancia ${d >= 1000 ? (d / 1000) + ' km' : d + ' m'}` });
+    chips.push({ text: `⏳ Límite ${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')} min` });
+  }
+  if (mode === 'satellite') {
+    chips.push({ text: `🔭 Área visible ${Number(cfg.satZoom) || 280} m` });
+    chips.push({ text: `🏙️ ${satSourceText(cfg.satSource, cfg.satCity)}` });
+  }
+  chips.push({ text: `🔁 ${Number(cfg.rounds) || CONFIG.DUEL_ROUNDS} rondas` });
+  chips.push({ text: `👥 Máx. ${Number(cfg.limit) || CONFIG.ROOM_MAX_PLAYERS} jugadores` });
+  if (cfg.isPublic !== undefined && cfg.isPublic !== null) chips.push({ text: cfg.isPublic ? '🌐 Pública' : '🔒 Privada' });
+  return chips;
 }
 
 async function startDaily(info) {
@@ -1760,6 +1836,9 @@ function createRoom(isPublic = false) {
     blurSeconds: currentMultiBlurSecs,
     raceDistance: currentMultiRaceDist,
     raceSeconds: currentMultiRaceSecs,
+    satZoom: multiSat.zoom,
+    satSource: multiSat.src,
+    satCity: multiSat.city,
   });
 }
 
@@ -1784,6 +1863,9 @@ function persistActiveRoom() {
     flashlightMode: net.flashlightMode,
     raceDistance: net.raceDistance,
     raceSeconds: net.raceSeconds,
+    satZoom: net.satZoom,
+    satSource: net.satSource,
+    satCity: net.satCity,
   }));
 }
 
@@ -1966,6 +2048,8 @@ function wire() {
 
     const tempConf = $('#soloTemporalConfig');
     if (tempConf) tempConf.classList.toggle('hidden', currentSoloMode !== 'temporal');
+    const soloSatConf = $('#soloSatConfig');
+    if (soloSatConf) soloSatConf.classList.toggle('hidden', currentSoloMode !== 'satellite');
 
     const tunnelConf = $('#soloTunnelConfig');
     if (tunnelConf) tunnelConf.classList.toggle('hidden', !hasZoom);
@@ -2013,6 +2097,49 @@ function wire() {
       }
     });
   }
+
+  /** Conecta los sliders y botones de Ojo de Halcón de una pantalla (solo / multi). */
+  function bindSatConfig(prefix, state, withRankNote) {
+    const zoom = $(`#${prefix}SatZoom`);
+    const city = $(`#${prefix}SatCity`);
+    const zoomVal = $(`#${prefix}SatZoomVal`);
+    const cityVal = $(`#${prefix}SatCityVal`);
+    const mixRow = $(`#${prefix}SatMixRow`);
+    const note = $(`#${prefix}SatRankNote`);
+    const pills = document.querySelectorAll(`#${prefix}SatSourcePills .pill-btn`);
+    if (!zoom || !city) return;
+    const storeKey = `ggtlalte:sat:${prefix}`;
+    try {
+      const saved = JSON.parse(localStorage.getItem(storeKey) || 'null');
+      if (saved) Object.assign(state, {
+        zoom: Math.max(150, Math.min(280, Number(saved.zoom) || 280)),
+        src: ['both', 'city', 'out'].includes(saved.src) ? saved.src : 'both',
+        city: Math.max(10, Math.min(90, Number(saved.city) || 60)),
+      });
+    } catch (e) {}
+    const render = () => {
+      zoom.value = state.zoom;
+      city.value = state.city;
+      if (zoomVal) zoomVal.textContent = `${state.zoom} m`;
+      if (cityVal) cityVal.textContent = `${state.city}% centro · ${100 - state.city}% afuera`;
+      if (mixRow) mixRow.classList.toggle('hidden', state.src !== 'both');
+      pills.forEach((b) => b.classList.toggle('active', b.dataset.src === state.src));
+      if (note && withRankNote) {
+        const std = isStdSat(state);
+        note.classList.toggle('custom', !std);
+        note.textContent = std
+          ? '🏆 Configuración estándar: esta partida cuenta para el leaderboard.'
+          : '🎨 Partida personalizada: se guarda en tu perfil, pero solo la configuración estándar (280 m · 60% centro / 40% afuera) cuenta para el leaderboard.';
+      }
+      try { localStorage.setItem(storeKey, JSON.stringify(state)); } catch (e) {}
+    };
+    zoom.addEventListener('input', () => { state.zoom = Number(zoom.value) || 280; render(); });
+    city.addEventListener('input', () => { state.city = Number(city.value) || 60; render(); });
+    pills.forEach((b) => b.addEventListener('click', () => { state.src = b.dataset.src || 'both'; render(); }));
+    render();
+  }
+  bindSatConfig('solo', soloSat, true);
+  bindSatConfig('multi', multiSat, false);
 
   document.querySelectorAll('#soloModeSelector .mode-tab').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -2127,6 +2254,8 @@ function wire() {
 
     const tempConf = $('#multiTemporalConfig');
     if (tempConf) tempConf.classList.toggle('hidden', currentMultiMode !== 'temporal');
+    const multiSatConf = $('#multiSatConfig');
+    if (multiSatConf) multiSatConf.classList.toggle('hidden', currentMultiMode !== 'satellite');
 
     const tunnelConf = $('#multiTunnelConfig');
     if (tunnelConf) tunnelConf.classList.toggle('hidden', !hasZoom);
@@ -2961,7 +3090,7 @@ function boot() {
   detectPotatoMode();
   const versionBadge = $('#versionBadge');
   if (versionBadge) {
-    versionBadge.textContent = CONFIG.VERSION || 'v1.0.1';
+    versionBadge.textContent = CONFIG.VERSION || 'v1.0.2';
     versionBadge.style.cursor = 'pointer';
     versionBadge.title = 'Ver historial de versiones';
     versionBadge.addEventListener('click', () => {

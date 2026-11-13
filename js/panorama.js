@@ -2,8 +2,8 @@
 // panorama.js — Visor panorámico 360° (Google Street View) + brújula.
 // ============================================================================
 
-import { CONFIG } from './config.js?v=1.0.1';
-import { detectPotatoMode } from './utils.js?v=1.0.1';
+import { CONFIG } from './config.js?v=1.0.2';
+import { detectPotatoMode } from './utils.js?v=1.0.2';
 
 let mapsPromise = null;
 
